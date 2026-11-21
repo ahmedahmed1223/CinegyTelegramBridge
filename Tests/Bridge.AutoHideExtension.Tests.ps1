@@ -75,6 +75,37 @@ Describe 'Durable auto-hide and one-time extension' {
         Request-TemplateAirLimitNow -Key other -ChatId 100 -UserId 101 | Should -BeFalse
     }
 
+    It 'persists a reviewed timer and never hides a replacement with the same event identifier' {
+        $config.Settings.TemplateAirExtensionEnabled = $false
+        $script:AutoHideFixtureDevice = 'gfx_stage'
+        $script:AutoHideFixtureStart = 17L
+        Mock Resolve-AirGfxDevice { @{ StatusPath = $script:AutoHideFixtureDevice } }
+        Mock Get-CinegyStatusStartTicks { $script:AutoHideFixtureStart }
+        Set-AutoHideTimer -Layer 7 -Seconds 120 -ChatId 100 -UserId 101 -TemplateKey urgent -ActiveId scene `
+            -ActiveIdConfirmed $true -SingleSceneOnly -ExpectedDevicePath gfx_stage -ExpectedLayerStartedAtTicks 17 | Should -BeTrue
+        $script:AutoHideQueue.Clear()
+        Import-AutoHideQueue
+        $script:AutoHideQueue[0].ExpectedDevicePath | Should -Be 'gfx_stage'
+        $script:AutoHideQueue[0].ExpectedLayerStartedAtTicks | Should -Be 17L
+        $script:AutoHideFixtureStart = 18L
+        Update-AutoHideQueue -Now $script:testNow.AddSeconds(1)
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        $script:AutoHideQueue.Count | Should -Be 0
+    }
+
+    It 'passes the reviewed device, engine start and event stamp to final HIDE' {
+        $config.Settings.TemplateAirExtensionEnabled = $false
+        Mock Resolve-AirGfxDevice { @{ StatusPath = 'gfx_stage' } }
+        Mock Get-CinegyStatusStartTicks { 17L }
+        Set-AutoHideTimer -Layer 7 -Seconds 120 -ChatId 100 -UserId 101 -TemplateKey urgent -ActiveId scene `
+            -ActiveIdConfirmed $true -SingleSceneOnly -ExpectedDevicePath gfx_stage -ExpectedLayerStartedAtTicks 17 | Should -BeTrue
+        Update-AutoHideQueue -Now $script:testNow.AddSeconds(1)
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter {
+            $ReviewedTimer -and $ExpectedDevicePath -eq 'gfx_stage' -and $ExpectedLayerStartedAtTicks -eq 17L -and
+            $ExpectedLayerStamp -eq 'active:scene' -and $System
+        }
+    }
+
     It 'sensitive templates hide at their ceiling with no extension offer' {
         $config.Settings.SensitiveTemplateKeys = 'urgent'
         Set-AutoHideTimer -Layer 7 -Seconds 120 -ChatId 100 -UserId 101 -TemplateKey urgent -ActiveId scene | Out-Null

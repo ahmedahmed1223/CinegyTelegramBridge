@@ -16,17 +16,3 @@ export async function showTemplate(request: ShowTemplateRequest): Promise<void> 
   const { error, response } = await api.POST('/api/air/show', { body: request })
   if (!response.ok) throw new Error(error?.message || messageFor(errorCode(error, response)))
 }
-
-export async function hideLayer(layer: number): Promise<void> {
-  const { error, response } = await api.POST('/api/air/hide/{layer}', {
-    params: { path: { layer } },
-  })
-  if (!response.ok) throw new Error(errorCode(error, response))
-}
-
-export async function exitLayer(layer: number): Promise<void> {
-  const { error, response } = await api.POST('/api/air/exit/{layer}', {
-    params: { path: { layer } },
-  })
-  if (!response.ok) throw new Error(errorCode(error, response))
-}

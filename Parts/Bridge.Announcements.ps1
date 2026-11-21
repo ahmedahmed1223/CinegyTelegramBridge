@@ -143,6 +143,16 @@ function Send-BridgeAnnouncement {
     return $sent
 }
 
+function ConvertTo-AnnouncementText {
+    param([AllowEmptyString()][string]$Text)
+    $paragraphBreak = ([string][char]10) * 2
+    return (($Text -replace '[\r\n]{3,}', $paragraphBreak).Trim())
+}
+
+function Get-AnnouncementTextLimit {
+    return [math]::Max(20, (Get-SettingInt 'AnnouncementMaxLength' 500))
+}
+
 function New-BridgeAnnouncement {
     <# One notice, bounded on every axis the author can choose. #>
     param(
@@ -154,10 +164,11 @@ function New-BridgeAnnouncement {
         [int]$RepeatHours = 0,
         [bool]$RequireAck = $true,
         [bool]$Pinned = $false,
+        [switch]$QueueFirstDelivery,
         [datetime]$Now = (Get-Date)
     )
-    $clean = ([string]$Text -replace '[\r\n]{3,}', "`n`n").Trim()
-    $limit = [math]::Max(20, (Get-SettingInt 'AnnouncementMaxLength' 500))
+    $clean = ConvertTo-AnnouncementText -Text $Text
+    $limit = Get-AnnouncementTextLimit
     if ($clean.Length -gt $limit) { $clean = $clean.Substring(0, $limit) }
     if ($ExpiryHours -le 0) { $ExpiryHours = Get-SettingInt 'AnnouncementDefaultExpiryHours' 24 }
     $announcement = [pscustomobject]@{
@@ -175,12 +186,22 @@ function New-BridgeAnnouncement {
         AckBy        = [pscustomobject]@{}
         Status       = 'active'
     }
+    $previous = $null
+    if ($QueueFirstDelivery) {
+        # A notice cannot reach the tick before the queued record is durable.
+        $previous = $script:Announcements.ToArray()
+        Set-JsonProp -Object $announcement -Name 'FirstDeliveryQueued' -Value $true
+    }
     $script:Announcements.Add($announcement)
-    # Finished notices are history, not state: expired and cancelled ones were
-    # kept for ever, and every acknowledgement rewrote the whole list. The live
-    # ones are always kept; the rest are trimmed oldest-first to the cap.
-    Remove-StaleAnnouncements
-    Save-BridgeAnnouncements | Out-Null
+    # Finished notices are history. Their count must not be emitted alongside
+    # the announcement record that the Bot sends and the web API displays.
+    Remove-StaleAnnouncements -Now $Now | Out-Null
+    $saved = Save-BridgeAnnouncements
+    if ($QueueFirstDelivery -and -not $saved) {
+        $script:Announcements.Clear()
+        foreach ($entry in $previous) { $script:Announcements.Add($entry) }
+        return
+    }
     return $announcement
 }
 
@@ -248,8 +269,9 @@ function Update-AnnouncementQueue {
             }
             continue
         }
+        $firstDelivery = [bool](Get-JsonProp $announcement 'FirstDeliveryQueued')
         $every = [int](Get-JsonProp $announcement 'RepeatHours')
-        if ($every -le 0) { continue }
+        if (-not $firstDelivery -and $every -le 0) { continue }
         $at = [datetime]::MinValue
         if ([datetime]::TryParse([string](Get-JsonProp $announcement 'LastSentAt'), [ref]$at) -and
             ($Now - $at).TotalHours -lt $every) { continue }
@@ -257,6 +279,7 @@ function Update-AnnouncementQueue {
         # still live, so the first sweep after the quiet window sends it.
         if (Test-QuietHoursActive) { continue }
         $repeated += Send-BridgeAnnouncement -Announcement $announcement -Now $Now
+        if ($firstDelivery) { Remove-JsonProp -Object $announcement -Name 'FirstDeliveryQueued' }
         $dirty = $true
     }
     if ($dirty) { Save-BridgeAnnouncements | Out-Null }

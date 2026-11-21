@@ -1,13 +1,18 @@
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core'
-import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconPlugConnected, IconStack2 } from '@tabler/icons-react'
-import type { ReactNode } from 'react'
+import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconPlugConnected, IconStack2, IconArrowBackUp } from '@tabler/icons-react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '../../components/PageHeader'
 import { useNow } from '../../hooks/useNow'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { cinegyLamp, telegramLamp } from '../../lib/lamps'
 import { formatAgo, formatClock, isFresh } from '../../lib/time'
+import { AirOperationsMenu } from './AirOperationsMenu'
 import { LayerTile } from './LayerTile'
+import { LayerTimerModal } from './LayerTimerModal'
+import { LayerRemovalModal, type RemovalOperation } from './LayerRemovalModal'
+import { LayerRollbackModal } from './LayerRollbackModal'
+import { LayerTextModal } from './LayerTextModal'
 
 const healthLabel: Record<string, string> = {
   healthy: 'سليم',
@@ -16,6 +21,10 @@ const healthLabel: Record<string, string> = {
 }
 
 export function StatusPage() {
+  const [rollbackOpen, setRollbackOpen] = useState(false)
+  const [editingLayer, setEditingLayer] = useState<number | null>(null)
+  const [timedLayer, setTimedLayer] = useState<number | null>(null)
+  const [removal, setRemoval] = useState<{ layer: number; operation: RemovalOperation } | null>(null)
   const live = useLiveStatus()
   const now = useNow()
   const status = live.status
@@ -47,7 +56,18 @@ export function StatusPage() {
   return (
     <Stack gap="xl">
       <PageHeader title="لوحة الهواء" description="تابع الطبقات المعروضة وحالة محرك البث."
-        actions={<Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>البث المباشر</Button>} />
+        actions={
+          <Group gap="sm">
+            <AirOperationsMenu disabled={!live.bridgeOnline} />
+            <Button variant="default" disabled={!live.bridgeOnline} leftSection={<IconArrowBackUp size={18} />}
+              onClick={() => setRollbackOpen(true)}>التراجع عن أمر</Button>
+            <Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>البث المباشر</Button>
+          </Group>
+        } />
+      {rollbackOpen && <LayerRollbackModal onClose={() => setRollbackOpen(false)} />}
+      {editingLayer !== null && <LayerTextModal layer={editingLayer} onClose={() => setEditingLayer(null)} />}
+      {timedLayer !== null && <LayerTimerModal layer={timedLayer} onClose={() => setTimedLayer(null)} />}
+      {removal && <LayerRemovalModal {...removal} onClose={() => setRemoval(null)} />}
 
       {!live.bridgeOnline && (
         <Alert color="red" icon={<IconPlugConnected />} title="الجسر لا يجيب">
@@ -120,7 +140,9 @@ export function StatusPage() {
         ) : (
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
             {layers.map((layer) => (
-              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh} />
+              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh}
+                onEditText={() => setEditingLayer(layer.layer)} onTimer={() => setTimedLayer(layer.layer)}
+                onRemove={(operation) => setRemoval({ layer: layer.layer, operation })} />
             ))}
           </SimpleGrid>
         )}

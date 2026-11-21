@@ -939,20 +939,29 @@ function Get-WebProgrammeBoardEditor {
 }
 
 function Get-ProgrammeLoadedSceneKey {
-    param([int]$Layer, [string]$Stamp, $Store)
+    param([int]$Layer, [string]$Stamp, $Store, [switch]$LocalScenesOnly, $VerifiedStatus)
     $shown = $script:LastSuccessfulLayerShows[$Layer]
     if (-not $Stamp -or $Stamp -cne (Get-MojazRunSceneStamp -Playback $shown)) { return '' }
     $key = [string](Get-JsonProp $shown 'Key')
-    $path = [string](Get-JsonProp (Get-JsonProp $Store.Map $key) 'Path')
+    $template = Get-JsonProp $Store.Map $key
+    $path = [string](Get-JsonProp $template 'Path')
     $ticks = [long](Get-JsonProp $shown 'SceneWriteTicks')
     if (-not $path -or -not $ticks -or $path -cne [string](Get-JsonProp $shown 'TemplatePath')) { return '' }
+    if ($LocalScenesOnly) {
+        $startedAt = Get-CinegyStatusStartTicks -Status $VerifiedStatus
+        if ($startedAt -le 0 -or (Get-JsonProp $shown 'EventIdentityConfirmed') -ne $true -or
+            (Get-JsonProp $shown 'EngineStartedAtTicks') -ne $startedAt -or
+            (Get-JsonProp $shown 'DevicePath') -cne (Resolve-AirGfxDevice -Layer $Layer).StatusPath) { return '' }
+        if (Test-WebRollbackLocalScene -Template $template -Restore $shown) { return $key }
+        return ''
+    }
     $file = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
     if (-not $file -or $file.LastWriteTimeUtc.Ticks -ne $ticks) { return '' }
     return $key
 }
 
 function Test-ProgrammeBoardPostboxScope {
-    param([int]$Layer, [string[]]$Names, [long]$Deadline)
+    param([int]$Layer, [string[]]$Names, [long]$Deadline, [switch]$LocalScenesOnly)
     # Postbox is channel-wide. Treat an unidentified graphic or unreadable
     # field list as a potential listener, and never let a deferred SHOW write
     # overwrite a correction that the web already reported as accepted.
@@ -983,7 +992,7 @@ function Test-ProgrammeBoardPostboxScope {
         if ($probe.Layer -lt 0 -and (Get-JsonProp $otherStatus 'OffAirReason') -eq 'device-not-found') { continue }
         $otherStamp = Get-CinegyLayerReviewStamp -Status $otherStatus
         if ($otherStamp -eq 'empty') { continue }
-        $otherKey = Get-ProgrammeLoadedSceneKey -Layer $probe.Layer -Stamp $otherStamp -Store $store
+        $otherKey = Get-ProgrammeLoadedSceneKey -Layer $probe.Layer -Stamp $otherStamp -Store $store -LocalScenesOnly:$LocalScenesOnly -VerifiedStatus $otherStatus
         if (-not $otherKey) { return $false }
         $otherFields = @(Get-MojazDesignFields -TemplateKey $otherKey)
         if (-not $otherFields.Count -or @($otherFields | Where-Object { [string]$_.Name -in $Names }).Count) { return $false }

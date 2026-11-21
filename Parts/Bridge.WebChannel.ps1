@@ -354,8 +354,36 @@ function Invoke-WebChannelOperation {
         'account.grant' { return Grant-WebOnlyAccount -Arguments $arguments }
         'account.revoke' { return Revoke-WebOnlyAccount -Arguments $arguments }
         'air.templates' { return Get-WebTemplates }
+        'air.templateScene' { return Invoke-WebTemplateSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateCatalogue' { return Start-WebSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateDefinition' { return Invoke-WebTemplateDefinition -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.settings.review' { return New-WebAdminSettingReview -Arguments $arguments }
+        'admin.settings.confirm' { return Complete-WebAdminSettingReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.overview' { return Get-WebAdminOverview -Arguments $arguments }
+        'shift.notices' { return Invoke-WebShiftNotice -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'telegram.access.revoke.review' { return New-WebTelegramRevokeReview -Arguments $arguments }
+        'telegram.access.revoke.confirm' { return Complete-WebTelegramRevokeReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'telegram.access.suspended-operators' { return Get-WebSuspendedTelegramOperators -Arguments $arguments }
+        'telegram.access.suspension.review' { return New-WebTelegramSuspensionReview -Arguments $arguments }
+        'telegram.access.suspension.confirm' { return Complete-WebTelegramSuspensionReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'telegram.access.history' { return Get-WebAccessHistoryPage -Arguments $arguments }
+        'telegram.access.blocked' { return Get-WebBlockedAccessPage -Arguments $arguments }
+        'telegram.access.unblock.review' { return New-WebTelegramUnblockReview -Arguments $arguments }
+        'telegram.access.unblock.confirm' { return Complete-WebTelegramUnblockReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.announcements.list' { return Get-WebAnnouncementPage -Arguments $arguments }
+        'admin.announcements.queue.review' { return New-WebAnnouncementReview -Arguments $arguments }
+        'admin.announcements.queue.confirm' { return Complete-WebAnnouncementReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.announcements.cancel.review' { return New-WebAnnouncementCancelReview -Arguments $arguments }
+        'admin.announcements.cancel.confirm' { return Complete-WebAnnouncementCancelReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.diagnostics.runtime-files' { return Get-WebRuntimeFileDiagnostics -Arguments $arguments }
+        'schedule.executions' { return Get-WebScheduleExecutionPage -Arguments $arguments }
+        'reports.work-summary' { return Get-WebWorkSummary -Arguments $arguments }
+        'shift.history' { return Invoke-WebShiftHistory -Arguments $arguments }
+        'air.maintenance' { return Invoke-WebAirMaintenance -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.emergency-hide' { return Invoke-WebEmergencyHide -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.timer' { return Invoke-WebAirTimer -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.text' { return Invoke-WebAirText -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.rollback' { return Invoke-WebAirRollback -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.rerun' { return Invoke-WebAirRerun -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'schedule.templates' { return Invoke-WebTemplateSchedule -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.requests' { return Get-WebTelegramAccessRequests -Arguments $arguments }
@@ -366,6 +394,7 @@ function Invoke-WebChannelOperation {
         'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
         'air.rehearsal' { return Invoke-WebTemplateRehearsal -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.show' { return Invoke-WebAirShow -Arguments $arguments }
+        'air.layer-removal' { return Invoke-WebLayerRemoval -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
         'content.list' { return Get-WebContentPage -Arguments $arguments }
@@ -379,6 +408,9 @@ function Invoke-WebChannelOperation {
         'ticker.backups' { return Invoke-WebTickerBackups -Arguments $arguments }
         'ticker.sheet' { return Start-WebTickerSheetRequest -Entry $Entry }
         'bulletin.edit' { return Invoke-WebBulletinEdit -Arguments $arguments }
+        'bulletin.scene-images' { return Invoke-WebBulletinSceneImages -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'bulletin.management' { return Invoke-WebBulletinManagement -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'bulletin.afterUrgent' { return Invoke-WebBulletinAfterUrgent -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'bulletin.preview' { return Get-WebBulletinPreview -Arguments $arguments }
         'bulletin.playback' { return Invoke-WebBulletinPlayback -Arguments $arguments }
         'bulletin.preview-image' { return Get-WebBulletinPreview -Arguments $arguments -Image }
@@ -765,14 +797,19 @@ function Get-WebSceneWorkerScript {
     # Copy the two filesystem readers, not the bridge or its session state.
     $itemReader = ${function:Get-WebSceneItem}.ToString()
     $folderReader = ${function:Get-WebSceneFolder}.ToString()
+    $replacementReader = ${function:Get-WebSceneReplacementArtifact}.ToString()
     return @"
 param(`$root, `$request, `$pagingModule)
 function Get-WebSceneItem { $itemReader }
 function Get-WebSceneFolder { $folderReader }
+function Get-WebSceneReplacementArtifact { $replacementReader }
 `$ErrorActionPreference = 'Stop'
 if (`$request.Action -ceq 'browse') {
     Import-Module `$pagingModule
     return Get-WebSceneFolder -Root `$root -Folder `$request.RelativePath -Page `$request.Page -Search `$request.Search
+}
+if (`$request.Action -clike 'replace-*') {
+    return Get-WebSceneReplacementArtifact -Root `$root -RelativePath `$request.RelativePath -SceneModule `$request.SceneModule
 }
 `$scene = Get-WebSceneItem -Root `$root -RelativePath `$request.RelativePath
 if (`$scene -and -not `$scene.PSIsContainer -and `$scene.Extension -ieq '.cintitle' -and
@@ -872,6 +909,9 @@ function Update-WebSceneRequest {
         elseif ((Get-WebSceneCatalogueRoot) -cne $pending.Root) { @{ ok = $false; error = 'scene_registry_stale' } }
         elseif (-not $result.Count) { @{ ok = $false; error = 'scene_not_found' } }
         elseif ($pending.Query.Action -ceq 'browse') { $result[0] }
+        elseif ($pending.Query.Action -clike 'replace-*') {
+            Complete-WebTemplateSceneReplacement -Pending $pending -Scene $result[0]
+        }
         else { Complete-WebTemplateRegistration -Pending $pending -Scene $result[0] }
     }
     catch { $reply = @{ ok = $false; error = 'scene_not_found' } }
@@ -1260,7 +1300,9 @@ function Invoke-WebAirHide {
         return @{ ok = $false; error = 'forbidden' }
     }
 
-    $success = Invoke-HideLayer -Layer $layer -ChatId $actor -UserId $actor -Quiet
+    if (Get-Setting 'ConfirmLayerRemoval') { return @{ ok = $false; error = 'layer_review_required' } }
+
+    $success = Invoke-HideLayer -Layer $layer -ChatId $actor -UserId $actor -Quiet -CaptureRollback
     if (-not $success) {
         return @{ ok = $false; error = 'refused' }
     }
@@ -1277,6 +1319,8 @@ function Invoke-WebAirExit {
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) {
         return @{ ok = $false; error = 'forbidden' }
     }
+
+    if (Get-Setting 'ConfirmLayerRemoval') { return @{ ok = $false; error = 'layer_review_required' } }
 
     $success = Invoke-ExitLayer -Layer $layer -ChatId $actor -UserId $actor
     if (-not $success) {
@@ -1862,7 +1906,8 @@ function Get-WebBulletinPlaybackState {
             rowCount = @(Get-JsonProp $playback 'Rows').Count
         }
     }
-    return @{ run = $run; canStart = $CanStart; busy = [bool]$playback }
+    $canQueueAfterUrgent = $CanStart -and -not $run -and (Test-MojazUrgentOnAir)
+    return @{ run = $run; canStart = $CanStart; busy = [bool]$playback; canQueueAfterUrgent = $canQueueAfterUrgent }
 }
 
 function Invoke-WebBulletinPlayback {

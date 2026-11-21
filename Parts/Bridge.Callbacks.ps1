@@ -1079,23 +1079,10 @@ function Invoke-CallbackQuery {
         'mojaz:del:*' { Remove-MojazRow -RowId (Get-CallbackArg $data 'mojaz:del:') -ChatId $chatId -UserId $userId; break }
         'mojaz:up:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:up:') -Direction up -ChatId $chatId -UserId $userId; break }
         'mojaz:down:*' { Move-MojazRow -RowId (Get-CallbackArg $data 'mojaz:down:') -Direction down -ChatId $chatId -UserId $userId; break }
-        'mojaz:clear' {
-            Send-TelegramMessage -ChatId $chatId -Text (T 'reply.confirmClearRows') `
-                -ReplyMarkup (Get-MojazConfirmKeyboard -Question (T 'reply.yesClearRows') -ConfirmData 'mojaz:clearconfirm')
-            break
-        }
-        'mojaz:clearconfirm' { Clear-MojazRows -ChatId $chatId -UserId $userId; break }
-        'mojaz:drop' {
-            $doomed = Get-MojazSelected -ChatId $chatId
-            if (-not $doomed) { Show-MojazLibraryScreen -ChatId $chatId -UserId $userId; break }
-            $waiting = @(Get-MojazBulletinSchedules -BulletinId ([string]$doomed.Id)).Count
-            $warning = (T 'cb.confirmBoardDelete' $([string]$doomed.Name) $(@(Get-JsonProp $doomed 'Rows').Count))
-            if ($waiting -gt 0) { $warning += (T 'cb.andCancelSlots' $waiting) }
-            Send-TelegramMessage -ChatId $chatId -Text $warning `
-                -ReplyMarkup (Get-MojazConfirmKeyboard -Question (T 'reply.yesDeleteBulletin') -ConfirmData 'mojaz:dropconfirm')
-            break
-        }
-        'mojaz:dropconfirm' { Remove-MojazBulletinAndSchedules -ChatId $chatId -UserId $userId | Out-Null; break }
+        'mojaz:clear' { Request-MojazManagementReview -ChatId $chatId -UserId $userId -Operation clear; break }
+        'mojaz:clearconfirm' { Confirm-MojazManagementReview -ChatId $chatId -UserId $userId -Operation clear; break }
+        'mojaz:drop' { Request-MojazManagementReview -ChatId $chatId -UserId $userId -Operation delete; break }
+        'mojaz:dropconfirm' { Confirm-MojazManagementReview -ChatId $chatId -UserId $userId -Operation delete; break }
         { $_ -in @('menu', 'menu:main') } {
             Clear-PendingState -ChatId $chatId
             Show-MainMenuScreen -ChatId $chatId -UserId $userId
@@ -1275,14 +1262,16 @@ function Invoke-CallbackQuery {
         'repdl:news:*' { Export-BridgeReport -ChatId $chatId -UserId $userId -Kind news -Period (Get-CallbackArg $data 'repdl:news:'); break }
         'ops:retry' { Invoke-RetryLastShowAttempt -ChatId $chatId -UserId $userId; break }
         'notice:mute' {
-            [void](Set-AirNoticeMuted -UserId $userId -Muted $true)
+            $result = Set-AirNoticeMuted -UserId $userId -Muted $true -IncludeSaveStatus
+            if (-not $result.Saved) { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noticeSaveFailed'); break }
             Write-BridgeLog "User $userId muted their on-air notices"
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noticesOff') `
                 -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.noticesBackButton') 'notice:unmute'))) }
             break
         }
         'notice:unmute' {
-            [void](Set-AirNoticeMuted -UserId $userId -Muted $false)
+            $result = Set-AirNoticeMuted -UserId $userId -Muted $false -IncludeSaveStatus
+            if (-not $result.Saved) { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noticeSaveFailed'); break }
             Write-BridgeLog "User $userId resumed their on-air notices"
             Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noticesOn') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
@@ -1299,7 +1288,8 @@ function Invoke-CallbackQuery {
                         # none -> admins -> all -> none: widening by one tap,
                         # and back to silence without hunting for an off button.
                         $next = switch ($current) { 'none' { 'admins' } 'admins' { 'all' } default { 'none' } }
-                        [void](Set-TemplateNotifyRule -Key $key -Scope $next)
+                        $result = Set-TemplateNotifyRule -Key $key -Scope $next -IncludeSaveStatus
+                        if (-not $result.Saved) { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noticeSaveFailed'); break }
                         Write-BridgeLog "User $userId set the on-air notice for '$key' to $next"
                         $page = [int][math]::Floor($index / 12)
                         Show-TemplateNotifyEditor -ChatId $chatId -UserId $userId -Page $page -MessageId ([int]$msgObj.message_id)
@@ -2285,16 +2275,32 @@ function Invoke-CallbackQuery {
         }
         'schcancel:*' {
             $eventId = (Get-CallbackArg $data 'schcancel:')
-            $scheduleEntry = @(Get-UpcomingScheduleEvents | Where-Object { [string]$_.Id -eq $eventId }) | Select-Object -First 1
+            $scheduleEntry = Get-PendingScheduledShowEvent -Id $eventId
             if (-not $scheduleEntry) { break }
-            Set-PendingState -ChatId $chatId -State @{ Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId }
+            if (-not (Test-ScheduledShowEventOwnership -ScheduleEntry $scheduleEntry -ChatId $chatId -UserId $userId)) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'sch.yourEventsOnly') -ReplyMarkup (Get-ScheduleMenuKeyboard)
+                break
+            }
+            Set-PendingState -ChatId $chatId -State @{
+                Mode = 'schedule_cancel'; EventId = $eventId; UserId = $userId
+                EventRevision = Get-ScheduledShowEventRevision -ScheduleEntry $scheduleEntry
+            }
             Send-TelegramMessage -ChatId $chatId -Text (T 'cb.confirmEventCancel' $(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)) -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'reply.yesCancel') 'schedule:cancelconfirm' -Style danger), (New-Button (T 'cb.back') 'schedule:list'))) }
             break
         }
         'schedule:cancelconfirm' {
             $state = Get-PendingState -ChatId $chatId
             if (-not $state -or $state.Mode -ne 'schedule_cancel' -or [long]$state.UserId -ne $userId) { break }
-            $cancelled = Stop-ScheduledShowEvent -Id ([string]$state.EventId)
+            $cancelled = $false
+            $scheduleEntry = Get-PendingScheduledShowEvent -Id ([string]$state.EventId)
+            $revision = [string](Get-JsonProp $state 'EventRevision')
+            if ($scheduleEntry -and $revision -and (Test-ScheduledShowEventOwnership -ScheduleEntry $scheduleEntry -ChatId $chatId -UserId $userId)) {
+                $result = Invoke-ScheduledShowEventMutation -Operation cancel -EventId ([string]$state.EventId) -ExpectedRevision $revision
+                $cancelled = $result.ok
+                if ($cancelled) {
+                    Add-AuditEntry (T 'sch.scheduledAudit' (T 'sch.delete') $scheduleEntry.TemplateKey $scheduleEntry.Recurrence (Format-UserAuditActor -UserId $userId))
+                }
+            }
             Clear-PendingState -ChatId $chatId
             $text = if ($cancelled) { (T 'reply.eventCancelled') } else { (T 'reply.eventCancelFailed') }
             Send-TelegramMessage -ChatId $chatId -Text $text -ReplyMarkup (Get-ScheduleMenuKeyboard)

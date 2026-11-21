@@ -918,10 +918,10 @@ function Get-UpcomingScheduleEvents {
 
 function Stop-ScheduledShowEvent {
     param([Parameter(Mandatory)][string]$Id)
-    $scheduleEntry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq $Id }) | Select-Object -First 1
-    if (-not $scheduleEntry -or [string]$scheduleEntry.Status -ne 'pending') { return $false }
-    $scheduleEntry.Status = 'cancelled'; $scheduleEntry.LastResult = 'cancelled by operator'
-    return (Save-ScheduleEvents)
+    $entry = Get-PendingScheduledShowEvent -Id $Id
+    if (-not $entry) { return $false }
+    $result = Invoke-ScheduledShowEventMutation -Operation cancel -EventId $Id -ExpectedRevision (Get-ScheduledShowEventRevision -ScheduleEntry $entry)
+    return [bool]$result.ok
 }
 
 function Format-ScheduleEventHtml {
@@ -978,12 +978,12 @@ function Start-ScheduleMutationFlow {
         [Parameter(Mandatory)][long]$ChatId,
         [Parameter(Mandatory)][long]$UserId
     )
-    $entry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq $EventId -and [string]$_.Status -eq 'pending' }) | Select-Object -First 1
+    $entry = Get-PendingScheduledShowEvent -Id $EventId
     if (-not $entry) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.eventGone') -ReplyMarkup (Get-ScheduleMenuKeyboard)
         return
     }
-    if ([long]$entry.UserId -ne $UserId -and -not (Test-Admin -ChatId $ChatId -UserId $UserId)) {
+    if (-not (Test-ScheduledShowEventOwnership -ScheduleEntry $entry -ChatId $ChatId -UserId $UserId)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.yourEventsOnly') -ReplyMarkup (Get-ScheduleMenuKeyboard)
         return
     }
@@ -991,6 +991,7 @@ function Start-ScheduleMutationFlow {
     foreach ($name in $entry.Values.Keys) { $values[[string]$name] = [string]$entry.Values[$name] }
     $state = @{
         Mode = 'schedule_time'; MutationAction = $Action; OriginalEventId = $EventId
+        OriginalEventRevision = Get-ScheduledShowEventRevision -ScheduleEntry $entry
         TemplateKey = [string]$entry.TemplateKey; Layer = [int](Get-JsonProp $entry 'Layer')
         Fields = @($values.Keys); Values = $values; Recurrence = [string]$entry.Recurrence
         TimeZoneId = [string]$entry.TimeZoneId; RecurrenceUntil = [string](Get-JsonProp $entry 'RecurrenceUntil'); UserId = $UserId
@@ -1087,7 +1088,13 @@ function Show-ScheduleReview {
         $lines += (T 'sch.repeatEnds' $(if ($until) { $until } else { (T 'sch.noEndDate') }))
     }
     foreach ($field in @($State.Fields)) { $lines += "• $field`: $($State.Values[[string]$field])" }
-    $conflicts = @(Get-ScheduleLayerConflicts -Layer ([int]$State.Layer) -ScheduledAt ([datetimeoffset]$State.ScheduledAt) `
+    $materials = @()
+    if ((Get-JsonProp $State 'AnchorMaterialId') -or (Get-UpcomingScheduleEvents | Where-Object { Get-JsonProp $_ 'AnchorMaterialId' } | Select-Object -First 1)) {
+        $materials = @(Get-CachedMaterialSchedule)
+    }
+    $at = Resolve-ScheduleAnchorTime -ScheduleEntry $State -Items $materials
+    $excludeId = if ((Get-JsonProp $State 'MutationAction') -eq 'edit') { [string]$State.OriginalEventId } else { '' }
+    $conflicts = @(Get-ScheduleLayerConflicts -Layer ([int]$State.Layer) -ScheduledAt $at -ExcludeId $excludeId -MaterialItems $materials `
         -WindowMinutes (Get-SettingInt 'ScheduleConflictWindowMinutes' 2))
     if ($conflicts.Count -gt 0) {
         $lines += ''
@@ -1153,35 +1160,26 @@ function Confirm-ScheduledShow {
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return }
     $scheduleEntry = $null
     $saved = $false
-    if ($state.ContainsKey('MutationAction') -and [string]$state.MutationAction -eq 'edit') {
-        $scheduleEntry = @($script:ScheduleEvents | Where-Object { [string]$_.Id -eq [string]$state.OriginalEventId -and [string]$_.Status -eq 'pending' }) | Select-Object -First 1
-        if ($scheduleEntry) {
-            $previous = @{
-                ScheduledAt = [string]$scheduleEntry.ScheduledAt; TimeZoneId = [string]$scheduleEntry.TimeZoneId
-                ExecutionKey = [string]$scheduleEntry.ExecutionKey; CompletedExecutionKey = [string]$scheduleEntry.CompletedExecutionKey
-                NextAttemptAt = [string]$scheduleEntry.NextAttemptAt; AttemptCount = [int]$scheduleEntry.AttemptCount
-                RecurrenceUntil = [string](Get-JsonProp $scheduleEntry 'RecurrenceUntil')
-                AnchorMaterialId = [string](Get-JsonProp $scheduleEntry 'AnchorMaterialId')
-                AnchorOffsetSeconds = [string](Get-JsonProp $scheduleEntry 'AnchorOffsetSeconds')
-            }
-            $scheduleEntry.ScheduledAt = [string]$state.ScheduledAt; $scheduleEntry.TimeZoneId = [string]$state.TimeZoneId
-            $scheduleEntry.RecurrenceUntil = [string](Get-JsonProp $state 'RecurrenceUntil')
-            $scheduleEntry.ExecutionKey = ''; $scheduleEntry.CompletedExecutionKey = ''; $scheduleEntry.NextAttemptAt = ''; $scheduleEntry.AttemptCount = 0
-            # An anchor survives an edit only while it still means something:
-            # a recurring event re-anchored to "today's programme" would fire
-            # off a stale material, so changing the recurrence clears it.
-            if ([string]$state.Recurrence -eq 'once' -and [string]$scheduleEntry.Recurrence -eq 'once') {
-                $scheduleEntry.AnchorMaterialId = [string](Get-JsonProp $state 'AnchorMaterialId')
-                $scheduleEntry.AnchorOffsetSeconds = [string](Get-JsonProp $state 'AnchorOffsetSeconds')
-            }
-            else {
-                $scheduleEntry.AnchorMaterialId = ''; $scheduleEntry.AnchorOffsetSeconds = 0
-            }
-            $saved = Save-ScheduleEvents
-            if (-not $saved) {
-                foreach ($name in $previous.Keys) { $scheduleEntry[$name] = $previous[$name] }
-            }
+    $action = [string](Get-JsonProp $state 'MutationAction')
+    if ($action -in 'edit', 'copy') {
+        $original = Get-PendingScheduledShowEvent -Id ([string]$state.OriginalEventId)
+        $revision = [string](Get-JsonProp $state 'OriginalEventRevision')
+        if (-not $original -or -not $revision -or (Get-ScheduledShowEventRevision -ScheduleEntry $original) -cne $revision) {
+            Clear-PendingState -ChatId $ChatId
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.eventGone') -ReplyMarkup (Get-ScheduleMenuKeyboard)
+            return
         }
+        if (-not (Test-ScheduledShowEventOwnership -ScheduleEntry $original -ChatId $ChatId -UserId $UserId) -or
+            ($action -eq 'edit' -and -not (Test-WebScheduledShowAccess -ScheduleEntry $original))) {
+            Clear-PendingState -ChatId $ChatId
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.yourEventsOnly') -ReplyMarkup (Get-ScheduleMenuKeyboard)
+            return
+        }
+    }
+    if ($action -eq 'edit') {
+        $result = Invoke-ScheduledShowEventMutation -Operation edit -EventId ([string]$state.OriginalEventId) -ExpectedRevision $revision -Plan $state
+        $saved = $result.ok
+        $scheduleEntry = Get-JsonProp $result 'entry'
     }
     else {
         $scheduleEntry = New-ScheduledShowEvent -TemplateKey ([string]$state.TemplateKey) -Layer ([int]$state.Layer) -Values $state.Values -ScheduledAt ([datetimeoffset]$state.ScheduledAt) -Recurrence ([string]$state.Recurrence) -ChatId $ChatId -UserId $UserId -RecurrenceUntil ([string](Get-JsonProp $state 'RecurrenceUntil')) -AnchorMaterialId ([string](Get-JsonProp $state 'AnchorMaterialId')) -AnchorOffsetSeconds ([int](Get-JsonProp $state 'AnchorOffsetSeconds'))
@@ -1189,8 +1187,7 @@ function Confirm-ScheduledShow {
     }
     Clear-PendingState -ChatId $ChatId
     if ($saved) {
-        $auditAction = if ($state.ContainsKey('MutationAction')) { [string]$state.MutationAction } else { 'created' }
-        $auditLabel = switch ($auditAction) { 'updated' { (T 'sch.edit') } 'deleted' { (T 'sch.delete') } default { (T 'sch.create') } }
+        $auditLabel = if ($action -eq 'edit') { T 'sch.edit' } else { T 'sch.create' }
         Add-AuditEntry (T 'sch.scheduledAudit' $auditLabel $($scheduleEntry.TemplateKey) $($scheduleEntry.Recurrence) $(Format-UserAuditActor -UserId $UserId))
         Send-TelegramMessage -ChatId $ChatId -Text (T 'sch.saved' $(Format-ScheduleEvent -ScheduleEntry $scheduleEntry)) -ReplyMarkup (Get-ScheduleMenuKeyboard)
     }

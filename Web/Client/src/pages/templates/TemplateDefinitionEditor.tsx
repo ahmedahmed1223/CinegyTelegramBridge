@@ -7,6 +7,8 @@ import { useState, type FormEvent } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 
+import { TemplateSceneReplacement } from './TemplateSceneReplacement'
+
 type Definition = Schemas['TemplateDefinitionView']
 type Changes = Schemas['TemplateDefinitionChanges']
 type Command = Schemas['TemplateDefinitionCommand']
@@ -55,6 +57,7 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
     definition.fields.map(({ name, label, maxLength, required, sensitive }) =>
       ({ id: crypto.randomUUID(), name, label, maxLength, required, sensitive })))
   const [review, setReview] = useState<Review | null>(null)
+  const [replacingScene, setReplacingScene] = useState(false)
   const checking = useMutation({
     mutationFn: async ({ mode, changes }: Pick<Review, 'mode' | 'changes'>) => {
       const reply = await requestDefinition(definition.key, { action: `review-${mode}`, revision: definition.revision, changes })
@@ -92,6 +95,9 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
     })
   }
 
+  if (replacingScene) {
+    return <TemplateSceneReplacement templateKey={definition.key} onClose={() => setReplacingScene(false)} />
+  }
   return <Modal opened size="xl" title={review?.mode === 'delete' ? 'مراجعة حذف القالب' : 'إدارة القالب'}
     onClose={() => { if (!pending) onClose() }} withCloseButton={!pending}>
     <Stack gap="md">
@@ -172,7 +178,10 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
             </Table.ScrollContainer>}
             {!!fields.length && <Text size="xs" c="dimmed">الحدّ 0 يستخدم الحدّ الافتراضي للقالب.</Text>}
             <Group justify="space-between">
-              <Button variant="light" color="red" disabled={pending} onClick={() => checking.mutate({ mode: 'delete' })}>مراجعة الحذف</Button>
+              <Group gap="xs">
+                <Button variant="light" color="red" disabled={pending} onClick={() => checking.mutate({ mode: 'delete' })}>مراجعة الحذف</Button>
+                <Button variant="default" disabled={pending} onClick={() => setReplacingScene(true)}>استبدال ملف المشهد</Button>
+              </Group>
               <Button type="submit" loading={pending}>مراجعة التعديل</Button>
             </Group>
           </Stack>

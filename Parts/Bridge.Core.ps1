@@ -93,7 +93,7 @@ function Save-Config {
        manages, so a manual edit made while the bridge is running is not
        clobbered by the next approval - and the in-memory copy picks that
        manual edit up at the same time. #>
-    param([string]$Path = $ConfigPath)
+    param([string]$Path = $ConfigPath, [long]$Deadline = 0)
     if ($LoadOnly -and [IO.Path]::GetFullPath($Path) -eq [IO.Path]::GetFullPath($ConfigPath) -and
         [IO.Path]::GetFileName($Path) -eq 'config.example.json') {
         $script:LastConfigSaveFailed = $false
@@ -101,7 +101,12 @@ function Save-Config {
     }
     $configMutex = [Threading.Mutex]::new($false, 'Global\CinegyTelegramBridge.Config')
     $configLockHeld = $false
-    try { $configLockHeld = $configMutex.WaitOne([timespan]::FromSeconds(10)) }
+    $waitSeconds = 10.0
+    if ($Deadline -gt 0) {
+        $remaining = ($Deadline - [Diagnostics.Stopwatch]::GetTimestamp()) / [Diagnostics.Stopwatch]::Frequency
+        $waitSeconds = [math]::Clamp($remaining, 0.0, 10.0)
+    }
+    try { $configLockHeld = $configMutex.WaitOne([timespan]::FromSeconds($waitSeconds)) }
     catch [Threading.AbandonedMutexException] { $configLockHeld = $true }
     if (-not $configLockHeld) {
         $script:LastConfigSaveFailed = $true
@@ -190,6 +195,9 @@ function Save-Config {
         $target | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tempPath -Encoding utf8 -ErrorAction Stop
         if (Test-Path $Path) { Copy-Item -Path $Path -Destination $backupPath -Force -ErrorAction SilentlyContinue }
         Protect-BridgeConfigurationAcl -ConfigPath $Path
+        if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+            throw 'The reviewed configuration write expired before publication.'
+        }
         Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
         $script:LastConfigSaveFailed = $false
     }
@@ -954,11 +962,11 @@ function Set-Setting {
     param([Parameter(Mandatory)][string]$Name, $Value)
     Assert-SettingRange -Name $Name -Value $Value
     $settings = Get-JsonProp $config 'Settings'
-    if (-not $settings) {
+    if ($null -eq $settings) {
         $settings = [pscustomobject]@{}
-        $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $settings -Force
+        Set-JsonProp $config 'Settings' $settings
     }
-    $settings | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+    Set-JsonProp $settings $Name $Value
     Save-Config
 }
 

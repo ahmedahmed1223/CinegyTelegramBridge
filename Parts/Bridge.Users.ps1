@@ -288,17 +288,32 @@ function Test-AirNoticeMuted {
 }
 
 function Set-AirNoticeMuted {
-    <# Sets or clears it, creating the profile if this is the first thing
-       anyone has recorded about them. #>
-    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][bool]$Muted)
+    param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][bool]$Muted, [switch]$IncludeSaveStatus)
+
     $id = [string]$UserId
-    if (-not $script:UserProfiles.ContainsKey($id)) {
-        $script:UserProfiles[$id] = @{ AddedAt = ''; AddedByUserId = 0L; LastActivityAt = '' }
+    $previousMuted = Test-AirNoticeMuted -UserId $UserId
+    $saved = $true
+    if ($previousMuted -ne $Muted) {
+        $wasDirty = $script:UserProfilesDirty
+        $hadProfile = $script:UserProfiles.ContainsKey($id)
+        if (-not $hadProfile) { $script:UserProfiles[$id] = @{ AddedAt = ''; AddedByUserId = 0L; LastActivityAt = '' } }
+        $userProfile = $script:UserProfiles[$id]
+        $previousValue = Get-JsonProp $userProfile 'MutedAirNotices'
+        $hadValue = if ($userProfile -is [System.Collections.IDictionary]) { $userProfile.Contains('MutedAirNotices') }
+        else { $null -ne $userProfile.PSObject.Properties['MutedAirNotices'] }
+        Set-JsonProp -Object $userProfile -Name 'MutedAirNotices' -Value $Muted
+        $script:UserProfilesDirty = $true
+        $saved = Save-UserProfiles -Force
+        if (-not $saved) {
+            if (-not $hadProfile) { $script:UserProfiles.Remove($id) }
+            elseif ($hadValue) { Set-JsonProp -Object $userProfile -Name 'MutedAirNotices' -Value $previousValue }
+            else { Remove-JsonProp -Object $userProfile -Name 'MutedAirNotices' }
+            $script:UserProfilesDirty = $wasDirty
+        }
     }
-    Set-JsonProp -Object $script:UserProfiles[$id] -Name 'MutedAirNotices' -Value $Muted
-    $script:UserProfilesDirty = $true
-    Save-UserProfiles -Force | Out-Null
-    return $Muted
+    $effective = if ($saved) { $Muted } else { $previousMuted }
+    if ($IncludeSaveStatus) { return @{ Saved = $saved; Muted = $effective } }
+    return $effective
 }
 
 function Update-UserLastActivity {

@@ -570,10 +570,13 @@ function Get-VerifiedCinegyShowIdentity {
         [AllowEmptyString()][string]$ExpectedPreviousActiveId = '',
         [AllowEmptyString()][string]$ExpectedActiveId = '',
         [switch]$AllowAnonymousActiveId,
-        [switch]$RequireEventIdentity
+        [switch]$RequireEventIdentity,
+        [string]$Device = ''
     )
+    $deviceArguments = @{}
+    if ($Device) { $deviceArguments.Device = $Device }
     $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
-    $status = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+    $status = Get-TitlerLayerStatus @deviceArguments -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -Layer $Layer `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if (-not [bool](Get-JsonProp $status 'Success') -or -not [bool](Get-JsonProp $status 'IsOnAir')) {
@@ -702,6 +705,8 @@ function Invoke-ShowTemplateResult {
         [switch]$RequireEventIdentity,
         [hashtable]$VariableTypes = @{},
         [switch]$SkipPostboxWrites,
+        [switch]$ReviewedRollback,
+        [string]$ExpectedDevicePath = '',
         [long]$Deadline = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -718,6 +723,21 @@ function Invoke-ShowTemplateResult {
         return
     }
     $template = $store.Map[$Key]
+    $rollbackDeviceArguments = @{}
+    if ($ReviewedRollback) {
+        $device = Get-WebRollbackDirectDevice -Layer $ExpectedLayer -ExpectedDevicePath $ExpectedDevicePath
+        if (-not $device -or -not $ExpectedTemplatePath -or -not $ExpectedLayerStamp -or $Deadline -le 0 -or
+            -not $RequireEventIdentity -or $AutoHideSeconds -gt 0 -or
+            ($ExpectedLayerStamp -cne 'empty' -and ($ExpectedLayerStartedAtTicks -le 0 -or (Get-Setting 'ReshowClearsLayer'))) -or
+            $Key -in $script:MojazTemplateKey, $script:MojazUrgentKey -or (Get-JsonProp $template 'Bulletin') -or
+            (Test-PermanentGraphicAutoHideProtected -Key $Key)) {
+            return @{ Success = $false; Error = 'reviewed rollback target is not a direct untimed show' }
+        }
+        $rollbackDeviceArguments.Device = $device
+        # A reviewed rollback admits precisely one target-specific command.
+        $SkipPostboxWrites = $true
+    }
+
     $publicValues = Get-PublicTemplateValues -Template $template -Variables $Variables
     $auditedValues = Format-AuditTemplateValues -Variables $publicValues
     $suppressPayloadLog = $publicValues.Count -lt $Variables.Count
@@ -745,7 +765,7 @@ function Invoke-ShowTemplateResult {
     # SHOW is the only operation that can replace visible content. Verify the
     # target layer immediately before mutating it; an unreachable Cinegy must
     # never be interpreted as an empty or safe layer.
-    $layerStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress `
+    $layerStatus = Get-TitlerLayerStatus @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -Layer ([int]$template.Layer) `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
     if (-not $layerStatus.Success) {
@@ -768,6 +788,9 @@ function Invoke-ShowTemplateResult {
     Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
     $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
+    $captureWebProof = (Get-Setting 'WebAccessEnabled') -eq $true
+    $previousWasUntimed = $captureWebProof -and
+        (Test-WebRollbackUntimedSnapshot -Layer ([int]$template.Layer) -Snapshot $previousSnapshot -Status $layerStatus)
 
     # Clearing the outgoing layer or stopping its engine commits this action.
     # A request that expires before admission must leave both untouched.
@@ -785,39 +808,41 @@ function Invoke-ShowTemplateResult {
     # that changed the channel by being denied. Nothing that alters the air may
     # run before the answer to "may they" is known - and now that includes an
     # unreachable Cinegy, which is refused above.
-    if ($Key -eq $script:MojazUrgentKey) {
-        Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null
-        # And the board, which plays on this same scene. The older, simpler
-        # path wins: an operator reaching for the single urgent button during a
-        # board run is asking for that one line, now.
-        #
-        # This is skipped while the board's own opening SHOW is in flight -
-        # that SHOW carries this very key, so without the flag the board would
-        # be stopped by the command that starts it.
-        Stop-UrgentBoardForManualUrgent -ChatId $ChatId -UserId $UserId | Out-Null
-    }
-    else {
-        # Any OTHER template claiming this layer takes it from whatever engine
-        # was walking it. Hide and exit have called these two since they were
-        # written; SHOW never did - so a replacing graphic left the bulletin
-        # engine running. It kept writing rows into a scene it no longer owned
-        # (Send-PostboxValues is channel-wide, it takes no layer at all), and
-        # at its planned end it sent EXIT_SCENE_LOOP to that layer and pulled
-        # the REPLACING graphic off air minutes later, logged against the
-        # bulletin's operator, with nothing on any screen saying why.
-        #
-        # The two helpers' own docstrings list their callers - "the hide
-        # button, an exit, hide-all" - and a replacing SHOW is not among them.
-        # That is the door this closes.
-        #
-        # Both are no-ops when no run owns this layer (they return $false on a
-        # layer mismatch) and both stop without sending an air command of their
-        # own, so the SHOW below is still the only thing here that touches
-        # Cinegy. Kept in the else branch so the urgent key keeps the older,
-        # narrower handling above: its opening SHOW carries the board's own
-        # key, and Stop-UrgentBoardForLayer must never see it.
-        Stop-MojazForLayer -Layer ([int]$template.Layer) | Out-Null
-        Stop-UrgentBoardForLayer -Layer ([int]$template.Layer) | Out-Null
+    if (-not $ReviewedRollback) {
+        if ($Key -eq $script:MojazUrgentKey) {
+            Clear-MojazForUrgent -ChatId $ChatId -UserId $UserId | Out-Null
+            # And the board, which plays on this same scene. The older, simpler
+            # path wins: an operator reaching for the single urgent button during a
+            # board run is asking for that one line, now.
+            #
+            # This is skipped while the board's own opening SHOW is in flight -
+            # that SHOW carries this very key, so without the flag the board would
+            # be stopped by the command that starts it.
+            Stop-UrgentBoardForManualUrgent -ChatId $ChatId -UserId $UserId | Out-Null
+        }
+        else {
+            # Any OTHER template claiming this layer takes it from whatever engine
+            # was walking it. Hide and exit have called these two since they were
+            # written; SHOW never did - so a replacing graphic left the bulletin
+            # engine running. It kept writing rows into a scene it no longer owned
+            # (Send-PostboxValues is channel-wide, it takes no layer at all), and
+            # at its planned end it sent EXIT_SCENE_LOOP to that layer and pulled
+            # the REPLACING graphic off air minutes later, logged against the
+            # bulletin's operator, with nothing on any screen saying why.
+            #
+            # The two helpers' own docstrings list their callers - "the hide
+            # button, an exit, hide-all" - and a replacing SHOW is not among them.
+            # That is the door this closes.
+            #
+            # Both are no-ops when no run owns this layer (they return $false on a
+            # layer mismatch) and both stop without sending an air command of their
+            # own, so the SHOW below is still the only thing here that touches
+            # Cinegy. Kept in the else branch so the urgent key keeps the older,
+            # narrower handling above: its opening SHOW carries the board's own
+            # key, and Stop-UrgentBoardForLayer must never see it.
+            Stop-MojazForLayer -Layer ([int]$template.Layer) | Out-Null
+            Stop-UrgentBoardForLayer -Layer ([int]$template.Layer) | Out-Null
+        }
     }
 
     # A scene that is already loaded on the layer keeps running with the values
@@ -826,7 +851,7 @@ function Invoke-ShowTemplateResult {
     # variables. (To change text without re-firing the animation, use the
     # ✏️ تحديث نص button, which writes to the live postbox instead.)
     $operationStarted = $false
-    if ((Get-Setting 'ReshowClearsLayer') -and $script:OnAir.ContainsKey([int]$template.Layer)) {
+    if (-not $ReviewedRollback -and (Get-Setting 'ReshowClearsLayer') -and $script:OnAir.ContainsKey([int]$template.Layer)) {
         Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId
         $operationStarted = $true
         $clear = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
@@ -860,9 +885,22 @@ function Invoke-ShowTemplateResult {
     # later, so an operator watched the old headline for a second or two
     # on every new urgent. The write after SHOW stays as belt and braces.
     if (-not $SkipPostboxWrites) { Send-PreShowValues -Key $Key -Variables $Variables -Types $types -SuppressPayloadLog:$suppressPayloadLog }
-    $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+    $airTimeout = Get-AirTimeout
+    if ($ReviewedRollback) {
+        $finalStatus = Get-TitlerLayerStatus @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Layer $ExpectedLayer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if ((Get-CinegyLayerReviewStamp -Status $finalStatus) -cne $ExpectedLayerStamp -or
+            ($ExpectedLayerStartedAtTicks -gt 0 -and
+                (Get-CinegyStatusStartTicks -Status $finalStatus) -ne $ExpectedLayerStartedAtTicks) -or
+            -not (Get-WebRollbackDirectDevice -Layer $ExpectedLayer -ExpectedDevicePath $ExpectedDevicePath) -or
+            ($ExpectedLayerStamp -cne 'empty' -and (Get-Setting 'ReshowClearsLayer')) -or
+            [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+            return @{ Success = $false; Error = 'reviewed rollback target or deadline changed before show' }
+        }
+    }
+    $result = Show-TitlerTemplate @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
-        -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
+        -Types $types -DefaultType $defaultType -TimeoutSec $airTimeout
 
     # Air Pro answers 200 OK even when it does not recognise a variable name,
     # so "Success" only means the request was accepted - not that the text
@@ -908,18 +946,25 @@ function Invoke-ShowTemplateResult {
         # kept the client EventId, which happened to work until Cinegy returned
         # a different identity. An anonymous active item is accepted only when
         # its engine id changed from the pre-SHOW item.
-        $identity = Get-VerifiedCinegyShowIdentity -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
+        $identity = Get-VerifiedCinegyShowIdentity @rollbackDeviceArguments -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
             -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
             -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity -AllowAnonymousActiveId
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
         Set-JsonProp $result 'EngineStartedAtUtc' (Get-JsonProp $identity 'StartedAt')
         # Callers that later remove a specific job need exact event proof.
         # Leave the general engine correlation intact for timers and monitoring.
-        Set-JsonProp $result 'EventIdentityConfirmed' ($activeIdConfirmed -and $eventId -and
-            $eventId.Trim().Trim('{', '}') -eq $activeId.Trim().Trim('{', '}'))
+        $eventIdentityConfirmed = $activeIdConfirmed -and $eventId -and
+            $eventId.Trim().Trim('{', '}') -eq $activeId.Trim().Trim('{', '}')
+        Set-JsonProp $result 'EventIdentityConfirmed' $eventIdentityConfirmed
+        $engineStartedAt = Get-JsonProp $identity 'StartedAt'
+        $engineStartTicks = if ($engineStartedAt -is [datetime]) { $engineStartedAt.ToUniversalTime().Ticks } else { 0L }
         if ($previousSnapshot) {
             Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
                 -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
+            if ($captureWebProof) {
+                Initialize-WebRollbackProof -Layer ([int]$template.Layer) -CurrentKey $Key -StartTicks $engineStartTicks `
+                    -ExactEvent:$eventIdentityConfirmed -RestoreUntimed:$previousWasUntimed
+            }
         }
         elseif ($layerStatus.Success -and $false -eq [bool]$layerStatus.IsOnAir) {
             # Pushing onto a layer that was genuinely EMPTY used to leave
@@ -934,6 +979,10 @@ function Invoke-ShowTemplateResult {
             Set-RollbackCandidate -Layer ([int]$template.Layer) `
                 -RestoreSnapshot @{ Key = [string]$Key; Action = 'hide' } `
                 -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId
+            if ($captureWebProof) {
+                Initialize-WebRollbackProof -Layer ([int]$template.Layer) -CurrentKey $Key -StartTicks $engineStartTicks `
+                    -ExactEvent:$eventIdentityConfirmed
+            }
         }
         else { $script:RollbackCandidates.Remove([int]$template.Layer) | Out-Null }
         # Three of the same graphic in an hour is almost always a paste slip or
@@ -946,6 +995,14 @@ function Invoke-ShowTemplateResult {
             Key=$Key; Variables=(Copy-ShowVariables -Variables $Variables); UserId=$UserId; ChatId=$ChatId
             ActiveId=$activeId; ActiveIdConfirmed=$activeIdConfirmed; At=(Get-Date)
             TemplatePath=[string]$template.Path; SceneWriteTicks=$sceneWrite
+        }
+        if ($captureWebProof) {
+            $snapshot = $script:LastSuccessfulLayerShows[[int]$template.Layer]
+            $snapshot.TemplateRevision = [string](Get-JsonProp $template 'PresetRevision')
+            $snapshot.AutoHideSeconds = $AutoHideSeconds
+            $snapshot.EventIdentityConfirmed = $eventIdentityConfirmed
+            $snapshot.EngineStartedAtTicks = $engineStartTicks
+            $snapshot.DevicePath = if ($ReviewedRollback) { $ExpectedDevicePath } else { (Resolve-AirGfxDevice -Layer ([int]$template.Layer)).StatusPath }
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $publicValues }
         $script:MissingGraphicState.Remove($Key) | Out-Null

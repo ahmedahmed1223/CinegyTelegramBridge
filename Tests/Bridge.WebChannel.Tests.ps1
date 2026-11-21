@@ -1,6 +1,34 @@
 #requires -Version 7
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
+Describe 'Web layer removal compatibility' {
+    It 'requires a reviewed request on the legacy HIDE and EXIT operations when the station enables confirmation' {
+        Mock Test-Authorized { $true }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ExitLayer { $true }
+        Mock Publish-WebChannelState {}
+
+        (Invoke-WebAirHide @{ actor = 4321; layer = 9 }).error | Should -Be 'layer_review_required'
+        (Invoke-WebAirExit @{ actor = 4321; layer = 9 }).error | Should -Be 'layer_review_required'
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'keeps legacy HIDE and EXIT available when station confirmation is disabled' {
+        Mock Test-Authorized { $true }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ExitLayer { $true }
+        Mock Publish-WebChannelState {}
+
+        (Invoke-WebAirHide @{ actor = 4321; layer = 9 }).ok | Should -BeTrue
+        (Invoke-WebAirExit @{ actor = 4321; layer = 9 }).ok | Should -BeTrue
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Quiet -and $CaptureRollback -and $Layer -eq 9 }
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 9 }
+    }
+}
+
 Describe 'Web channel: sign-in through Telegram' {
     BeforeEach {
         $script:WebLoginRequests = @{}
@@ -525,6 +553,8 @@ Describe 'Web channel: the pipe' {
         }
         Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly
 
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'ConfirmLayerRemoval' }
+
         # 3. air.hide
         $hideReply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"air.hide","args":{"actor":4321,"layer":5}}') | ConvertFrom-Json
         $hideReply.ok | Should -BeTrue
@@ -730,6 +760,142 @@ Describe 'Web channel: the pipe' {
             (& $call 'schedule.templates' @{ actor = 9876; action = 'list' }).error | Should -Be 'forbidden'
             (& $call 'schedule.templates' @{ actor = 4321; action = 'list'; page = 0 }).ok | Should -BeTrue
             (& $call 'air.rerun' @{ actor = 4321; kind = 'repeat'; action = 'inspect' }).error | Should -Be 'rerun_missing'
+        }
+        finally { $script:LastShow = $savedHistory }
+    }
+
+    It 'rechecks the current administrator and applies a single reviewed setting change across the named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 9876 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-StatusViewer { $UserId -eq 4321 }
+        Mock Save-Config { $script:LastConfigSaveFailed = $false }
+        $previousSettings = Get-JsonProp $config 'Settings'
+        $previousSaveStatus = $script:LastConfigSaveFailed
+        Set-JsonProp $config 'Settings' @{ AskRequesterName = $false }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'admin.overview' @{ actor = 9876 }).error | Should -Be 'forbidden'
+            $overview = & $call 'admin.overview' @{ actor = 4321 }
+            $overview.ok | Should -BeTrue
+            @($overview.data.settings.id) | Should -Contain 'AskRequesterName'
+            @($overview.data.settings.id) | Should -Not -Contain 'BotToken'
+            (& $call 'shift.history' @{ actor = 9876; scope = 'all' }).error | Should -Be 'forbidden'
+            (& $call 'shift.history' @{ actor = 9876; scope = 'mine' }).ok | Should -BeTrue
+            $draft = & $call 'admin.settings.review' @{ actor = 4321; id = 'AskRequesterName'; enabled = $true }
+            $draft.ok | Should -BeTrue
+            $confirm = @{ actor = 9876; id = 'AskRequesterName'; review = $draft.data.review }
+            (& $call 'admin.settings.confirm' $confirm).error | Should -Be 'forbidden'
+            $confirm.actor = 4321
+            (& $call 'admin.settings.confirm' $confirm).data.setting.enabled | Should -BeTrue
+            (& $call 'admin.settings.confirm' $confirm).error | Should -Be 'setting_stale'
+            Should -Invoke Save-Config -Times 1 -Exactly
+        }
+        finally {
+            Set-JsonProp $config 'Settings' $previousSettings
+            $script:LastConfigSaveFailed = $previousSaveStatus
+        }
+    }
+
+    It 'validates a replacement file in the catalogue worker and changes only the reviewed registry path' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-WebLayerStatus { @{ Success = $true; IsOnAir = $false } }
+        $oldRegistry = $config.TemplateRegistryPath
+        $oldRoot = Get-Setting 'TemplateBasePath'
+        $oldManagement = Get-Setting 'EnableFullTemplateManagement'
+        $folder = (New-Item -ItemType Directory -Path (Join-Path $TestDrive 'replacement-catalogue')).FullName
+        $previous = Join-Path $folder 'existing.cintitle'
+        $replacement = Join-Path $folder 'replacement.cintitle'
+        $markup = '<Scene><Var Name="Title" Type="String" /><Title Text="${Title}" /></Scene>'
+        Set-Content -LiteralPath $previous -Value $markup
+        Set-Content -LiteralPath $replacement -Value $markup
+        $definition = @{ Caption = @{ path = $previous; layer = 7; description = 'Fixture caption'; fields = @('Title') } }
+        $registry = New-TempTemplateFile -Json ($definition | ConvertTo-Json -Depth 6)
+        Set-JsonProp $config.Settings 'TemplateBasePath' $folder
+        Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $true
+        $call = {
+            param([hashtable]$Arguments)
+            $line = @{ op = 'air.templateScene'; args = $Arguments } | ConvertTo-Json -Depth 4 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $request = @{ actor = 4321; key = 'Caption'; action = 'inspect' }
+            $request.revision = (& $call $request).data.current.revision
+            $request.action = 'select'
+            $request.file = 'replacement.cintitle'
+            $selection = & $call $request
+            $selection.ok | Should -BeTrue
+            $selection.data.selection.handle | Should -Not -BeNullOrEmpty
+            ($selection | ConvertTo-Json -Depth 6) | Should -Not -Match ([regex]::Escape($folder))
+            $request.action = 'preview'
+            $request.Remove('file')
+            $request.selection = $selection.data.selection.handle
+            $review = & $call $request
+            $review.ok | Should -BeTrue
+            (Get-TemplateStore).Map['Caption'].Path | Should -Be $previous
+            $request.action = 'apply'
+            $request.review = $review.data.preview.review
+            (& $call $request).ok | Should -BeTrue
+            $saved = Get-Content -LiteralPath $registry -Raw | ConvertFrom-Json
+            $saved.Caption.path | Should -Be $replacement
+            $saved.Caption.description | Should -Be 'Fixture caption'
+            @($saved.Caption.fields) | Should -Be @('Title')
+        }
+        finally {
+            $config.TemplateRegistryPath = $oldRegistry
+            Set-JsonProp $config.Settings 'TemplateBasePath' $oldRoot
+            Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $oldManagement
+        }
+    }
+
+    It 'keeps administrative disclosure behind current Telegram access and exposes personal notice settings' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $false }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        foreach ($operation in @('admin.announcements.list', 'admin.diagnostics.runtime-files', 'telegram.access.blocked', 'telegram.access.history', 'telegram.access.suspended-operators')) {
+            (& $call $operation @{ actor = 4321 }).error | Should -Be 'forbidden'
+        }
+        (& $call 'shift.notices' @{ actor = 4321; area = 'personal'; action = 'read' }).ok | Should -BeTrue
+        (& $call 'schedule.executions' @{ actor = 9876 }).error | Should -Be 'forbidden'
+        (& $call 'schedule.executions' @{ actor = 4321; kind = 'all'; result = 'all' }).ok | Should -BeTrue
+    }
+
+    It 'rechecks air permissions before loading sensitive scene data through the named pipe' {
+        Mock Test-Authorized { $false }
+        Mock Get-TitlerLayerStatus { throw 'A denied request must not probe a layer.' }
+        foreach ($operation in @('air.rollback', 'air.text', 'air.timer', 'air.maintenance', 'air.emergency-hide', 'air.layer-removal')) {
+            $line = @{ op = $operation; args = @{ actor = 4321; layer = 9; action = 'preview' } } | ConvertTo-Json -Depth 5 -Compress
+            $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $reply.error | Should -Be 'forbidden'
+        }
+        Should -Invoke Get-TitlerLayerStatus -Times 0 -Exactly
+    }
+
+    It 'refuses to review an occupied layer when Cinegy has no verifiable start for the repeat' {
+        Mock Test-Authorized { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Get-TemplatePresetRegistryRevision { 'fixture-revision' }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = 'gfx_7' } }
+        Mock Get-TemplateStore { @{ Map = @{ Guest = @{ Key = 'Guest'; Layer = 7; Path = 'guest.cintitle'; PresetRevision = 'fixture-revision'; Fields = @() } } } }
+        Mock Get-WebLayerStatus { @{ Success = $true; IsOnAir = $true; ActiveId = 'known-id'; ActiveXml = '' } }
+        Mock Invoke-ShowTemplateResult {}
+        $savedHistory = $script:LastShow
+        $script:LastShow = @{ ([long]4321) = @{ Key = 'Guest'; Variables = @{} } }
+        try {
+            $line = @{ op = 'air.rerun'; args = @{ actor = 4321; kind = 'repeat'; action = 'preview' } } | ConvertTo-Json -Depth 5 -Compress
+            $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $reply.error | Should -Be 'rerun_unverified'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
         }
         finally { $script:LastShow = $savedHistory }
     }
@@ -2735,6 +2901,94 @@ Describe 'Web channel: the pipe' {
             (& $sendImage $request).error | Should -Be 'bulletin_stale'
         }
         finally { $script:MojazLibrary = $oldLibrary }
+    }
+
+    It 'lists and saves an unreferenced scene picture through the real pipe without disclosing its path' {
+        $oldLibrary = $script:MojazLibrary
+        $fixture = New-Item -Path (Join-Path $TestDrive 'scene-image-pipe') -ItemType Directory
+        $script:PipeSceneImageScene = Join-Path $fixture.FullName 'Example.cintitle'
+        $script:PipeSceneImageLibrary = Join-Path $fixture.FullName 'library.json'
+        [IO.File]::WriteAllText($script:PipeSceneImageScene, '<scene />')
+        $png = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQWQAAAAASUVORK5CYII=')
+        [IO.File]::WriteAllBytes((Join-Path $fixture.FullName 'logo.png'), $png)
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-MojazPlaybackTemplate { @{ Path = $script:PipeSceneImageScene } }
+        Mock Get-WebBulletinFields { @{ name = $script:MojazImageVariable; kind = 'media' } }
+        Mock Get-MojazLibraryFile { $script:PipeSceneImageLibrary }
+        Mock Add-AuditEntry {}
+        Mock Get-WebBulletinEditor { @{ id = $Bulletin.Id; revision = $Bulletin.Revision } }
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الاتصال').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title 'صف الاتصال').Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $request = @{ actor = 4321; id = $id; rowId = $bulletin.Rows[0].Id; revision = $bulletin.Revision }
+            $list = @{ op = 'bulletin.scene-images'; args = $request + @{ action = 'list' } } | ConvertTo-Json -Compress
+            $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $list
+            $reply | Should -Not -Match 'cintitle|scene-image-pipe'
+            $choices = $reply | ConvertFrom-Json
+            $choices.data.items[0].label | Should -Be 'logo.png'
+            $apply = @{ op = 'bulletin.scene-images'; args = $request + @{
+                    action = 'apply'; selection = $choices.data.selection; slot = 0
+                } } | ConvertTo-Json -Compress
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $apply | ConvertFrom-Json).ok | Should -BeTrue
+            $script:MojazLibrary.Bulletins[0].Rows[0].Image | Should -Be '.\logo.png'
+        }
+        finally { $script:MojazLibrary = $oldLibrary }
+    }
+
+    It 'routes reviewed after-urgent bookings and whole-bulletin deletion over the pipe without calling air' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Test-WebBulletinPlayoutAccess { $true }
+        Mock Test-MaintenanceWindowActive { $false }
+        Mock Get-MojazUrgentTemplate { @{ Key = 'Urgent'; Layer = 7 } }
+        Mock Get-MojazPlaybackTemplate { @{ Key = 'Mojaz'; Layer = 4; Path = 'fixture.cintitle' } }
+        Mock Get-MojazResolvedRunSnapshot { @{ Success = $true; Value = @{ Rows = $Bulletin.Rows } } }
+        Mock Read-MojazLayerStamp { 'active:bulletin-urgent-test' }
+        Mock Add-AuditEntry {}
+        Mock Get-MojazLibraryFile { Join-Path $TestDrive 'pipe-bulletin-management.json' }
+        Mock Get-MojazSchedulesFile { Join-Path $TestDrive 'pipe-bulletin-management-schedules.json' }
+        Mock Invoke-ShowTemplateResult { throw 'The real pipe fixture must not call air.' }
+        $oldBulletinLibrary = $script:MojazLibrary
+        $oldBulletinSchedules = $script:MojazSchedules
+        $oldBulletinPlayback = $script:MojazPlayback
+        $oldBulletinOnAir = $script:OnAir
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز الاتصال').Value
+            $id = $script:MojazLibrary.Bulletins[0].Id
+            $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $id -Title 'صف الاتصال').Value
+            $revision = $script:MojazLibrary.Bulletins[0].Revision
+            $script:MojazSchedules = @()
+            $script:MojazPlayback = $null
+            $script:OnAir = @{ 7 = @{ Key = 'Urgent'; ActiveId = 'bulletin-urgent-test'; ActiveIdConfirmed = $true; At = [datetime]::Now } }
+            $sendBulletin = {
+                param($op, $body)
+                $line = @{ op = $op; args = $body } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $queueReview = & $sendBulletin 'bulletin.afterUrgent' @{ actor = 4321; action = 'review'; id = $id; revision = $revision }
+            $queueReview.ok | Should -BeTrue
+            $queue = & $sendBulletin 'bulletin.afterUrgent' @{ actor = 4321; action = 'confirm'; review = $queueReview.data.review }
+            $queue.ok | Should -BeTrue
+            $script:MojazSchedules[0].Source | Should -Be 'web'
+            $deleteReview = & $sendBulletin 'bulletin.management' @{
+                actor = 4321; action = 'review'; id = $id; revision = $revision; operation = 'delete'
+            }
+            $deleteReview.data.pendingCount | Should -Be 1
+            $removed = & $sendBulletin 'bulletin.management' @{ actor = 4321; action = 'confirm'; review = $deleteReview.data.review }
+            $removed.ok | Should -BeTrue
+            $script:MojazSchedules.Count | Should -Be 0
+            $script:MojazLibrary.Bulletins.Count | Should -Be 0
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        }
+        finally {
+            $script:MojazLibrary = $oldBulletinLibrary
+            $script:MojazSchedules = $oldBulletinSchedules
+            $script:MojazPlayback = $oldBulletinPlayback
+            $script:OnAir = $oldBulletinOnAir
+        }
     }
 
     It 'shares bulletin appointments with Telegram and refuses revoked scheduled web operators' {

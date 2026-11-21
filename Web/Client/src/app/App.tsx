@@ -6,7 +6,13 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router'
 import { RequireAdmin, RequireSession } from '../layout/guards'
 import { Shell } from '../layout/Shell'
 import { AccountsPage } from '../pages/accounts/AccountsPage'
+import { AnnouncementsPage } from '../pages/admin/AnnouncementsPage'
+import { ShiftNoticesPage } from '../pages/notices/ShiftNoticesPage'
+import { WorkSummaryPage } from '../pages/history/WorkSummaryPage'
+import { ShiftHistoryPage } from '../pages/history/ShiftHistoryPage'
+import { AdminOverviewPage } from '../pages/admin/AdminOverviewPage'
 import { TelegramAccessPage } from '../pages/admin/TelegramAccessPage'
+import { ScheduleExecutionPage } from '../pages/schedule/ScheduleExecutionPage'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
 import { LoginPage } from '../pages/login/LoginPage'
 import { NewsroomPage } from '../pages/newsroom/NewsroomPage'
@@ -34,9 +40,15 @@ const router = createBrowserRouter([
       { path: 'air', element: <StatusPage /> },
       { path: 'live', element: <></> },
       { path: 'templates', element: <TemplatesPage /> },
+      { path: 'schedule/executions', element: <ScheduleExecutionPage /> },
       { path: 'schedule', element: <TemplateSchedulePage /> },
       { path: 'newsroom', element: <NewsroomPage /> },
       { path: 'sessions', element: <SessionsPage /> },
+      { path: 'notices', element: <ShiftNoticesPage /> },
+      { path: 'admin/announcements', element: <RequireAdmin><AnnouncementsPage /></RequireAdmin> },
+      { path: 'reports/work-summary', element: <WorkSummaryPage /> },
+      { path: 'history', element: <ShiftHistoryPage /> },
+      { path: 'admin/overview', element: <RequireAdmin><AdminOverviewPage /></RequireAdmin> },
       { path: 'telegram-access', element: <RequireAdmin><TelegramAccessPage /></RequireAdmin> },
       {
         path: 'accounts',

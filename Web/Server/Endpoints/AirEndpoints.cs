@@ -55,12 +55,14 @@ public static class AirEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         api.MapPost("/exit/{layer:int}", Exit)
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
@@ -184,7 +186,7 @@ public static class AirEndpoints
     {
         "forbidden" => ApiErrors.Of(403, reply.Error),
         "not_found" => ApiErrors.Of(404, reply.Error),
-        "preset_stale" or "preset_duplicate" => ApiErrors.Of(409, reply.Error),
+        "preset_stale" or "preset_duplicate" or "layer_review_required" => ApiErrors.Of(409, reply.Error),
         "preset_invalid" or "preset_invalid_name" or "preset_too_long" => ApiErrors.Of(400, reply.Error),
         "preset_save_failed" => ApiErrors.Of(503, reply.Error),
         "rehearsal_invalid" => ApiErrors.Of(400, reply.Error),

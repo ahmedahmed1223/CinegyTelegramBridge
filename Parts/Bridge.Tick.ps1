@@ -172,6 +172,8 @@ function Save-AutoHideQueue {
                     ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
                     ActiveIdConfirmed = [bool](Get-JsonProp $_ 'ActiveIdConfirmed')
                     SingleSceneOnly = [bool](Get-JsonProp $_ 'SingleSceneOnly')
+                    ExpectedDevicePath = [string](Get-JsonProp $_ 'ExpectedDevicePath')
+                    ExpectedLayerStartedAtTicks = [long](Get-JsonProp $_ 'ExpectedLayerStartedAtTicks')
                     Stage = [string](Get-JsonProp $_ 'Stage')
                     Token = [string](Get-JsonProp $_ 'Token')
                     ShowAt = [string](Get-JsonProp $_ 'ShowAt')
@@ -212,6 +214,8 @@ function Import-AutoHideQueue {
                     ActiveId    = [string](Get-JsonProp $raw 'ActiveId')
                     ActiveIdConfirmed = [bool](Get-JsonProp $raw 'ActiveIdConfirmed')
                     SingleSceneOnly = [bool](Get-JsonProp $raw 'SingleSceneOnly')
+                    ExpectedDevicePath = [string](Get-JsonProp $raw 'ExpectedDevicePath')
+                    ExpectedLayerStartedAtTicks = [long](Get-JsonProp $raw 'ExpectedLayerStartedAtTicks')
                     Stage = [string](Get-JsonProp $raw 'Stage')
                     Token = [string](Get-JsonProp $raw 'Token')
                     ShowAt = [string](Get-JsonProp $raw 'ShowAt')
@@ -252,10 +256,13 @@ function Set-AutoHideTimer {
         [string]$ActiveId = '',
         [bool]$ActiveIdConfirmed = $false,
         [datetimeoffset]$Deadline = [datetimeoffset]::MinValue,
-        [switch]$SingleSceneOnly
+        [switch]$SingleSceneOnly,
+        [string]$ExpectedDevicePath = '',
+        [long]$ExpectedLayerStartedAtTicks = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
-    if ($Seconds -le 0) { return $false }
+    if ($Seconds -le 0 -or [bool]$ExpectedDevicePath -ne ($ExpectedLayerStartedAtTicks -gt 0) -or
+        ($ExpectedDevicePath -and (-not $SingleSceneOnly -or -not $ActiveIdConfirmed -or -not $ActiveId))) { return $false }
     if ($Deadline -eq [datetimeoffset]::MinValue) { $Deadline = [datetimeoffset]::Now.AddSeconds($Seconds) }
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $key = if ($current) { [string](Get-JsonProp $current 'Key') } else { $TemplateKey }
@@ -283,6 +290,8 @@ function Set-AutoHideTimer {
             ActiveId    = $ActiveId
             ActiveIdConfirmed = $ActiveIdConfirmed
             SingleSceneOnly = [bool]$SingleSceneOnly
+            ExpectedDevicePath = $ExpectedDevicePath
+            ExpectedLayerStartedAtTicks = $ExpectedLayerStartedAtTicks
         }
     $script:AutoHideQueue.Add($timer)
     if (Save-AutoHideQueue) { return $true }
@@ -300,6 +309,9 @@ function Get-AutoHideTargetDecision {
     # The layer-wide HIDE can remove a second scene that status cannot see.
     if ((Get-JsonProp $Timer 'SingleSceneOnly') -and (Get-Setting 'SceneMode') -eq 'Multi') {
         return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.rehearsalMulti' $layer) }
+    }
+    if (-not (Test-WebAirTimerTarget -Timer $Timer -LiveStatus $LiveStatus)) {
+        return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.layerChanged' $layer) }
     }
     if (-not $script:OnAir.ContainsKey($layer)) {
         return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.layerNotOnAir' $layer) }
@@ -498,7 +510,14 @@ function Update-AutoHideQueue {
                 # of whoever armed it, minutes later, and a per-layer owner rule
                 # must not strand a graphic on air because the operator who set
                 # the timer may not hide that layer by hand.
-                if (-not (Invoke-HideLayer -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet -System)) {
+                $reviewedTarget = @{}
+                if (Get-JsonProp $item 'ExpectedDevicePath') {
+                    $reviewedTarget.ExpectedDevicePath = [string]$item.ExpectedDevicePath
+                    $reviewedTarget.ExpectedLayerStartedAtTicks = [long]$item.ExpectedLayerStartedAtTicks
+                    $reviewedTarget.ExpectedLayerStamp = "active:$(([string]$item.ActiveId).Trim().Trim('{', '}').ToLowerInvariant())"
+                    $reviewedTarget.ReviewedTimer = $true
+                }
+                if (-not (Invoke-HideLayer @reviewedTarget -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet -System)) {
                     throw 'Hide not confirmed'
                 }
             }

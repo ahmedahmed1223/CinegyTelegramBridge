@@ -256,16 +256,19 @@ function Get-BridgeRuntimeFiles {
 }
 
 function Get-RuntimeFileHealth {
-    <# Reads each state file and says whether it would survive a restart.
-       "absent" is not a fault: a bridge that never scheduled anything has no
-       schedule.json, and colouring that red would train the administrator to
-       ignore the screen. A corrupt file with a .bak beside it is recoverable
-       because Read-BridgeValidatedJson falls back to that backup on load. #>
-    param([Parameter(Mandatory)][object[]]$Files)
+    <#
+        "Absent" is normal for runtime features operators have never used.
+        "Recoverable" records the existence of a backup, without evaluating it.
+        The Web health page uses a bounded read to keep diagnostic work from
+        monopolizing the thread that also handles air-control operations.
+    #>
+    param([Parameter(Mandatory)][object[]]$Files, [ValidateRange(0, 16MB)][int]$MaxJsonBytes = 0)
     $records = foreach ($file in $Files) {
         $path = [string]$file.Path
         $exists = $path -and (Test-Path -LiteralPath $path -PathType Leaf)
         $valid = $false
+        $skipped = $false
+        $unreadable = $false
         $sizeKB = 0
         $sizeText = ''
         $modified = $null
@@ -276,7 +279,30 @@ function Get-RuntimeFileHealth {
                 $sizeText = if ($item.Length -lt 1KB) { (T 'hlth.bytes' $($item.Length)) } else { "$sizeKB KB" }
                 $modified = $item.LastWriteTime
             }
-            $raw = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            $raw = $null
+            if ($MaxJsonBytes -le 0) {
+                $raw = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            }
+            else {
+                $stream = $null
+                $reader = $null
+                try {
+                    # Hold the sampled file length stable while reading. Allow
+                    # an atomic replacement to proceed on the live filename.
+                    $share = [IO.FileShare]::Read -bor [IO.FileShare]::Delete
+                    $stream = [IO.FileStream]::new($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+                    if ($stream.Length -gt $MaxJsonBytes) { $skipped = $true }
+                    else {
+                        $reader = [IO.StreamReader]::new($stream)
+                        $raw = $reader.ReadToEnd()
+                    }
+                }
+                catch { $unreadable = $true }
+                finally {
+                    if ($reader) { $reader.Dispose() }
+                    elseif ($stream) { $stream.Dispose() }
+                }
+            }
             if (-not [string]::IsNullOrWhiteSpace($raw)) {
                 try { $null = $raw | ConvertFrom-Json -ErrorAction Stop; $valid = $true }
                 catch { $valid = $false }
@@ -284,6 +310,8 @@ function Get-RuntimeFileHealth {
         }
         $hasBackup = $path -and (Test-Path -LiteralPath "$path.bak" -PathType Leaf)
         $state = if (-not $exists) { 'absent' }
+        elseif ($skipped) { 'skipped' }
+        elseif ($unreadable) { 'unreadable' }
         elseif ($valid) { 'healthy' }
         elseif ($hasBackup) { 'recoverable' }
         else { 'broken' }

@@ -861,7 +861,8 @@ function Get-ScheduleLayerConflicts {
         [Parameter(Mandatory)][int]$Layer,
         [Parameter(Mandatory)][datetimeoffset]$ScheduledAt,
         [int]$WindowMinutes = 2,
-        [string]$ExcludeId = ''
+        [string]$ExcludeId = '',
+        [AllowEmptyCollection()][array]$MaterialItems = @()
     )
     if ($Layer -le 0) { return @() }
     $window = [math]::Max(0, $WindowMinutes)
@@ -875,7 +876,8 @@ function Get-ScheduleLayerConflicts {
             if ($store.Map.ContainsKey($entryKey)) { $entryLayer = [int]$store.Map[$entryKey].Layer }
         }
         if ($entryLayer -ne $Layer) { continue }
-        $distance = [math]::Abs((([datetimeoffset]$entry.ScheduledAt) - $ScheduledAt).TotalMinutes)
+        $effectiveAt = Resolve-ScheduleAnchorTime -ScheduleEntry $entry -Items $MaterialItems
+        $distance = [math]::Abs(($effectiveAt - $ScheduledAt).TotalMinutes)
         if ($distance -le $window) { Write-Output $entry }
     }
 }
@@ -1548,77 +1550,77 @@ function Get-AccessGrantConfirmKeyboard {
         ) }
 }
 
-function Get-AccessHistoryRows {
-    <#
-        Who asked for access, who decided, and when - newest first.
-
-        Built from two sources because neither is complete on its own. The
-        audit file carries every decision including the rejections, which
-        leave no other trace at all; the user profiles carry the approvals
-        made before decisions were recorded as data, and outlive log rotation.
-        A request approved today appears once, from the audit.
-
-        Waiting requests are included as their own state: an administrator
-        reviewing how requests were handled needs the ones that were not.
-    #>
-    param([int]$Days = 30)
+function Get-AccessHistoryData {
+    <# Newest decision per subject and outcome, plus legacy approvals.
+       Interactive Bot history also includes the pending queue. #>
+    param([int]$Days = 30, [switch]$DecisionsOnly)
     $rows = [System.Collections.Generic.List[object]]::new()
     $seen = @{}
+    $scan = Get-ReportRecords -From ((Get-Date).Date.AddDays(-$Days)) -EventName 'access'
 
-    foreach ($record in @((Get-ReportRecords -From ((Get-Date).Date.AddDays(-$Days)) -EventName 'access').Records |
-            Sort-Object -Property When -Descending)) {
+    foreach ($record in @($scan.Records | Sort-Object -Property When -Descending -Stable)) {
         $result = [string]$record.Result
-        if ($result -eq 'requested') { continue }   # the ask, paired below
+        # Requested, revoked and unblocked records are not decisions. Older
+        # audit writers may have used the same event name for authorization.
+        if ($result -cnotin 'approved', 'rejected') { continue }
         $subject = [string]$record.Target
         $key = "$subject/$result"
         if ($seen.ContainsKey($key)) { continue }
         $seen[$key] = $true
         $rows.Add([pscustomobject]@{
-                UserId      = $subject
-                Name        = [string]$record.Values
-                State       = $(if ($result -eq 'approved') { 'approved' } else { 'rejected' })
-                DecidedAt   = $record.When
-                DecidedBy   = [string](Get-AuditOperatorName -UserId ([string]$record.UserId))
+                UserId = $subject
+                State = $result
+                DecidedAt = $record.When
+                DecidedByUserId = [string]$record.UserId
+                Name = if (-not $DecisionsOnly) { [string]$record.Values } else { '' }
+                DecidedBy = if (-not $DecisionsOnly) { [string](Get-AuditOperatorName -UserId ([string]$record.UserId)) } else { '' }
                 RequestedAt = $null
             })
     }
 
-    # The approvals that predate the structured records, from the roster.
     foreach ($id in @($script:UserProfiles.Keys)) {
         if ($seen.ContainsKey("$id/approved")) { continue }
-        # $entry, not $profile: $profile is a PowerShell automatic variable,
-        # and assigning to it has effects nobody reading this would expect.
         $entry = $script:UserProfiles[$id]
-        $addedAt = [string](Get-JsonProp $entry 'AddedAt')
-        if ([string]::IsNullOrWhiteSpace($addedAt)) { continue }
         $added = [datetime]::MinValue
-        if (-not [datetime]::TryParse($addedAt, [ref]$added)) { continue }
-        $askedAt = [string](Get-JsonProp $entry 'RequestedAt')
+        if (-not [datetime]::TryParse([string](Get-JsonProp $entry 'AddedAt'), [ref]$added)) { continue }
         $asked = [datetime]::MinValue
+        $decider = [string](Get-JsonProp $entry 'AddedByUserId')
         $rows.Add([pscustomobject]@{
-                UserId      = [string]$id
-                Name        = [string](Get-UserDisplayName -UserId ([long]$id))
-                State       = 'approved'
-                DecidedAt   = $added
-                DecidedBy   = [string](Get-AuditOperatorName -UserId ([string](Get-JsonProp $entry 'AddedByUserId')))
-                RequestedAt = $(if ([datetime]::TryParse($askedAt, [ref]$asked)) { $asked } else { $null })
+                UserId = [string]$id
+                State = 'approved'
+                DecidedAt = $added
+                DecidedByUserId = $decider
+                Name = if (-not $DecisionsOnly) { [string](Get-UserDisplayName -UserId ([long]$id)) } else { '' }
+                DecidedBy = if (-not $DecisionsOnly) { [string](Get-AuditOperatorName -UserId $decider) } else { '' }
+                RequestedAt = if ([datetime]::TryParse([string](Get-JsonProp $entry 'RequestedAt'), [ref]$asked)) { $asked } else { $null }
             })
     }
 
-    # Still waiting, which is a state and not an absence.
-    foreach ($id in @($script:PendingApprovals.Keys)) {
-        $record = $script:PendingApprovals[$id]
-        $rows.Add([pscustomobject]@{
-                UserId      = [string]$id
-                Name        = [string](Get-JsonProp $record 'Name')
-                State       = 'pending'
-                DecidedAt   = $null
-                DecidedBy   = ''
-                RequestedAt = (Get-JsonProp $record 'RequestedAt')
-            })
+    if (-not $DecisionsOnly) {
+        foreach ($id in @($script:PendingApprovals.Keys)) {
+            $record = $script:PendingApprovals[$id]
+            $rows.Add([pscustomobject]@{
+                    UserId = [string]$id
+                    State = 'pending'
+                    DecidedAt = $null
+                    DecidedByUserId = ''
+                    Name = [string](Get-JsonProp $record 'Name')
+                    DecidedBy = ''
+                    RequestedAt = Get-JsonProp $record 'RequestedAt'
+                })
+        }
     }
 
-    return @($rows | Sort-Object -Property @{ Expression = { if ($_.DecidedAt) { $_.DecidedAt } else { Get-Date } } } -Descending)
+    $now = Get-Date
+    return @{
+        Rows = @($rows | Sort-Object -Property @{ Expression = { if ($_.DecidedAt) { $_.DecidedAt } else { $now } } } -Descending -Stable)
+        Truncated = [bool]$scan.Truncated
+    }
+}
+
+function Get-AccessHistoryRows {
+    param([int]$Days = 30)
+    return (Get-AccessHistoryData -Days $Days).Rows
 }
 
 function Get-AccessHistoryStateLabel {
@@ -2500,7 +2502,7 @@ function Get-TemplateNotifyMap {
     foreach ($rule in (([string](Get-Setting 'TemplateNotifyRules')) -split ',')) {
         $parts = @($rule -split '=', 2 | ForEach-Object { $_.Trim() })
         $name = [string]$parts[0]
-        if (-not $name) { continue }
+        if (-not $name -or $map.Contains($name)) { continue }
         $scope = if ($parts.Count -gt 1) { ([string]$parts[1]).ToLowerInvariant() } else { 'all' }
         if ($scope -notin @('none', 'admins', 'all')) { $scope = 'all' }
         $map[$name] = $scope
@@ -2508,24 +2510,46 @@ function Get-TemplateNotifyMap {
     return $map
 }
 
-function Set-TemplateNotifyRule {
-    <#
-        Sets one template's scope and writes the setting back.
+function Test-TemplateNotifyRuleKey {
+    param([AllowEmptyString()][string]$Key)
 
-        Rules for templates the registry no longer has are kept: a template
-        renamed this morning and restored this afternoon should not have lost
-        the newsroom's decision about it in between, and dropping a line
-        nobody asked to drop is how a settings screen loses trust.
-    #>
-    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][ValidateSet('none', 'admins', 'all')][string]$Scope)
-    $map = Get-TemplateNotifyMap
-    $map[$Key] = $Scope
-    $rules = @(foreach ($name in $map.Keys) {
-            if ([string]$map[$name] -eq 'none') { continue }   # silence is the default; no need to store it
-            "$name=$($map[$name])"
-        })
-    Set-Setting -Name 'TemplateNotifyRules' -Value ($rules -join ', ')
-    return $Scope
+    return [bool]($Key -and $Key -ceq $Key.Trim() -and $Key -notmatch '[,=\r\n]')
+}
+
+function Set-TemplateNotifyRule {
+    <# Rules for removed templates stay in the shared setting so restoring
+       a registry entry also restores its newsroom audience. #>
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][ValidateSet('none', 'admins', 'all')][string]$Scope,
+        [switch]$IncludeSaveStatus
+    )
+    $previousScope = Get-TemplateNotifyScope -Key $Key
+    $saved = Test-TemplateNotifyRuleKey -Key $Key
+    if ($saved -and $previousScope -ne $Scope) {
+        $map = Get-TemplateNotifyMap
+        $map[$Key] = $Scope
+        $rules = @(foreach ($name in $map.Keys) {
+                if ([string]$map[$name] -ne 'none') {
+                    "$name=$($map[$name])"
+                }
+            })
+        $settings = Get-JsonProp $config 'Settings'
+        $previousRules = Get-JsonProp $settings 'TemplateNotifyRules'
+        $hadRules = if ($settings -is [System.Collections.IDictionary]) { $settings.Contains('TemplateNotifyRules') }
+        else { $settings -and $null -ne $settings.PSObject.Properties['TemplateNotifyRules'] }
+        $script:LastConfigSaveFailed = $false
+        Set-Setting -Name 'TemplateNotifyRules' -Value ($rules -join ', ')
+        $saved = -not $script:LastConfigSaveFailed
+        if (-not $saved) {
+            $settings = Get-JsonProp $config 'Settings'
+            if ($hadRules) { Set-JsonProp -Object $settings -Name 'TemplateNotifyRules' -Value $previousRules }
+            else { Remove-JsonProp -Object $settings -Name 'TemplateNotifyRules' }
+        }
+    }
+    $effective = if ($saved) { $Scope } else { $previousScope }
+    if ($IncludeSaveStatus) { return @{ Saved = $saved; Scope = $effective } }
+    return $effective
 }
 
 function Get-TemplateNotifyKeyboard {

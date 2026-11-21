@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.123.0'; Items = @('Review the exact layer before Hide or Exit, select an existing picture for a bulletin row, and review Telegram access history and temporary operator suspension.') },
+                @{ Version = '8.122.0'; Items = @('Review a replacement scene file, clear or delete a bulletin, or queue its playback after an urgent. The web also offers work summaries, reviewed maintenance, eligible emergency hide and live timers.') },
+                @{ Version = '8.121.0'; Items = @('Review Telegram revocation or unblocking, queue announcements, manage air notices and check scheduled execution and runtime file health from the web.') },
+                @{ Version = '8.120.0'; Items = @('Edit, copy and cancel template appointments from the web, or anchor a one-time appointment to a material. Review rollback and eligible live text corrections from Air Status. Check bridge health and edit supported settings in Administration. Open Shift History to find recent operations and faults.') },
                 @{ Version = '8.119.0'; Items = @('Review and book a template using the station clock, manage Telegram access requests and roles, or review your last show or attempt from the web.') },
                 @{ Version = '8.118.0'; Items = @('Administrators can review edits and deletions of existing templates from the web library. The bridge rejects stale reviews and protects templates on air and scheduled templates from deletion.') },
                 @{ Version = '8.117.0'; Items = @('From the web library, administrators can browse the configured scenes folder, enter a template and its fields, and review it before saving to the catalogue shared with the bot.') },
@@ -360,6 +364,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.123.0'; Items = @('راجع المشهد قبل إخفائه أو الخروج من حلقته. اختر صورة موجودة للموجز، وراجع قرارات الوصول والتعطيل المؤقت للمشغّلين.') },
+                @{ Version = '8.122.0'; Items = @('راجع تبديل ملف المشهد، وامسح صفوف الموجز أو احذفه أو ضع عرضه بعد العاجل. تابع ملخص العمل، وراجع الصيانة والإخفاء الطارئ ومؤقّت العرض من الويب.') },
+                @{ Version = '8.121.0'; Items = @('راجع سحب الوصول وفك الحظر، وجدول التعاميم. اضبط تنبيهات الهواء وتابع تنفيذ المواعيد وصحة ملفات التشغيل من الويب.') },
+                @{ Version = '8.120.0'; Items = @('عدّل مواعيد القوالب أو انسخها أو ألغها، واربط الموعد المفرد ببداية مادة. راجع التراجع أو تصحيح نص عرض مؤهّل من لوحة الهواء. تابع صحة الجسر وعدّل الإعدادات المدعومة من إدارة النظام. تابع عملياتك والأعطال الأخيرة من سجل المناوبة.') },
                 @{ Version = '8.119.0'; Items = @('يمكنك مراجعة عرض قالب وجدولته بتوقيت المحطة، وإعادة تجهيز آخر عرض أو محاولة. ويمكن للمشرف مراجعة طلبات الوصول، وللمالك تغيير أدوار مستخدمي البوت من الويب.') },
                 @{ Version = '8.118.0'; Items = @('يستطيع المشرف مراجعة تعديل القالب المسجّل أو حذفه من مكتبة الويب. يرفض الجسر المراجعات القديمة ويحمي القوالب المعروضة أو المجدولة عند الحذف.') },
                 @{ Version = '8.117.0'; Items = @('يستطيع المشرف تصفّح مجلد المشاهد من مكتبة الويب واختيار ملف وإدخال حقوله وطبقته، ثم مراجعتها قبل حفظ القالب في السجل المشترك مع البوت.') },

@@ -453,3 +453,32 @@ Describe 'A board as a table' {
         $table.cells[2][3].text | Should -Be '🚫'
     }
 }
+
+Describe 'Web peer checks for channel-wide live text' {
+    It 'requires the same exact engine event, start and device before trusting a loaded peer scene' {
+        Mock Resolve-AirGfxDevice { @{ StatusPath = 'gfx_7' } }
+        Mock Get-CinegyStatusStartTicks { [long](Get-JsonProp $Status 'FixtureTicks') }
+        Mock Test-WebRollbackLocalScene { $true }
+        $savedShows = $script:LastSuccessfulLayerShows
+        $shown = @{
+            Key = 'Peer'; ActiveId = 'peer-item'; ActiveIdConfirmed = $true
+            TemplatePath = 'peer.cintitle'; SceneWriteTicks = 7L
+        }
+        $script:LastSuccessfulLayerShows = @{ 7 = $shown }
+        $store = @{ Map = @{ Peer = @{ Path = 'peer.cintitle' } } }
+        $stamp = Get-MojazRunSceneStamp -Playback $shown
+        $read = @{ FixtureTicks = 10L }
+        try {
+            Get-ProgrammeLoadedSceneKey -Layer 7 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $read | Should -Be ''
+            $shown.EventIdentityConfirmed = $true
+            $shown.DevicePath = 'gfx_7'
+            $shown.EngineStartedAtTicks = 9L
+            Get-ProgrammeLoadedSceneKey -Layer 7 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $read | Should -Be ''
+            $shown.EngineStartedAtTicks = 10L
+            Get-ProgrammeLoadedSceneKey -Layer 7 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $read | Should -Be 'Peer'
+            $shown.DevicePath = 'gfx_3'
+            Get-ProgrammeLoadedSceneKey -Layer 7 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $read | Should -Be ''
+        }
+        finally { $script:LastSuccessfulLayerShows = $savedShows }
+    }
+}

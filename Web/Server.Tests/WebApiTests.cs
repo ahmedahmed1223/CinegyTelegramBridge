@@ -404,6 +404,24 @@ public sealed class AccountTests : IDisposable
     }
 
     [Fact]
+    public async Task Layer_removal_previews_and_confirms_under_the_signed_in_actor()
+    {
+        var actor = WebApp.Operator;
+        var op = await _app.SignedInAsync("desk", actor);
+        var preview = await op.PostAsync("/api/air/layers/5/removal", new AirLayerRemovalCommand("preview", "hide"));
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var plan = await preview.Content.ReadFromJsonAsync<AirLayerRemovalResult>();
+        Assert.Equal("test_l3d", plan?.Preview?.TemplateKey);
+        var stale = await op.PostAsync("/api/air/layers/5/removal", new AirLayerRemovalCommand("apply", "hide", "expired"));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var applied = await op.PostAsync("/api/air/layers/5/removal",
+            new AirLayerRemovalCommand("apply", "hide", plan?.Preview?.Review));
+        Assert.Equal(HttpStatusCode.OK, applied.StatusCode);
+        Assert.True((await applied.Content.ReadFromJsonAsync<AirLayerRemovalResult>())?.Sent == true);
+        Assert.Contains(_app.Bridge.Calls, c => c.Op == "air.layer-removal" && c.Args.Contains($"\"actor\":{actor}"));
+    }
+
+    [Fact]
     public async Task Newsroom_passes_the_signed_in_identity_and_requested_page_to_the_bridge()
     {
         var anonymous = await _app.BrowserAsync();

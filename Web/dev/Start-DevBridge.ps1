@@ -43,6 +43,7 @@ $fixtureScenes = Join-Path $runtime 'scene-library'
 $fixtureStudio = Join-Path $fixtureScenes 'studio'
 New-Item -ItemType Directory -Path $fixtureStudio -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $fixtureStudio 'new-programme.cintitle') -Value '<Scene />'
+Set-Content -LiteralPath (Join-Path $fixtureStudio 'replacement-programme.cintitle') -Value '<Scene />'
 Set-JsonProp $config.Settings 'TemplateBasePath' $fixtureScenes
 Set-JsonProp $config.Settings 'TemplateTestLayer' 9
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
@@ -253,7 +254,10 @@ function Set-AutoHideTimer {
 }
 
 function Invoke-HideLayer {
-    param([int]$Layer, [string]$ExpectedLayerStamp, [long]$ExpectedLayerStartedAtTicks)
+    param([int]$Layer, [string]$ExpectedLayerStamp, [long]$ExpectedLayerStartedAtTicks,
+        [string]$ExpectedDevicePath, [long]$Deadline = 0)
+    if (($ExpectedDevicePath -and (Resolve-AirGfxDevice -Layer $Layer).StatusPath -cne $ExpectedDevicePath) -or
+        ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline)) { return $false }
     $observed = Get-TitlerLayerStatus -Layer $Layer
     if (($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status $observed) -cne $ExpectedLayerStamp) -or
         ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $observed))) { return $false }
@@ -264,11 +268,9 @@ function Invoke-HideLayer {
 }
 
 function Invoke-ExitLayer {
-    param([int]$Layer, [string]$ExpectedLayerStamp)
-    if ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status (Get-TitlerLayerStatus -Layer $Layer)) -cne $ExpectedLayerStamp) {
-        return $false
-    }
-    return Invoke-HideLayer -Layer $Layer
+    param([int]$Layer, [string]$ExpectedLayerStamp, [long]$ExpectedLayerStartedAtTicks,
+        [string]$ExpectedDevicePath, [long]$Deadline = 0)
+    return Invoke-HideLayer @PSBoundParameters
 }
 
 function Send-PostboxValues {

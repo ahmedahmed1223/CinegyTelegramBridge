@@ -590,7 +590,12 @@ function Invoke-HideLayer {
         [switch]$MaintenanceOverride,
         [switch]$System,
         [string]$ExpectedLayerStamp = '',
-        [long]$ExpectedLayerStartedAtTicks = 0
+        [long]$ExpectedLayerStartedAtTicks = 0,
+        [switch]$CaptureRollback,
+        [switch]$ReviewedRollback,
+        [switch]$ReviewedTimer,
+        [string]$ExpectedDevicePath = '',
+        [long]$Deadline = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
@@ -623,8 +628,26 @@ function Invoke-HideLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
+    $rollbackDeviceArguments = @{}
+    if ($ReviewedRollback) {
+        $device = Get-WebRollbackDirectDevice -Layer $Layer -ExpectedDevicePath $ExpectedDevicePath
+        if (-not $device -or -not $ExpectedLayerStamp -or $ExpectedLayerStamp -ceq 'empty' -or
+            $ExpectedLayerStartedAtTicks -le 0 -or $Deadline -le 0 -or $CaptureRollback) { return $false }
+        $rollbackDeviceArguments.Device = $device
+    }
+    elseif ($ExpectedDevicePath) {
+        if ($ExpectedDevicePath -cnotmatch '^gfx_([a-z0-9_]{1,32})$') { return $false }
+        $device = $Matches[1]
+        if (-not $ExpectedLayerStamp -or $ExpectedLayerStamp -ceq 'empty' -or $ExpectedLayerStartedAtTicks -le 0 -or
+            [string](Get-Setting 'SceneMode') -ne 'Single' -or
+            (Resolve-AirGfxDevice -Layer $Layer).StatusPath -cne $ExpectedDevicePath -or
+            ($ReviewedTimer -and -not (Get-WebRollbackDirectDevice -Layer $Layer -ExpectedDevicePath $ExpectedDevicePath))) { return $false }
+        $rollbackDeviceArguments.Device = $device
+    }
+    elseif ($ReviewedTimer) { return $false }
+    $verified = $null
     if ($ExpectedLayerStamp) {
-        $verified = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        $verified = Get-TitlerLayerStatus @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
         if ((Get-CinegyLayerReviewStamp -Status $verified) -cne $ExpectedLayerStamp -or
             ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $verified))) {
@@ -632,26 +655,57 @@ function Invoke-HideLayer {
             return $false
         }
     }
+    $rollbackSnapshot = $null
+    $previousWasUntimed = $false
+    $captureWebProof = (Get-Setting 'WebAccessEnabled') -eq $true
+    if ((-not $Quiet -or $CaptureRollback) -and (Get-Setting 'EnableSafeRollback')) {
+        $preHideStatus = if ($verified) { $verified } else {
+            Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+                -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        }
+        $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preHideStatus
+        $previousWasUntimed = $captureWebProof -and
+            (Test-WebRollbackUntimedSnapshot -Layer $Layer -Snapshot $rollbackSnapshot -Status $preHideStatus)
+    }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $false }
     # A bulletin walking this layer has to stop with it, or it keeps writing
     # rows into a scene nobody can see.
     # After the gate, not before it. A blocked HIDE sends nothing to Cinegy,
     # so a bulletin stopped here was stopped for an operation that never
     # happened - recorded as finished, ticker recalled, scene possibly still
     # walking rows on air.
-    Stop-MojazForLayer -Layer $Layer | Out-Null
-    # The breaking-news board walks a scene the same way, and stops the same way.
-    Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
-    $rollbackSnapshot = $null
-    if (-not $Quiet -and (Get-Setting 'EnableSafeRollback')) {
-        $preHideStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-        $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preHideStatus
+    if (-not $ExpectedDevicePath) {
+        Stop-MojazForLayer -Layer $Layer | Out-Null
+        # The breaking-news board walks a scene the same way, and stops the same way.
+        Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
     }
     Start-AirOperation -Operation $operation -Action HIDE -Layer $Layer -UserId $UserId
-    $result = Hide-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
+    $airTimeout = Get-AirTimeout
+    if ($ExpectedDevicePath) {
+        $finalStatus = Get-TitlerLayerStatus @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if ((Get-CinegyLayerReviewStamp -Status $finalStatus) -cne $ExpectedLayerStamp -or
+            (Get-CinegyStatusStartTicks -Status $finalStatus) -ne $ExpectedLayerStartedAtTicks -or
+            (Resolve-AirGfxDevice -Layer $Layer).StatusPath -cne $ExpectedDevicePath -or
+            [string](Get-Setting 'SceneMode') -ne 'Single' -or
+            (($ReviewedRollback -or $ReviewedTimer) -and -not (Get-WebRollbackDirectDevice -Layer $Layer -ExpectedDevicePath $ExpectedDevicePath)) -or
+            ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline)) { return $false }
+    }
+    $result = Hide-TitlerTemplate @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec $airTimeout
     if ($result.Success) {
+        # Reviewed emergency targets can include managed graphics. Settle them
+        # after a successful transport so a stale review never stops their runs.
+        if ($ExpectedDevicePath -and -not $ReviewedRollback -and -not $ReviewedTimer) {
+            Stop-MojazForLayer -Layer $Layer | Out-Null
+            Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
+        }
         Stop-GraphicRecoveryForLayer -Layer $Layer
-        if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
+        if ($rollbackSnapshot) {
+            Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId
+            if ($captureWebProof) {
+                Initialize-WebRollbackProof -Layer $Layer -CurrentKey $rollbackSnapshot.Key -RestoreUntimed:$previousWasUntimed
+            }
+        }
         Sync-LayerAfterOperatorAction -Layer $Layer -Reason 'after-hide' | Out-Null
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor hid layer $Layer"
@@ -689,8 +743,9 @@ function Invoke-HideLayer {
 }
 
 function Invoke-ExitLayer {
-    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$System,
-        [string]$ExpectedLayerStamp = '')
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
+        [switch]$System, [switch]$Quiet, [string]$ExpectedLayerStamp = '',
+        [long]$ExpectedLayerStartedAtTicks = 0, [string]$ExpectedDevicePath = '', [long]$Deadline = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action EXIT -Layer $Layer -UserId $UserId
     # Read before anything runs: the operation clears the layer, and the
@@ -704,7 +759,7 @@ function Invoke-ExitLayer {
     if (-not $System) {
         $access = Test-TemplateAccess -Key $outgoingKey -Layer $Layer -ChatId $ChatId -UserId $UserId
         if (-not $access.Allowed) {
-            Send-TelegramMessage -ChatId $ChatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+            if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text "⛔ $($access.Reason)" -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
             Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$access.Reason)
             return $false
         }
@@ -713,21 +768,28 @@ function Invoke-ExitLayer {
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText 'maintenance mode'
         return $false
     }
+    $deviceArguments = @{}
+    if ($ExpectedDevicePath) {
+        if ($ExpectedDevicePath -cnotmatch '^gfx_([a-z0-9_]{1,32})$' -or
+            -not $ExpectedLayerStamp -or $ExpectedLayerStamp -ceq 'empty' -or $ExpectedLayerStartedAtTicks -le 0 -or
+            $Deadline -le 0 -or [string](Get-Setting 'SceneMode') -ne 'Single' -or
+            (Resolve-AirGfxDevice -Layer $Layer).StatusPath -cne $ExpectedDevicePath) { return $false }
+        $deviceArguments.Device = $Matches[1]
+    }
     $preExitStatus = $null
     if ($ExpectedLayerStamp) {
-        $preExitStatus = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        $preExitStatus = Get-TitlerLayerStatus @deviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-        if ((Get-CinegyLayerReviewStamp -Status $preExitStatus) -cne $ExpectedLayerStamp) {
+        if ((Get-CinegyLayerReviewStamp -Status $preExitStatus) -cne $ExpectedLayerStamp -or
+            ($ExpectedLayerStartedAtTicks -gt 0 -and (Get-CinegyStatusStartTicks -Status $preExitStatus) -ne $ExpectedLayerStartedAtTicks)) {
             Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'reviewed scene changed'
             return $false
         }
     }
-    # A bulletin walking this layer has to stop with it, or it keeps writing
-    # rows into a scene nobody can see. After the gate, for the same reason as
-    # the hide above.
-    Stop-MojazForLayer -Layer $Layer | Out-Null
-    # The breaking-news board walks a scene the same way, and stops the same way.
-    Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
+    if (-not $ExpectedDevicePath) {
+        Stop-MojazForLayer -Layer $Layer | Out-Null
+        Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
+    }
     $rollbackSnapshot = $null
     if (Get-Setting 'EnableSafeRollback') {
         if (-not $preExitStatus) {
@@ -737,8 +799,23 @@ function Invoke-ExitLayer {
         $rollbackSnapshot = Get-CorrelatedLayerSnapshot -Layer $Layer -LiveStatus $preExitStatus
     }
     Start-AirOperation -Operation $operation -Action EXIT -Layer $Layer -UserId $UserId
-    $result = Exit-TitlerScene -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-AirTimeout)
+    $airTimeout = Get-AirTimeout
+    if ($ExpectedDevicePath) {
+        $finalStatus = Get-TitlerLayerStatus @deviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        if ((Get-CinegyLayerReviewStamp -Status $finalStatus) -cne $ExpectedLayerStamp -or
+            (Get-CinegyStatusStartTicks -Status $finalStatus) -ne $ExpectedLayerStartedAtTicks -or
+            (Resolve-AirGfxDevice -Layer $Layer).StatusPath -cne $ExpectedDevicePath -or
+            [string](Get-Setting 'SceneMode') -ne 'Single' -or
+            [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $false }
+    }
+    $result = Exit-TitlerScene @deviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec $airTimeout
     if ($result.Success) {
+        # Reviewed EXIT settles the engine only after Cinegy accepts the command.
+        if ($ExpectedDevicePath) {
+            Stop-MojazForLayer -Layer $Layer | Out-Null
+            Stop-UrgentBoardForLayer -Layer $Layer | Out-Null
+        }
         if ($rollbackSnapshot) { Set-RollbackCandidate -Layer $Layer -RestoreSnapshot $rollbackSnapshot -ExpectedState hidden -ActorUserId $UserId }
         Stop-GraphicRecoveryForLayer -Layer $Layer
         # Dropped directly rather than reconciled: Cinegy keeps the playlist
@@ -751,11 +828,11 @@ function Invoke-ExitLayer {
         Add-AuditEntry (T 'flow.exitAudit' $Layer $actor)
         Send-TemplateAirNotice -Key $outgoingKey -Layer $Layer -ActorChatId $ChatId -ActorName $actor `
             -Copy $outgoingCopy -Action hide -OnAirSince (Get-JsonProp $outgoing 'At') | Out-Null
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.exited' $Layer) -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId)
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.exited' $Layer) -ReplyMarkup (Get-AfterLayerRemovalKeyboard -Layer $Layer -ChatId $ChatId -UserId $UserId) }
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.exitFailed' $Layer $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        if (-not $Quiet) { Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.exitFailed' $Layer $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId) }
         Write-AirOperationResult -OperationId $operation.Id -Action EXIT -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -Target $outgoingKey -Values $outgoingCopy -ErrorText ([string]$result.Error)
     }
     return $result.Success

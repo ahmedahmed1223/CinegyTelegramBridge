@@ -507,43 +507,30 @@ function Get-MojazConfirmKeyboard {
 }
 
 function Remove-MojazBulletinAndSchedules {
-    <#
-        Deleting a bulletin takes its appointments with it, or takes nothing.
-
-        Two files have to move together. The schedules go first: if that write
-        fails nothing has happened yet, and if the library write then fails the
-        schedules are put back - so no appointment is ever left pointing at a
-        bulletin that no longer exists.
-    #>
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    $bulletin = Get-MojazSelected -ChatId $ChatId
-    if (-not $bulletin) { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId; return $false }
-    $bulletinId = [string]$bulletin.Id
-    if (Test-MojazOnAir -Bulletin $bulletin) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.onAirStopFirst')
-        Show-MojazScreen -ChatId $ChatId -UserId $UserId
+
+    $id = Get-MojazSelectedId -ChatId $ChatId
+    $plan = Get-MojazManagementPlan -BulletinId $id -Operation delete
+    if (-not $plan.ok) {
+        if ($plan.error -eq 'bulletin_on_air') {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.onAirStopFirst')
+            Show-MojazScreen -ChatId $ChatId -UserId $UserId
+        }
+        else { Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId }
         return $false
     }
-    $removal = Remove-MojazBulletin -Library $script:MojazLibrary -BulletinId $bulletinId
-    if (-not $removal.Success) {
-        Send-TelegramMessage -ChatId $ChatId -Text "❌ $([string]$removal.Error)"
+    $result = Invoke-MojazManagementCommit -BulletinId $id -Operation delete -Fingerprint $plan.fingerprint -UserId $UserId
+    if (-not $result.ok) {
+        $text = switch ($result.error) {
+            'bulletin_schedule_save_failed' { T 'mojaz.cancelSchedulesFailed' }
+            'bulletin_schedule_rollback_failed' { T 'reply.bulletinRollbackFailed' }
+            default { T 'mojaz.deleteFailed' }
+        }
+        Send-TelegramMessage -ChatId $ChatId -Text $text
         return $false
     }
-    $previousSchedules = @($script:MojazSchedules)
-    $keptSchedules = @($previousSchedules | Where-Object { [string](Get-JsonProp $_ 'BulletinId') -ne $bulletinId })
-    $cancelled = $previousSchedules.Count - $keptSchedules.Count
-    if ($cancelled -gt 0 -and -not (Save-MojazSchedules -Schedules $keptSchedules)) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.cancelSchedulesFailed')
-        return $false
-    }
-    if (-not (Save-MojazLibrary -Library $removal.Value)) {
-        if ($cancelled -gt 0) { Save-MojazSchedules -Schedules $previousSchedules | Out-Null }
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.deleteFailed')
-        return $false
-    }
-    $note = if ($cancelled -gt 0) { (T 'mjz.withSlots' $cancelled) } else { '' }
-    Add-AuditEntry (T 'mjz.deletedAudit' $([string]$bulletin.Name) $note $(Format-UserAuditActor -UserId $UserId))
-    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.deleted' $([string]$bulletin.Name) $note)
+    $note = if ($plan.summary.pendingCount -gt 0) { T 'mjz.withSlots' $plan.summary.pendingCount } else { '' }
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.deleted' $plan.summary.name $note)
     Show-MojazLibraryScreen -ChatId $ChatId -UserId $UserId
     return $true
 }
@@ -872,10 +859,13 @@ function Move-MojazRow {
 
 function Clear-MojazRows {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
-    $result = Clear-MojazBulletinRows -Library $script:MojazLibrary -BulletinId (Get-MojazSelectedId -ChatId $ChatId) -UserId $UserId
-    if (Invoke-MojazEdit -Result $result -ChatId $ChatId) {
-        Add-AuditEntry (T 'mjz.clearedAudit' $(Format-UserAuditActor -UserId $UserId))
+    $id = Get-MojazSelectedId -ChatId $ChatId
+    $plan = Get-MojazManagementPlan -BulletinId $id -Operation clear
+    if ($plan.ok) {
+        $result = Invoke-MojazManagementCommit -BulletinId $id -Operation clear -Fingerprint $plan.fingerprint -UserId $UserId
+        if (-not $result.ok) { Send-TelegramMessage -ChatId $ChatId -Text (T 'mjz.saveFailed') }
     }
+    elseif ($plan.error -eq 'bulletin_on_air') { Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.onAirStopFirst') }
     Show-MojazScreen -ChatId $ChatId -UserId $UserId
 }
 

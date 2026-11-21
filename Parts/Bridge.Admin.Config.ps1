@@ -82,7 +82,7 @@ function ConvertTo-ImportedSettingValue {
 }
 
 function Set-ImportedSettings {
-    param([Parameter(Mandatory)][object[]]$Changes)
+    param([Parameter(Mandatory)][object[]]$Changes, [long]$Deadline = 0)
     $original = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
     $updated = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
     foreach ($change in $Changes) {
@@ -93,7 +93,8 @@ function Set-ImportedSettings {
     # than a return value. Clear a stale failure from an earlier operation
     # before attempting this transaction.
     $script:LastConfigSaveFailed = $false
-    Save-Config
+    if ($Deadline -gt 0) { Save-Config -Deadline $Deadline }
+    else { Save-Config }
     if ($script:LastConfigSaveFailed) {
         $config | Add-Member -NotePropertyName 'Settings' -NotePropertyValue $original -Force
         return $false

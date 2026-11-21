@@ -42,6 +42,12 @@ public sealed class FakeBridge : IBridgeChannel
             "air.show" => Reply("null"),
             "air.hide" => Reply("null"),
             "air.exit" => Reply("null"),
+            "air.layer-removal" => a.GetProperty("action").GetString() switch
+            {
+                "preview" => Reply("""{"preview":{"review":"remove-fixture","layer":5,"operation":"hide","templateKey":"test_l3d","expiresAt":1893456000000}}"""),
+                "apply" when a.GetProperty("review").GetString() == "remove-fixture" => Reply("""{"sent":true}"""),
+                _ => new BridgeReply(false, default, "layer_removal_stale")
+            },
             "content.list" => Reply("""{"items":[{"title":"خبر منشور","state":"published","rows":null}],"page":1,"pageCount":2,"total":21}"""),
             "ticker.txt" => TickerTxt(a),
             "media.capture" => Capture(a),
@@ -54,6 +60,27 @@ public sealed class FakeBridge : IBridgeChannel
             "bulletin.preview-image" => BulletinPreviewImage is { } picture
                 ? Reply(JsonSerializer.Serialize(new { root = picture.Root, path = picture.Path }))
                 : new BridgeReply(false, default, "not_found"),
+            "bulletin.scene-images" => a.GetProperty("action").GetString() switch
+            {
+                "list" => Reply("""{"selection":"scene-image-ticket","page":0,"pageCount":1,"truncated":false,"items":[{"slot":0,"label":"logo.png","bytes":532}]}"""),
+                "apply" when a.GetProperty("selection").GetString() == "scene-image-ticket" =>
+                    Reply("""{"id":"morning","name":"Morning","design":"bulletin","revision":4,"fields":[],"rows":[],"pageCount":1}"""),
+                _ => new BridgeReply(false, default, "bulletin_scene_image_stale")
+            },
+            "bulletin.management" => a.GetProperty("action").GetString() switch
+            {
+                "review" => Reply("""{"id":"morning","revision":3,"operation":"delete","name":"Morning","rowCount":4,"pendingCount":2,"referenceCount":3,"review":"management-ticket"}"""),
+                "confirm" when a.GetProperty("review").GetString() == "management-ticket" =>
+                    Reply("""{"id":"morning","operation":"delete","revision":null}"""),
+                _ => new BridgeReply(false, default, "bulletin_stale")
+            },
+            "bulletin.afterUrgent" => a.GetProperty("action").GetString() switch
+            {
+                "review" => Reply("""{"id":"morning","revision":3,"name":"Morning","rowCount":4,"urgentLayer":7,"review":"queue-ticket"}"""),
+                "confirm" when a.GetProperty("review").GetString() == "queue-ticket" =>
+                    Reply("""{"id":"morning","alreadyQueued":false}"""),
+                _ => new BridgeReply(false, default, "bulletin_urgent_gone")
+            },
             "relay.control" => a.GetProperty("action").GetString() == "status"
                 ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"outcome":""}""")
                 : Reply("""{"state":"starting","revision":"next","enabled":true,"configured":true,"canStart":false,"canStop":true,"outcome":"starting"}"""),

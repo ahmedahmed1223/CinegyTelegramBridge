@@ -122,6 +122,8 @@ const messages: Record<string, string> = {
   bulletin_image_invalid: 'تعذّر تطبيق خيار الصورة. اختر صورة من صف في هذا الموجز أو استخدم صورة القالب.',
   bulletin_photo_invalid: 'تعذّر قراءة الملف كصورة. اختر صورة سليمة وأعد المحاولة.',
   bulletin_photo_unavailable: 'رفع الصور غير متاح لهذا التصميم.',
+  bulletin_scene_images_unavailable: 'لا يمكن اختيار صور من مجلد المشهد لهذا التصميم.',
+  bulletin_scene_image_stale: 'تغيّرت الصورة المختارة أو انتهت صلاحية القائمة. حدّث الصور ثم اختر من جديد.',
   bulletin_photo_size: 'حجم الصورة يتجاوز 10 ميغابايت.',
   bulletin_photo_busy: 'تجري معالجة صورة أخرى. انتظر قليلًا ثم أعد المحاولة.',
   bulletin_photo_timeout: 'استغرقت معالجة الصورة وقتًا طويلًا. جرّب صورة أصغر.',

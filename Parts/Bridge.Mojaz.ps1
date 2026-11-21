@@ -71,7 +71,7 @@ function Save-MojazLibrary {
 }
 
 function Save-MojazSchedules {
-    param([Parameter(Mandatory)]$Schedules)
+    param([Parameter(Mandatory)][AllowEmptyCollection()]$Schedules)
     $payload = [pscustomobject]@{ SchemaVersion = 1; Schedules = @($Schedules) }
     if (-not (Write-BridgeValidatedJson -Path (Get-MojazSchedulesFile) -Json ($payload | ConvertTo-Json -Depth 12))) {
         Write-BridgeLog 'Could not write the Mojaz schedules.' 'WARN'

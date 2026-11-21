@@ -15,6 +15,22 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.123.0
+
+Web Hide and Exit support a reviewed scene, device and start time. Bulletin editors can select an approved existing image from the scene directory. Telegram administration shows previous access decisions and supports reviewed temporary operator suspension and restoration.
+
+## Version 8.122.0
+
+The web catalogue can review a compatible scene-file replacement while preserving a template's registered fields and presets. Bulletin operators can review clearing rows or deleting a bulletin, and queue playback after an active urgent. Web operators can read their work totals, with station totals available to administrators. The status and live views add reviewed maintenance, eligible emergency hide and live timer controls that follow existing bridge policies.
+
+## Version 8.121.0
+
+Administrators can review Telegram operator revocations, unblock chats and manage queued announcements. Operators with Telegram delivery can manage their air notification preference. Administrators can review station-wide notification audiences and two Telegram presentation settings. The schedule execution history and runtime file diagnostics expose bounded status summaries.
+
+## Version 8.120.0
+
+The web schedule now supports reviewed editing, copying, cancellation and one-time appointments anchored to a scheduled material. Operators can review a short-lived rollback when enabled and correct verified text fields on an eligible live scene. The administration dashboard reports service health and lets administrators review and save selected access-request and pending-input settings. The shift history provides a filtered operator view and an administrator audit view with bounded CSV export.
+
 ## Version 8.119.0
 
 The newsroom website adds reviewed template scheduling using the station clock and the shared Telegram schedule, administrator review of access requests, owner-only Telegram role changes, and reviewed repeat or retry of an operator's last show.

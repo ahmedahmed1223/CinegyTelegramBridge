@@ -8,6 +8,7 @@ import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { isAdmin, useSession } from '../../api/session'
 import { PageHeader } from '../../components/PageHeader'
+import { AirOperationsMenu } from '../status/AirOperationsMenu'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { formatClock, formatDateTime } from '../../lib/time'
 import classes from './LivePage.module.css'
@@ -211,7 +212,8 @@ export function LivePage({ active, watching, onWatchingChange }: {
   const url = player.data?.url
   return (
     <Stack gap="xl" className={active ? classes.page : classes.floatingPage}>
-      {active && <PageHeader title="البث المباشر" description="مشاهدة خرج القناة ومراقبة الإشارة." />}
+      {active && <PageHeader title="البث المباشر" description="مشاهدة خرج القناة ومراقبة الإشارة."
+        actions={<AirOperationsMenu disabled={!live.bridgeOnline} />} />}
       <div className={active ? classes.workspace : undefined}>
         <Stack gap="md" className={classes.monitorColumn}>
           <Paper radius="lg" className={classes.monitor} data-floating-video={active ? undefined : nativePip ? 'native' : 'inline'}>

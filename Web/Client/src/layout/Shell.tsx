@@ -1,6 +1,6 @@
 import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBroadcast, IconCalendarTime, IconDevices, IconDeviceTv, IconLayoutGrid, IconNews, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
+import { IconBell, IconBroadcast, IconSpeakerphone, IconCalendarTime, IconDevices, IconDeviceTv, IconHistory, IconLayoutGrid, IconNews, IconSettings, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
 import { useState } from 'react'
 import { isAdmin, useSession } from '../api/session'
@@ -21,12 +21,16 @@ const navigation = [
   { to: '/schedule', label: 'جدولة القوالب', description: 'مواعيد العرض القادمة', icon: IconCalendarTime, admin: false },
   { to: '/sessions', label: 'الجلسات', description: 'المتصفحات المسجّلة', icon: IconDevices, admin: false },
   { to: '/accounts', label: 'الحسابات', description: 'دخول الويب بكلمة مرور', icon: IconUsersGroup, admin: true },
+  { to: '/history', label: 'سجل العمليات', description: 'العمليات والأعطال خلال المناوبة', icon: IconHistory },
+  { to: '/notices', label: 'التنبيهات', description: 'تنبيهات العرض والإخفاء', icon: IconBell },
+  { to: '/admin/announcements', label: 'التعاميم', description: 'إعداد الإعلانات ومتابعة تسليمها', icon: IconSpeakerphone, admin: true },
+  { to: '/admin/overview', label: 'إدارة النظام', description: 'صحة الجسر والإعدادات', icon: IconSettings, admin: true },
   { to: '/telegram-access', label: 'صلاحيات البوت', description: 'طلبات الوصول وأدوار Telegram', icon: IconUserCheck, admin: true },
 ]
 
 const sections = [
-  { label: 'التشغيل', links: navigation.slice(0, 5) },
-  { label: 'إدارة الوصول', links: navigation.slice(5) },
+  { label: 'التشغيل', links: navigation.slice(0, 7) },
+  { label: 'الإدارة', links: navigation.slice(7) },
 ]
 
 export function Shell() {

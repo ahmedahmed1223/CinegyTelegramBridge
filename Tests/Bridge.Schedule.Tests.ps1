@@ -311,7 +311,26 @@ Describe 'Reliable schedule store and executor' {
         Stop-ScheduledShowEvent -Id $scheduleEntry.Id | Should -BeTrue
 
         $scheduleEntry.Status | Should -Be 'cancelled'
+        [object]::ReferenceEquals($script:ScheduleEvents[0], $scheduleEntry) | Should -BeTrue
+        $saved = @(Get-Content -LiteralPath $script:scheduleFile -Raw | ConvertFrom-Json)
+        $saved[0].Status | Should -Be 'cancelled'
         @(Get-UpcomingScheduleEvents).Count | Should -Be 0
+    }
+
+    It 'keeps the original pending entry and saved queue when cancelling cannot be persisted' {
+        $scheduleEntry = New-ScheduledShowEvent -TemplateKey 'urgent' -Values @{} -ScheduledAt ([datetimeoffset]::Now.AddHours(1)) -Recurrence once -ChatId 1 -UserId 2
+        Remove-JsonProp -Object $scheduleEntry -Name 'MutationId'
+        $script:ScheduleEvents.Add($scheduleEntry)
+        Save-ScheduleEvents | Should -BeTrue
+        $saved = Get-Content -LiteralPath $script:scheduleFile -Raw
+        Mock Move-Item { throw 'disk failure' } -ModuleName BridgeStorage
+
+        Stop-ScheduledShowEvent -Id $scheduleEntry.Id | Should -BeFalse
+
+        [object]::ReferenceEquals($script:ScheduleEvents[0], $scheduleEntry) | Should -BeTrue
+        $scheduleEntry.Status | Should -Be 'pending'
+        $scheduleEntry.ContainsKey('MutationId') | Should -BeFalse
+        (Get-Content -LiteralPath $script:scheduleFile -Raw) | Should -BeExactly $saved
     }
 
     It 'does not approve a schedule mutation when atomic replacement fails' {

@@ -1,12 +1,9 @@
 import { ActionIcon, Badge, Button, Group, Menu, Progress, Stack, Text, Tooltip } from '@mantine/core'
-import { modals } from '@mantine/modals'
-import { notifications } from '@mantine/notifications'
-import { IconClockHour4, IconDotsVertical, IconEyeOff, IconLogout, IconUser } from '@tabler/icons-react'
-import { exitLayer, hideLayer } from '../../api/air'
+import { IconClockHour4, IconDotsVertical, IconEyeOff, IconLogout, IconPencil, IconUser } from '@tabler/icons-react'
 import type { LayerStatus } from '../../api/client'
-import { messageFor } from '../../api/messages'
 import { formatClock } from '../../lib/time'
 import classes from './LayerTile.module.css'
+import type { RemovalOperation } from './LayerRemovalModal'
 
 const sourceLabel: Record<string, string> = {
   cinegy: 'من خارج الجسر',
@@ -18,54 +15,19 @@ const sourceLabel: Record<string, string> = {
  * only while the reading is fresh: a clock ticking over an unconfirmed
  * reading would claim more than the bridge knows.
  */
-export function LayerTile({ layer, now, fresh }: { layer: LayerStatus; now: number; fresh: boolean }) {
+export function LayerTile({ layer, now, fresh, onEditText, onTimer, onRemove }: {
+  layer: LayerStatus
+  now: number
+  fresh: boolean
+  onEditText: () => void
+  onTimer: () => void
+  onRemove: (operation: RemovalOperation) => void
+}) {
   const onAirFor = fresh && layer.at > 0 ? now - layer.at : null
   const hidesIn = fresh && layer.hideAt > now ? layer.hideAt - now : null
   const span = layer.hideAt > layer.at && layer.at > 0 ? layer.hideAt - layer.at : 0
   const elapsed = span > 0 && hidesIn !== null ? ((span - hidesIn) / span) * 100 : 0
   const origin = sourceLabel[layer.source]
-
-  const confirmHide = () => {
-    modals.openConfirmModal({
-      title: 'إخفاء الطبقة من الهواء',
-      children: (
-        <Text size="sm">
-          هل أنت متأكد من إخفاء <strong>{layer.name || layer.key || `الطبقة ${layer.layer}`}</strong> فوراً؟
-        </Text>
-      ),
-      labels: { confirm: 'إخفاء الآن', cancel: 'تراجع' },
-      confirmProps: { color: 'red' },
-      onConfirm: async () => {
-        try {
-          await hideLayer(layer.layer)
-          notifications.show({ title: 'أُرسل أمر الإخفاء', message: `تابع حالة الطبقة ${layer.layer} في لوحة الهواء`, color: 'teal' })
-        } catch (err: any) {
-          notifications.show({ title: 'فشل الإخفاء', message: messageFor(err.message), color: 'red' })
-        }
-      },
-    })
-  }
-
-  const confirmExit = () => {
-    modals.openConfirmModal({
-      title: 'خروج من حلقة المشهد (EXIT)',
-      children: (
-        <Text size="sm">
-          هل تريد إرسال أمر الخروج (EXIT) للطبقة <strong>{layer.name || layer.key || layer.layer}</strong>؟
-        </Text>
-      ),
-      labels: { confirm: 'خروج', cancel: 'تراجع' },
-      confirmProps: { color: 'orange' },
-      onConfirm: async () => {
-        try {
-          await exitLayer(layer.layer)
-          notifications.show({ title: 'تم أمر الخروج', message: `أُرسل أمر الخروج للطبقة ${layer.layer}`, color: 'teal' })
-        } catch (err: any) {
-          notifications.show({ title: 'فشل الخروج', message: messageFor(err.message), color: 'red' })
-        }
-      },
-    })
-  }
 
   return (
     <div className={classes.tile} data-fresh={fresh}>
@@ -90,10 +52,16 @@ export function LayerTile({ layer, now, fresh }: { layer: LayerStatus; now: numb
                 </ActionIcon>
               </Menu.Target>
               <Menu.Dropdown>
-                <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} onClick={confirmHide}>
+                <Menu.Item disabled={!fresh} leftSection={<IconClockHour4 size={14} />} onClick={onTimer}>
+                  مؤقّت الإخفاء
+                </Menu.Item>
+                <Menu.Item disabled={!fresh} leftSection={<IconPencil size={14} />} onClick={onEditText}>
+                  تعديل النص المباشر
+                </Menu.Item>
+                <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} disabled={!fresh} onClick={() => onRemove('hide')}>
                   إخفاء (HIDE)
                 </Menu.Item>
-                <Menu.Item color="orange" leftSection={<IconLogout size={14} />} onClick={confirmExit}>
+                <Menu.Item color="orange" leftSection={<IconLogout size={14} />} disabled={!fresh} onClick={() => onRemove('exit')}>
                   خروج (EXIT)
                 </Menu.Item>
               </Menu.Dropdown>
@@ -125,7 +93,7 @@ export function LayerTile({ layer, now, fresh }: { layer: LayerStatus; now: numb
               {origin ?? (layer.by || 'الجسر')}
             </Text>
           </Group>
-          <Button size="compact-xs" color="red" variant="light" leftSection={<IconEyeOff size={12} />} onClick={confirmHide}>
+          <Button size="compact-xs" color="red" variant="light" leftSection={<IconEyeOff size={12} />} disabled={!fresh} onClick={() => onRemove('hide')}>
             إخفاء
           </Button>
         </Group>

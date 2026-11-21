@@ -700,6 +700,7 @@ function Get-ReportRecords {
         [void][long]::TryParse((Get-AuditRecordField $record 'durationMs'), [ref]$duration)
         [pscustomobject]@{
             When   = $at
+            Event  = (Get-AuditRecordField $record 'event')
             Action = (Get-AuditRecordField $record 'action')
             Result = (Get-AuditRecordField $record 'result')
             Target = (Get-AuditRecordField $record 'target')

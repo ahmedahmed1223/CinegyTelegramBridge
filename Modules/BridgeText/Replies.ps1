@@ -66,6 +66,9 @@ function Add-BridgeTextReplies {
     $catalogue['reply.sendUrgentTitle'] = @{ ar = 'أرسل عنوان العاجل'; en = 'Send the urgent items title' }
     $catalogue['reply.noReadyUrgent'] = @{ ar = 'ℹ️ لا يوجد عاجل جاهز للتشغيل.'; en = 'ℹ️ There is no urgent item ready to play.' }
     $catalogue['reply.noRunToStop'] = @{ ar = 'ℹ️ لا يوجد تشغيل جدول يمكن إيقافه الآن.'; en = 'ℹ️ There is no board run to stop right now.' }
+    $catalogue['reply.bulletinRowsAlreadyEmpty'] = @{ ar = 'الموجز خالٍ من الصفوف.'; en = 'This bulletin has no rows.' }
+    $catalogue['reply.clearKeepsBulletinSlots'] = @{ ar = ' المواعيد القائمة ({0}) تبقى محفوظة.'; en = ' Existing appointments ({0}) will remain booked.' }
+    $catalogue['reply.bulletinRollbackFailed'] = @{ ar = 'تعذّر حذف الموجز واستعادة ملف مواعيده. راجع سجل المحطة.'; en = 'The bulletin could not be deleted and its appointments could not be restored on disk. Check the station log.' }
     $catalogue['reply.confirmClearRows'] = @{ ar = '⚠️ مسح كل صفوف هذا الموجز؟ لا يؤثر على ما هو على الهواء الآن.'; en = '⚠️ Clear every row of this bulletin? It does not affect what is on air now.' }
     $catalogue['reply.yesClearRows'] = @{ ar = '🧹 نعم، امسح الصفوف'; en = '🧹 Yes, clear the rows' }
     $catalogue['reply.yesDeleteBulletin'] = @{ ar = '🗑 نعم، احذف الموجز'; en = '🗑 Yes, delete the bulletin' }
@@ -138,6 +141,7 @@ function Add-BridgeTextReplies {
     $catalogue['reply.alertExpiredOrOther'] = @{ ar = 'انتهى التنبيه أو أنه مخصص لمستخدم آخر.'; en = 'The alert has expired, or it belongs to somebody else.' }
     $catalogue['reply.reminderSet'] = @{ ar = '⏰ تم ضبط التذكير: سيصلك تنبيه جديد بعد 5 دقائق إن بقي القالب ظاهرًا.'; en = '⏰ Reminder set: you will be told again in five minutes if the template is still showing.' }
     $catalogue['reply.reminderSaveFailed'] = @{ ar = '⚠️ تعذّر حفظ التذكير. حاول مجددًا.'; en = '⚠️ Could not save the reminder. Try again.' }
+    $catalogue['reply.noticeSaveFailed'] = @{ ar = 'تعذّر حفظ إعداد التنبيه.'; en = 'Could not save the notice preference.' }
     $catalogue['reply.handledRecorded'] = @{ ar = '✅ تم تسجيل المعالجة وإلغاء تنبيه المتابعة.'; en = '✅ Recorded as handled, and the follow-up was cancelled.' }
     $catalogue['reply.handledSaveFailed'] = @{ ar = '⚠️ تعذّر حفظ إلغاء المتابعة؛ ما زال التنبيه قائمًا. حاول مجددًا.'; en = '⚠️ Could not save that; the alert still stands. Try again.' }
     $catalogue['reply.noUpdatableFields'] = @{ ar = 'لا توجد حقول قابلة للتحديث في هذا القالب.'; en = 'This template has no fields that can be updated.' }

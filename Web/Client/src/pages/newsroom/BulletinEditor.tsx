@@ -4,15 +4,18 @@ import {
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconFileUpload, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconFileUpload, IconPhoto, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { BulletinPaste } from './RowPaste'
 import { BulletinPhotoDialog } from './BulletinPhotoDialog'
+import { BulletinSceneImageDialog } from './BulletinSceneImageDialog'
 import { BulletinPreview } from './BulletinPreview'
 import { BulletinRunStatus } from './BulletinPlayback'
 import { BulletinSchedule } from './BulletinSchedule'
+import { BulletinManagementDialog, type BulletinManagementOperation } from './BulletinManagementDialog'
+import { BulletinAfterUrgentButton } from './BulletinAfterUrgentButton'
 import { BulletinTimingForm } from './BulletinTimingForm'
 import { useBulletinPlayback } from './bulletinPlaybackApi'
 import classes from './NewsroomPage.module.css'
@@ -98,7 +101,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [editingTiming, setEditingTiming] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
+  const [management, setManagement] = useState<BulletinManagementOperation | null>(null)
   const [photoRow, setPhotoRow] = useState<{ rowId: string | null; revision: number; field: string; title: string } | null>(null)
+  const [sceneImageRow, setSceneImageRow] = useState<{ rowId: string; revision: number } | null>(null)
   const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
   const queryClient = useQueryClient()
@@ -124,6 +129,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     setPasting(false)
     setEditingTiming(false)
     setPhotoRow(null)
+    setSceneImageRow(null)
     setDesignChange(null)
     onSaved(value)
   }
@@ -133,7 +139,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const onAir = playback.data ? Boolean(playback.data.run) : bulletin?.onAir === true
   const sceneUnconfirmed = playback.data?.run?.state === 'scene_unconfirmed'
   const busy = edit.isPending || query.isFetching
-  const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || pasting || editingTiming || previewing || scheduling
+  const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || !!sceneImageRow || pasting || editingTiming || previewing || scheduling || !!management
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
   const photoFields = fields.filter((field) => bulletin?.photoFields?.includes(field.name) ??
@@ -234,11 +240,30 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 onClick={() => { edit.reset(); setSavedNote(''); setEditingTiming(true) }}>التوقيت</Button>}
               <Button variant="default" leftSection={<IconEdit size={16} />} onClick={() => setNameMode('rename')} disabled={busy || editing}>إعادة تسمية</Button>
               <Button variant="default" leftSection={<IconCopy size={16} />} onClick={() => setNameMode('copy')} disabled={busy || editing}>نسخ</Button>
+              <Button variant="subtle" color="red" disabled={busy || editing || onAir || sceneUnconfirmed}
+                onClick={() => { setSavedNote(''); setManagement('delete') }}>حذف الموجز</Button>
             </Group>
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
           {previewing && <BulletinPreview bulletin={bulletin} playback={playback.data} onClose={() => setPreviewing(false)} />}
           {scheduling && <BulletinSchedule bulletin={bulletin} onClose={() => setScheduling(false)} />}
+          {playback.data?.canQueueAfterUrgent && <BulletinAfterUrgentButton bulletin={bulletin} disabled={busy || editing}
+            onQueued={() => { void queryClient.invalidateQueries({ queryKey: ['bulletin-schedule', id] }) }} />}
+          {management && <BulletinManagementDialog bulletin={bulletin} operation={management} onClose={() => setManagement(null)}
+            onSaved={(result) => {
+              setManagement(null)
+              void queryClient.invalidateQueries({ queryKey: ['newsroom', 'bulletins'] })
+              if (result.operation === 'delete') {
+                onBack()
+                queryClient.removeQueries({ queryKey: ['bulletin-editor', id] })
+              } else {
+                setPage(0)
+                setSavedNote('أُفرغت صفوف الموجز.')
+                void queryClient.invalidateQueries({ queryKey: ['bulletin-editor', id] })
+              }
+            }} />}
+          {sceneImageRow && <BulletinSceneImageDialog id={id} {...sceneImageRow} onClose={() => setSceneImageRow(null)}
+            onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
           {photoRow && <BulletinPhotoDialog id={id} {...photoRow} onClose={() => setPhotoRow(null)}
             onSaved={(value) => {
               acceptSaved(value)
@@ -273,6 +298,8 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           <Group justify="space-between">
             <Title order={4}>صفوف الموجز</Title>
             <Group gap="xs">
+              <Button variant="subtle" color="red" disabled={busy || editing || onAir || sceneUnconfirmed || bulletin.total === 0}
+                onClick={() => { setSavedNote(''); setManagement('clear') }}>إفراغ الصفوف</Button>
               {textFields.length > 0 && <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={busy || editing}
                 onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>}
               {photoFields.length > 0 && <Menu position="bottom-end">
@@ -342,14 +369,20 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                                 : `رفع صورة إلى ${field.label} للصف ${number.format(rank)}`
                               return (
                                 <Table.Td key={field.name}>
-                                  {canUpload ? <Group gap={6} wrap="nowrap">
+                                  {canUpload || canonical ? <Group gap={6} wrap="nowrap">
                                     {cell(row, field)}
-                                    <Tooltip label={title}>
+                                    {canonical && <Tooltip label="اختيار صورة من مجلد المشهد">
+                                      <ActionIcon variant="subtle" aria-label={`اختيار صورة من مجلد المشهد للصف ${number.format(rank)}`} disabled={busy || editing}
+                                        onClick={() => { setSavedNote(''); setSceneImageRow({ rowId: row.id, revision: bulletin.revision }) }}>
+                                        <IconPhoto size={16} />
+                                      </ActionIcon>
+                                    </Tooltip>}
+                                    {canUpload && <Tooltip label={title}>
                                       <ActionIcon variant="subtle" aria-label={title} disabled={busy || editing}
                                         onClick={() => { setSavedNote(''); setPhotoRow({ rowId: row.id, field: field.name, title, revision: bulletin.revision }) }}>
                                         <IconFileUpload size={16} />
                                       </ActionIcon>
-                                    </Tooltip>
+                                    </Tooltip>}
                                   </Group> : cell(row, field)}
                                 </Table.Td>
                               )

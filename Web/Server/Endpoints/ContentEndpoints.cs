@@ -103,6 +103,7 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(503);
         var bulletin = app.MapGroup("/api/content/bulletins").WithTags("Content").RequireAuthorization();
         BulletinPhotoEndpoints.Map(bulletin);
+        BulletinSceneImageEndpoints.Map(bulletin);
         ProgrammeBoardEndpoints.Map(app);
         bulletin.MapGet("/playback", (string id, IBridgeChannel channel, HttpContext http) =>
                 ControlBulletinPlayback(new("status", id), channel, http))

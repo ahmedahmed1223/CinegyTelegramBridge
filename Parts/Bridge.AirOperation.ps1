@@ -598,9 +598,10 @@ function Get-VerifiedCinegyShowIdentity {
 
     $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
     $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
+    $startedAt = Get-CinegyStatusStartedAtUtc -Status $status
     if ($RequireEventIdentity) {
         if ($expectedCurrentId -and $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) {
-            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id' }
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id'; StartedAt=$startedAt }
         }
         return (& $failed (T 'air.noConfirmAfterShow'))
     }
@@ -619,7 +620,7 @@ function Get-VerifiedCinegyShowIdentity {
               $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) -or
              (-not [string]::IsNullOrWhiteSpace($expectedPreviousId) -and
               -not $normalizedId.Equals($expectedPreviousId, [StringComparison]::OrdinalIgnoreCase)))) {
-            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation' }
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation'; StartedAt=$startedAt }
         }
         return (& $failed (T 'air.noMatchableName'))
     }
@@ -634,7 +635,7 @@ function Get-VerifiedCinegyShowIdentity {
     if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
         return (& $failed (T 'air.sceneNameMismatch' $Key))
     }
-    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name' }
+    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name'; StartedAt=$startedAt }
 }
 
 function Get-TemplateFieldTypeOverrides {
@@ -681,6 +682,7 @@ function Invoke-ShowTemplateResult {
         [int]$AutoHideSeconds = 0,
         [switch]$RequireEmptyLayer,
         [string]$ExpectedLayerStamp = '',
+        [long]$ExpectedLayerStartedAtTicks = 0,
         [int]$ExpectedLayer = 0,
         [string]$ExpectedTemplatePath = '',
         [switch]$RequireEventIdentity,
@@ -738,7 +740,8 @@ function Invoke-ShowTemplateResult {
         return [pscustomobject]@{ Success = $false; Error = (T 'air.layerCheckFailed') }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
-    if ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status $layerStatus) -cne $ExpectedLayerStamp) {
+    if (($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status $layerStatus) -cne $ExpectedLayerStamp) -or
+        ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $layerStatus))) {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -ErrorText 'reviewed scene changed'
         return [pscustomobject]@{ Success = $false; Error = (T 'tick.sceneChanged') }
     }
@@ -875,7 +878,8 @@ function Invoke-ShowTemplateResult {
             $script:ShowFlowTimings[$timingKey] = @{ Count = ($count + 1); TotalSeconds = ($total + $seconds) }
         }
         $reminderMinutes = [int](Get-JsonProp $template 'ReminderMinutes')
-        $activeId = [string]$result.EventId
+        $eventId = [string]$result.EventId
+        $activeId = $eventId
         $activeIdConfirmed = $false
         # Capture Cinegy's engine id for every successful SHOW. The old bridge
         # kept the client EventId, which happened to work until Cinegy returned
@@ -885,6 +889,11 @@ function Invoke-ShowTemplateResult {
             -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
             -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity -AllowAnonymousActiveId
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
+        Set-JsonProp $result 'EngineStartedAtUtc' (Get-JsonProp $identity 'StartedAt')
+        # Callers that later remove a specific job need exact event proof.
+        # Leave the general engine correlation intact for timers and monitoring.
+        Set-JsonProp $result 'EventIdentityConfirmed' ($activeIdConfirmed -and $eventId -and
+            $eventId.Trim().Trim('{', '}') -eq $activeId.Trim().Trim('{', '}'))
         if ($previousSnapshot) {
             Set-RollbackCandidate -Layer ([int]$template.Layer) -RestoreSnapshot $previousSnapshot `
                 -ExpectedState replace -ExpectedActiveId $activeId -ActorUserId $UserId

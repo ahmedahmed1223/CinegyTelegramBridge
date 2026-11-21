@@ -3508,6 +3508,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/boards/air": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProgrammeBoardAirRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProgrammeBoardAirResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/content/boards/{id}": {
         parameters: {
             query?: never;
@@ -3977,6 +4061,39 @@ export interface components {
             username: string;
             password: string;
         };
+        ProgrammeBoardAirField: {
+            label: string;
+            value: string;
+        };
+        ProgrammeBoardAirPreview: {
+            review: string;
+            /** Format: int32 */
+            layer: number;
+            template: string;
+            fields: components["schemas"]["ProgrammeBoardAirField"][];
+            replacesGraphic: boolean;
+            graphicName: string | null;
+            /** Format: int32 */
+            autoHideSeconds: number | null;
+            /** @default false */
+            stopsUrgent: boolean;
+            /** @default false */
+            stopsBulletin: boolean;
+        } | null;
+        ProgrammeBoardAirRequest: {
+            action: string;
+            id: string;
+            /** Format: int32 */
+            revision: number;
+            rowId: string;
+            review: string | null;
+        };
+        ProgrammeBoardAirResult: {
+            preview: components["schemas"]["ProgrammeBoardAirPreview"];
+            liveRowId: string | null;
+            /** @default false */
+            autoHideFailed: boolean;
+        };
         ProgrammeBoardEditor: {
             id: string;
             name: string;
@@ -3996,6 +4113,7 @@ export interface components {
             pageCount: number;
             /** Format: int32 */
             maxFieldLength: number;
+            liveRowId: string | null;
         };
         ProgrammeBoardEditRequest: {
             action: string;

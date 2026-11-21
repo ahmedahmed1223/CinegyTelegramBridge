@@ -27,6 +27,10 @@ internal static class ProgrammeBoardEndpoints
             .Produces<ProgrammeBoardPasteResult>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        boards.MapPost("/air", Air)
+            .Produces<ProgrammeBoardAirResult>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
         boards.MapDelete("/{id}", Delete)
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
@@ -78,6 +82,17 @@ internal static class ProgrammeBoardEndpoints
         return reply.Ok ? TypedResults.NoContent() : Error(reply.Error);
     }
 
+    private static async Task<IResult> Air(ProgrammeBoardAirRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("board.air", new
+        {
+            actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.RowId, request.Review
+        }, http.RequestAborted);
+        if (!reply.Ok) return Error(reply.Error);
+        http.Response.Headers.CacheControl = "no-store";
+        return TypedResults.Ok(reply.Data.Deserialize<ProgrammeBoardAirResult>(JsonDefaults.Options));
+    }
+
     private static IResult Error(string code) => code switch
     {
         "forbidden" => ApiErrors.Of(403, code),
@@ -86,8 +101,8 @@ internal static class ProgrammeBoardEndpoints
             or "board_invalid_text" or "board_invalid_template" or "board_invalid_name" or "board_name_too_long" or "board_invalid_role"
             or "board_paste_invalid"
             => ApiErrors.Of(400, code),
-        "board_stale" or "board_at_edge" or "board_capacity" => ApiErrors.Of(409, code),
-        "board_save_failed" or "board_delete_failed" => ApiErrors.Of(503, code),
+        "board_stale" or "board_at_edge" or "board_capacity" or "board_air_refused" or "board_air_multiple" => ApiErrors.Of(409, code),
+        "board_save_failed" or "board_delete_failed" or "board_air_unverified" => ApiErrors.Of(503, code),
         _ => ApiErrors.BridgeUnavailable(),
     };
 }

@@ -25,6 +25,7 @@ $script:WebTickerSheetRequest = $null
 $script:WebTickerTxtRequest = $null
 $script:WebBulletinPhotoRequest = $null
 $script:WebUrgentManualReviews = @{}
+$script:WebProgrammeBoardAirReviews = @{}
 $script:WebBulletinPlaybackReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
 $script:WebChannelPipeName = 'CinegyTelegramBridge.Web'
@@ -370,6 +371,7 @@ function Invoke-WebChannelOperation {
         'board.edit' { return Invoke-WebProgrammeBoardEdit -Arguments $arguments }
         'board.delete' { return Remove-WebProgrammeBoard -Arguments $arguments }
         'board.paste' { return Invoke-WebProgrammeBoardPaste -Arguments $arguments }
+        'board.air' { return Invoke-WebProgrammeBoardAir -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
         'media.capture' { return Invoke-WebCapture -Arguments $arguments }
     }
@@ -2479,9 +2481,14 @@ function Get-WebUrgentRun {
     }
 }
 
-function Get-WebUrgentLayerStatus {
+function Get-WebLayerStatus {
     param([int]$Layer)
     return Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+}
+
+function Get-WebUrgentLayerStatus {
+    param([int]$Layer)
+    return Get-WebLayerStatus -Layer $Layer
 }
 
 function Get-WebUrgentManualLive {

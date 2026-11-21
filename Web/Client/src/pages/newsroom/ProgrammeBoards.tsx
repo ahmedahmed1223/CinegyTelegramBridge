@@ -1,14 +1,15 @@
 import {
-  ActionIcon, Alert, Button, Group, NativeSelect, Pagination, Paper, Skeleton,
+  ActionIcon, Alert, Badge, Button, Group, NativeSelect, Pagination, Paper, Skeleton,
   Stack, Table, Text, Textarea, TextInput, Title, Tooltip,
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { IconArrowDown, IconArrowRight, IconArrowUp, IconEdit, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowRight, IconArrowUp, IconEdit, IconPlayerPlay, IconPlayerStop, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { ProgrammeBoardPaste } from './RowPaste'
+import { ProgrammeBoardPlayout, type BoardAirTarget } from './ProgrammeBoardPlayout'
 import classes from './NewsroomPage.module.css'
 
 type Board = Schemas['ProgrammeBoardEditor']
@@ -129,6 +130,8 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const [draft, setDraft] = useState<{ rowId?: string; revision: number; values: Record<string, string> } | null>(null)
   const [role, setRole] = useState<{ value: string; revision: number } | null>(null)
   const [pasting, setPasting] = useState(false)
+  const [air, setAir] = useState<BoardAirTarget | null>(null)
+  const [airNotice, setAirNotice] = useState<{ text: string; warning: boolean } | null>(null)
   const [saved, setSaved] = useState(false)
   const cache = useQueryClient()
   const query = useQuery({
@@ -140,6 +143,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     },
     retry: false,
     refetchOnWindowFocus: false,
+    refetchInterval: 10_000,
   })
   function acceptSaved(board: Board) {
     cache.setQueryData(editorKey(id, board.page), board)
@@ -269,6 +273,15 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
       </Paper>}
       {!!board.sceneMedia.length && <Text size="sm" c="dimmed">وسائط من القالب: {board.sceneMedia.join('، ')}</Text>}
       {!board.fields.length && <Alert color="orange">لا يحتوي قالب اللوحة الآن على حقول نصية قابلة للتحرير.</Alert>}
+      {board.liveRowId && <Group justify="space-between">
+        <Badge color="red" variant="light">صف من اللوحة على الهواء</Badge>
+        <Button color="red" variant="light" size="compact-sm" leftSection={<IconPlayerStop size={16} />}
+          disabled={blocked} onClick={() => {
+            setAirNotice(null)
+            setAir({ action: 'hide', rowId: board.liveRowId!, revision: board.revision })
+          }}>مراجعة الإخفاء</Button>
+      </Group>}
+      {airNotice && <Alert role="status" color={airNotice.warning ? 'orange' : 'teal'}>{airNotice.text}</Alert>}
       {saved && <Text size="sm" role="status">حُفظت التغييرات.</Text>}
       {write.error && <Alert color={write.error.message === 'board_stale' ? 'orange' : 'red'} role="alert">{messageFor(write.error.message)}</Alert>}
       {removeBoard.error && <Alert color={removeBoard.error.message === 'board_stale' ? 'orange' : 'red'} role="alert">
@@ -284,7 +297,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
           <Table.ScrollContainer minWidth={Math.max(490, board.fields.length * 165 + 225)} type="native" tabIndex={0} aria-label="جدول محتوى البرنامج">
             <Table verticalSpacing="sm">
               <Table.Thead><Table.Tr>
-                <Table.Th scope="col">الترتيب</Table.Th>
+                <Table.Th scope="col">الصف</Table.Th>
                 {board.fields.map(({ name, label }) => <Table.Th key={name} scope="col" className={classes.urgentCell}>{label}</Table.Th>)}
                 <Table.Th scope="col">الحالة</Table.Th>
                 <Table.Th scope="col">الإجراءات</Table.Th>
@@ -292,7 +305,16 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
               <Table.Tbody>
                 {draft && !draft.rowId && editRow()}
                 {board.rows.map((row) => draft?.rowId === row.id ? editRow(row.number, row.id) : <Table.Tr key={row.id}>
-                  <Table.Td>{number.format(row.number)}</Table.Td>
+                  <Table.Td><Stack gap={4} align="start">
+                    <Text size="sm">{number.format(row.number)}</Text>
+                    {board.liveRowId === row.id ? <Badge color="red" variant="light" size="xs">على الهواء</Badge>
+                      : <Button size="compact-xs" variant="light" leftSection={<IconPlayerPlay size={13} />}
+                        aria-label={`مراجعة عرض الصف ${number.format(row.number)}`}
+                        disabled={blocked || !row.enabled || !board.fields.length} onClick={() => {
+                          setAirNotice(null)
+                          setAir({ action: 'show', rowId: row.id, revision: board.revision })
+                        }}>عرض</Button>}
+                  </Stack></Table.Td>
                   {board.fields.map(({ name }) => <Table.Td key={name} className={classes.urgentCell}>
                     <Text size="sm" dir="auto" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{row.values[name] || '—'}</Text>
                   </Table.Td>)}
@@ -318,6 +340,18 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
         </form>
       </Paper>}
       {board.pageCount > 1 && <Pagination disabled={blocked} total={board.pageCount} value={board.page + 1} onChange={(next) => setPage(next - 1)} />}
+      {air && <ProgrammeBoardPlayout id={id} target={air} onClose={() => setAir(null)} onChanged={(result) => {
+        if (result) {
+          cache.setQueriesData<Board>({ queryKey: ['programme-board', id] },
+            (cached) => cached && { ...cached, liveRowId: result.liveRowId })
+          if (air.action === 'hide') setAirNotice({ text: 'أُخفي صف البرنامج.', warning: false })
+          else if (!result.liveRowId) setAirNotice({ text: 'أُرسل أمر العرض وتعذّر تأكيد المشهد. راجع حالة الطبقة.', warning: true })
+          else if (result.autoHideFailed) setAirNotice({ text: 'عُرض الصف وتعذّر ضبط الإخفاء التلقائي.', warning: true })
+          else setAirNotice({ text: 'عُرض صف البرنامج.', warning: false })
+          setAir(null)
+        }
+        void cache.invalidateQueries({ queryKey: ['programme-board', id] })
+      }} />}
     </>}
   </Stack>
 }

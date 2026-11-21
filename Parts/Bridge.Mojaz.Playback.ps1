@@ -426,8 +426,13 @@ function Get-CinegyLayerStartedAtUtc {
             -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec $TimeoutSec
     }
     catch { return $null }
-    if (-not $status -or -not [bool](Get-JsonProp $status 'Success')) { return $null }
-    $xml = [string](Get-JsonProp $status 'ActiveXml')
+    return Get-CinegyStatusStartedAtUtc -Status $status
+}
+
+function Get-CinegyStatusStartedAtUtc {
+    param($Status)
+    if (-not $Status -or -not [bool](Get-JsonProp $Status 'Success')) { return $null }
+    $xml = [string](Get-JsonProp $Status 'ActiveXml')
     if ([string]::IsNullOrWhiteSpace($xml)) { return $null }
     $match = [regex]::Match($xml, 'ScheduledAt\s*=\s*"([^"]+)"')
     if (-not $match.Success) { return $null }
@@ -437,6 +442,13 @@ function Get-CinegyLayerStartedAtUtc {
     if (-not [datetime]::TryParse($match.Groups[1].Value, [System.Globalization.CultureInfo]::InvariantCulture,
             [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$at)) { return $null }
     return $at.ToUniversalTime()
+}
+
+function Get-CinegyStatusStartTicks {
+    param($Status)
+    $startedAt = Get-CinegyStatusStartedAtUtc -Status $Status
+    if ($startedAt) { return $startedAt.Ticks }
+    return [long]0
 }
 
 function Get-MojazAirClockOffset {

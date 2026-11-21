@@ -1702,6 +1702,121 @@ Describe 'Web channel: the pipe' {
         finally { Remove-ContentBoardFile -BoardId $board.Id }
     }
 
+    It 'plays a reviewed programme row and only hides the exact scene reviewed by the operator' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-BoardsAvailable { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Get-BoardTextFields { 'programme.title'; 'programme.guest' }
+        Mock Get-MojazFieldLabel { $FieldName }
+        Mock Get-EffectiveAutoHideSeconds { 0 }
+        Mock Write-BridgeValidatedJson { $true }
+        $script:BoardAirPath = Join-Path $TestDrive 'programme.cintitle'
+        Set-Content -LiteralPath $script:BoardAirPath -Value '<Scene />'
+        Mock Get-TemplateStore { @{ Map = @{ Programme = @{ Key = 'Programme'; Layer = 7; Path = $script:BoardAirPath } } } }
+        $script:BoardAirEngine = @{ Success = $true; IsOnAir = $false }
+        $script:BoardAirSceneMode = 'Single'
+        $script:BoardAirHasIdentity = $true
+        Mock Get-Setting { $script:BoardAirSceneMode } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Get-TitlerLayerStatus { $script:BoardAirEngine }
+        Mock Invoke-ShowTemplateResult {
+            $engineStarted = ([datetimeoffset]'2025-01-01T15:00:00Z').UtcDateTime
+            $script:OnAir[7] = @{ Key = 'Programme'; ActiveId = '{show-1}'; ActiveIdConfirmed = $true; At = Get-Date }
+            $script:BoardAirEngine = @{
+                Success = $true; IsOnAir = $true; ActiveId = '{show-1}'; ActiveXml = '<Item ScheduledAt="2025-01-01T15:00:00Z" />'
+            }
+            @{ Success = $true; EngineStartedAtUtc = $engineStarted; EventIdentityConfirmed = $script:BoardAirHasIdentity }
+        }
+        Mock Invoke-HideLayer {
+            $script:OnAir.Remove(7)
+            $script:BoardAirEngine = @{ Success = $true; IsOnAir = $false }
+            $true
+        }
+        $board = (New-ContentBoard -Name 'برنامج العرض' -TemplateKey 'Programme' -EditRole 'admin').Value
+        $board = (Add-BoardItem -Board $board -TextFields @('programme.title', 'programme.guest') -Values @{
+                'programme.title' = 'الفقرة الأولى'; 'programme.guest' = 'الضيف الأول' } -MaxFieldLength 100).Value
+        $boardId = $board.Id
+        try {
+            Save-ContentBoard -Board $board | Should -BeTrue
+            $request = @{ actor = 4322; action = 'show-preview'; id = $boardId; revision = $board.Revision; rowId = $board.Items[0].Id }
+            $sendBoardAir = {
+                $line = @{ op = 'board.air'; args = $request } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $preview = & $sendBoardAir
+            $preview.ok | Should -BeTrue
+            $preview.data.preview.layer | Should -Be 7
+            $preview.data.preview.fields.value | Should -Be @('الفقرة الأولى', 'الضيف الأول')
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+            $request.action = 'show'
+            $request.review = $preview.data.preview.review
+            $request.actor = 4321
+            (& $sendBoardAir).error | Should -Be 'board_stale'
+            $request.actor = 4322
+            $script:BoardAirEngine = @{ Success = $true; IsOnAir = $true; ActiveId = '{incoming}' }
+            (& $sendBoardAir).error | Should -Be 'board_stale'
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+
+            $request.action = 'show-preview'
+            $preview = & $sendBoardAir
+            $preview.data.preview.replacesGraphic | Should -BeTrue
+            $request.action = 'show'
+            $request.review = $preview.data.preview.review
+            $shown = & $sendBoardAir
+            $shown.ok | Should -BeTrue
+            $shown.data.liveRowId | Should -Be $request.rowId
+            (& $sendBoardAir).error | Should -Be 'board_stale'
+            Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+                $Key -eq 'Programme' -and $ExpectedLayer -eq 7 -and $ExpectedLayerStamp -eq 'active:incoming' -and -not $RequireEventIdentity -and
+                $Variables['programme.guest'] -eq 'الضيف الأول'
+            }
+
+            $request.action = 'hide-preview'
+            $script:BoardAirSceneMode = 'Multi'
+            (& $sendBoardAir).error | Should -Be 'board_air_multiple'
+            $script:BoardAirSceneMode = 'Single'
+            $hidePreview = & $sendBoardAir
+            $hidePreview.ok | Should -BeTrue
+            $request.action = 'hide'
+            $request.review = $hidePreview.data.preview.review
+            $script:BoardAirEngine.ActiveId = '{different}'
+            (& $sendBoardAir).error | Should -Be 'board_stale'
+            Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+
+            $script:BoardAirEngine.ActiveId = '{show-1}'
+            $request.action = 'hide-preview'
+            $script:BoardAirEngine.ActiveXml = '<Item ScheduledAt="2025-01-01T15:00:00.333Z" />'
+            (& $sendBoardAir).error | Should -Be 'board_stale'
+            $script:BoardAirEngine.ActiveXml = '<Item ScheduledAt="2025-01-01T15:00:00Z" />'
+            $hidePreview = & $sendBoardAir
+            $request.action = 'hide'
+            $request.review = $hidePreview.data.preview.review
+            $hidden = & $sendBoardAir
+            $hidden.ok | Should -BeTrue
+            $hidden.data.liveRowId | Should -BeNullOrEmpty
+            Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 -and $ExpectedLayerStamp -eq 'active:show-1' }
+
+            $script:BoardAirHasIdentity = $false
+            $request.action = 'show-preview'
+            $preview = & $sendBoardAir
+            $request.action = 'show'
+            $request.review = $preview.data.preview.review
+            $uncertain = & $sendBoardAir
+            $uncertain.ok | Should -BeTrue
+            $uncertain.data.liveRowId | Should -BeNullOrEmpty
+            $request.action = 'hide-preview'
+            (& $sendBoardAir).error | Should -Be 'board_stale'
+        }
+        finally {
+            Clear-BoardItemLive -Layer 7
+            $script:OnAir.Remove(7)
+            Remove-ContentBoardFile -BoardId $boardId
+        }
+    }
+
     It 'shares programme boards with the bot and applies its row permissions and revision checks' {
         Mock Test-Authorized { $UserId -in 4321, 4322 }
         Mock Test-Admin { $UserId -eq 4321 }

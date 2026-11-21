@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.113.0
+
+Programme-board rows can go on air from the web newsroom after the operator reviews the template fields, target layer, and any affected playback. The bridge rechecks the reviewed scene before showing the row and verifies its identity before hiding it.
+
 ## Version 8.112.0
 
 The web ticker keeps the TXT import dialog open until it reloads the saved draft. Operators can then continue editing against the new revision.

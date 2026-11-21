@@ -223,6 +223,8 @@ function Import-BoardsLive {
                 BoardId = [string](Get-JsonProp $entry 'BoardId')
                 ItemId = [string](Get-JsonProp $entry 'ItemId')
                 At = [string](Get-JsonProp $entry 'At')
+                AirIdentity = [string](Get-JsonProp $entry 'AirIdentity')
+                EngineStartedAtTicks = [long](Get-JsonProp $entry 'EngineStartedAtTicks')
             }
         }
     }
@@ -233,7 +235,9 @@ function Save-BoardsLive {
     $payload = [pscustomobject]@{
         SavedAt = [datetimeoffset]::Now.ToString('o')
         Layers = @($script:BoardsLive.GetEnumerator() | ForEach-Object {
-                [pscustomobject]@{ Layer = [int]$_.Key; BoardId = [string]$_.Value.BoardId; ItemId = [string]$_.Value.ItemId; At = [string]$_.Value.At }
+                [pscustomobject]@{ Layer = [int]$_.Key; BoardId = [string]$_.Value.BoardId; ItemId = [string]$_.Value.ItemId
+                    At = [string]$_.Value.At; AirIdentity = [string](Get-JsonProp $_.Value 'AirIdentity')
+                    EngineStartedAtTicks = [long](Get-JsonProp $_.Value 'EngineStartedAtTicks') }
             })
     }
     return [bool](Write-BridgeValidatedJson -Path (Get-BoardsLiveFile) -Json ($payload | ConvertTo-Json -Depth 6))
@@ -248,8 +252,12 @@ function Set-BoardItemLive {
         on claiming to be on air - and a card that lies about the air is worse
         than a card that says nothing.
     #>
-    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][string]$BoardId, [Parameter(Mandatory)][string]$ItemId)
-    $script:BoardsLive[$Layer] = @{ BoardId = $BoardId; ItemId = $ItemId; At = [datetimeoffset]::Now.ToString('o') }
+    param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)][string]$BoardId, [Parameter(Mandatory)][string]$ItemId,
+        [string]$AirIdentity = '', [long]$EngineStartedAtTicks = 0)
+    $script:BoardsLive[$Layer] = @{
+        BoardId = $BoardId; ItemId = $ItemId; At = [datetimeoffset]::Now.ToString('o'); AirIdentity = $AirIdentity
+        EngineStartedAtTicks = $EngineStartedAtTicks
+    }
     Save-BoardsLive | Out-Null
 }
 
@@ -266,12 +274,59 @@ function Test-BoardItemLive {
     if (-not $script:BoardsLive.ContainsKey($Layer)) { return $false }
     $live = $script:BoardsLive[$Layer]
     if ([string]$live.BoardId -ne $BoardId -or [string]$live.ItemId -ne $ItemId) { return $false }
+    $identity = [string](Get-JsonProp $live 'AirIdentity')
+    if ($identity) {
+        $key = [string](Get-JsonProp $script:OnAir[$Layer] 'Key')
+        return $identity -ceq (Get-BoardAirIdentity -Layer $Layer -Key $key)
+    }
     # The bridge's own record of the layer is the second half of the answer: a
     # row marked live on a layer nothing is on air on is a stale promise.
     return $script:OnAir.ContainsKey($Layer)
 }
 
 # -------------------------------------------------------------------- the air
+
+function Get-BoardAirIdentity {
+    param([int]$Layer, [string]$Key)
+    $record = $script:OnAir[$Layer]
+    if ([string](Get-JsonProp $record 'Key') -cne $Key -or -not (Get-JsonProp $record 'ActiveIdConfirmed')) { return '' }
+    $id = [string](Get-JsonProp $record 'ActiveId')
+    $at = Get-JsonProp $record 'At'
+    $instant = [datetimeoffset]::MinValue
+    if (-not $id -or -not $at) { return '' }
+    if ($at -is [datetime] -or $at -is [datetimeoffset]) { $instant = [datetimeoffset]$at }
+    elseif (-not [datetimeoffset]::TryParse([string]$at, [ref]$instant)) { return '' }
+    # An engine item id can be reused. Keep the precision of the bridge's
+    # recorded start time so even a same-second re-show loses the old identity.
+    return (@($Key, $id, $instant.UtcTicks) | ConvertTo-Json -Compress)
+}
+
+function Get-ConfirmedBoardLiveRowId {
+    param([string]$BoardId, [string]$Key, [int]$Layer)
+    $row = $script:BoardsLive[$Layer]
+    $identity = [string](Get-JsonProp $row 'AirIdentity')
+    if ($identity -and [string](Get-JsonProp $row 'BoardId') -ceq $BoardId -and
+        $identity -ceq (Get-BoardAirIdentity -Layer $Layer -Key $Key)) {
+        return [string](Get-JsonProp $row 'ItemId')
+    }
+    return ''
+}
+
+function Invoke-BoardItemShow {
+    param([string]$BoardId, [string]$ItemId, [string]$Key, $Template, [hashtable]$Variables,
+        [long]$ChatId, [long]$UserId, [hashtable]$Review = @{})
+    $result = Invoke-ShowTemplateResult -Key $Key -Variables $Variables -ChatId $ChatId -UserId $UserId @Review
+    if (Get-JsonProp $result 'Success') {
+        $layer = [int]$Template.Layer
+        $startedAt = Get-JsonProp $result 'EngineStartedAtUtc'
+        $ticks = if ($startedAt) { $startedAt.Ticks } else { 0 }
+        # A template-name match can also describe the previous show of that
+        # same template and cannot authorize the Web's row-specific HIDE.
+        $identity = if (Get-JsonProp $result 'EventIdentityConfirmed') { Get-BoardAirIdentity -Layer $layer -Key $Key } else { '' }
+        Set-BoardItemLive -Layer $layer -BoardId $BoardId -ItemId $ItemId -AirIdentity $identity -EngineStartedAtTicks $ticks
+    }
+    return $result
+}
 
 function Show-BoardItemOnAir {
     <#
@@ -300,10 +355,8 @@ function Show-BoardItemOnAir {
     }
     $fields = @(Get-BoardTextFields -TemplateKey $key)
     $values = Get-BoardItemValues -Item $item -TextFields $fields
-    $result = Invoke-ShowTemplateResult -Key $key -Variables $values -ChatId $ChatId -UserId $UserId
-    if (-not $result -or -not $result.Success) { return $false }
-    Set-BoardItemLive -Layer ([int]$template.Layer) -BoardId $BoardId -ItemId $ItemId
-    return $true
+    $result = Invoke-BoardItemShow -BoardId $BoardId -ItemId $ItemId -Key $key -Template $template -Variables $values -ChatId $ChatId -UserId $UserId
+    return [bool](Get-JsonProp $result 'Success')
 }
 
 # -------------------------------------------------------------------- screens
@@ -861,6 +914,7 @@ function Remove-WebProgrammeBoard {
 function Get-WebProgrammeBoardEditor {
     param($Board, [long]$Actor, [int]$Page)
     $template = [string](Get-BoardProperty $Board 'TemplateKey' '')
+    $layer = [int](Get-JsonProp (Get-TemplateStore).Map[$template] 'Layer')
     $textFields = @(Get-BoardTextFields -TemplateKey $template)
     $sceneMedia = @(foreach ($name in @(Get-BoardMediaFields -TemplateKey $template)) {
             Get-MojazFieldLabel -TemplateKey $template -FieldName $name
@@ -880,7 +934,118 @@ function Get-WebProgrammeBoardEditor {
         editRole = [string](Get-BoardProperty $Board 'EditRole' 'all'); canManage = (Test-Admin -ChatId $Actor -UserId $Actor)
         fields = $fields; sceneMedia = $sceneMedia; rows = $rows; total = $items.Count; page = $window.Page; pageCount = $window.PageCount
         maxFieldLength = Get-SettingInt 'MaxFieldLength' 1
+        liveRowId = Get-ConfirmedBoardLiveRowId -BoardId ([string](Get-BoardProperty $Board 'Id')) -Key $template -Layer $layer
     }
+}
+
+function Invoke-WebProgrammeBoardAir {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -cnotin @('show-preview', 'show', 'hide-preview', 'hide')) { return @{ ok = $false; error = 'board_invalid' } }
+    $preview = $action.EndsWith('-preview', [StringComparison]::Ordinal)
+    $hiding = $action.StartsWith('hide', [StringComparison]::Ordinal)
+    $stale = @{ ok = $false; error = 'board_stale' }
+    if (-not $preview) {
+        $pending = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebProgrammeBoardAirReviews
+        if (-not $pending) { return $stale }
+    }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    $rowId = [string](Get-JsonProp $Arguments 'rowId')
+    if (-not $id -or -not $rowId) { return @{ ok = $false; error = 'board_invalid' } }
+    $board = Get-ContentBoard -BoardId $id
+    if (-not $board) { return @{ ok = $false; error = 'not_found' } }
+    $revision = [int](Get-BoardProperty $board 'Revision')
+    if ([int](Get-JsonProp $Arguments 'revision') -ne $revision) { return $stale }
+    $key = [string](Get-BoardProperty $board 'TemplateKey')
+    $template = (Get-TemplateStore).Map[$key]
+    $layer = [int](Get-JsonProp $template 'Layer')
+    if ($layer -le 0) { return @{ ok = $false; error = 'board_invalid_template' } }
+    if (-not (Test-TemplateAccess -Key $key -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'board_air_refused' } }
+
+    $label = [string](Get-JsonProp $template 'Description')
+    if (-not $label) { $label = $key }
+    $reviewData = @{ layer = $layer; template = Get-NewsScreenLine $label 100; fields = @() }
+    $reviewParts = @($id, $rowId, $revision, $key, $layer)
+    if ($hiding) {
+        if ((Get-ConfirmedBoardLiveRowId -BoardId $id -Key $key -Layer $layer) -cne $rowId) { return $stale }
+        # HIDE addresses the layer. The live read only verifies its primary
+        # item, while the Multi catalogue can retain other scenes on it.
+        if ([string](Get-Setting 'SceneMode') -eq 'Multi') {
+            return @{ ok = $false; error = 'board_air_multiple' }
+        }
+        $reviewParts += 'hide'
+    }
+    else {
+        $item = Get-BoardItem -Board $board -ItemId $rowId
+        if (-not $item -or -not [bool](Get-BoardProperty $item 'Enabled' $true)) { return $stale }
+        if (-not (Test-TemplateShowPolicy -Key $key -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)).Allowed) {
+            return @{ ok = $false; error = 'board_air_refused' }
+        }
+        $path = [string](Get-JsonProp $template 'Path')
+        $sceneFile = if ($path) { Get-Item -LiteralPath $path -ErrorAction SilentlyContinue }
+        if (-not $sceneFile -or $sceneFile.PSIsContainer) { return @{ ok = $false; error = 'board_invalid_template' } }
+        $fields = @(Get-BoardTextFields -TemplateKey $key)
+        if (-not $fields.Count) { return @{ ok = $false; error = 'board_no_fields' } }
+        $variables = Get-BoardItemValues -Item $item -TextFields $fields
+        $effective = Get-EffectiveAutoHideSeconds -Key $key
+        $reviewData.fields = @(foreach ($field in $fields) {
+                @{ label = Get-MojazFieldLabel -TemplateKey $key -FieldName $field; value = $variables[$field] }
+            })
+        $reviewData.autoHideSeconds = $effective
+        $reviewData.stopsUrgent = [bool]($script:UrgentBoardRun -and
+            ($key -eq $script:MojazUrgentKey -or [int](Get-JsonProp (Get-UrgentTemplate) 'Layer') -eq $layer))
+        $reviewData.stopsBulletin = [bool]($script:MojazPlayback -and
+            ($key -eq $script:MojazUrgentKey -or (Get-MojazRunLayer -Playback $script:MojazPlayback) -eq $layer))
+        $urgentRun = if ($reviewData.stopsUrgent) { Get-JsonProp $script:UrgentBoardRun 'OperationId' }
+        $bulletinRun = if ($reviewData.stopsBulletin) { Get-JsonProp $script:MojazPlayback 'OperationId' }
+        $reviewParts += @('show', $path, $sceneFile.LastWriteTimeUtc.Ticks, $sceneFile.Length, $fields, @($fields | ForEach-Object { $variables[$_] }),
+            $effective, $reviewData.stopsUrgent, $urgentRun, $reviewData.stopsBulletin, $bulletinRun)
+    }
+    $status = Get-WebLayerStatus -Layer $layer
+    $stamp = Get-CinegyLayerReviewStamp -Status $status
+    $engineTicks = Get-CinegyStatusStartTicks -Status $status
+    if (-not $stamp) { return @{ ok = $false; error = 'board_air_unverified' } }
+    if ($hiding) {
+        $expected = Get-CinegyLayerReviewStamp -Status @{ Success = $true; IsOnAir = $true
+            ActiveId = Get-JsonProp $script:OnAir[$layer] 'ActiveId' }
+        $shownAtTicks = [long](Get-JsonProp $script:BoardsLive[$layer] 'EngineStartedAtTicks')
+        if ($stamp -cne $expected -or ($shownAtTicks -gt 0 -and $shownAtTicks -ne $engineTicks)) { return $stale }
+    }
+    $reviewData.replacesGraphic = -not $hiding -and $stamp -cne 'empty'
+    $reviewData.graphicName = Get-NewsScreenLine ([string](Get-JsonProp $status 'ActiveName')) 100
+    $reviewParts += @($stamp, $engineTicks, (Get-LayerRemovalFingerprint -Layer $layer))
+    $fingerprint = ConvertTo-Json -Compress -Depth 10 -InputObject $reviewParts
+    if ($preview) {
+        $reviewData.review = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebProgrammeBoardAirReviews
+        return @{ ok = $true; data = @{ preview = $reviewData } }
+    }
+    if ($pending.Fingerprint -cne $fingerprint) { return $stale }
+    if ($hiding) {
+        if (-not (Invoke-HideLayer -Layer $layer -ChatId $actor -UserId $actor -Quiet -ExpectedLayerStamp $stamp -ExpectedLayerStartedAtTicks $engineTicks)) {
+            return @{ ok = $false; error = 'board_air_refused' }
+        }
+        if ((Get-CinegyLayerReviewStamp -Status (Get-WebLayerStatus -Layer $layer)) -cne 'empty') {
+            return @{ ok = $false; error = 'board_air_unverified' }
+        }
+        Clear-BoardItemLive -Layer $layer
+        Publish-WebChannelState -Force
+        return @{ ok = $true; data = @{ liveRowId = $null } }
+    }
+    $result = Invoke-BoardItemShow -BoardId $id -ItemId $rowId -Key $key -Template $template -Variables $variables -ChatId $actor -UserId $actor -Review @{
+        ExpectedLayer = $layer; ExpectedTemplatePath = $path; ExpectedLayerStamp = $stamp; ExpectedLayerStartedAtTicks = $engineTicks
+    }
+    if (-not (Get-JsonProp $result 'Success')) { return @{ ok = $false; error = 'board_air_refused' } }
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = @{
+        liveRowId = Get-ConfirmedBoardLiveRowId -BoardId $id -Key $key -Layer $layer
+        autoHideFailed = $effective -gt 0 -and -not (Get-JsonProp $result 'AutoHideArmed')
+    } }
 }
 
 function New-WebProgrammeBoard {

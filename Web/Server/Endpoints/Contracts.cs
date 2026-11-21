@@ -17,12 +17,17 @@ public sealed record ProgrammeBoardTemplates(ProgrammeBoardTemplate[] Templates)
 public sealed record ProgrammeBoardField(string Name, string Label);
 public sealed record ProgrammeBoardRow(string Id, int Number, Dictionary<string, string> Values, bool Enabled);
 public sealed record ProgrammeBoardEditor(string Id, string Name, int Revision, bool CanEdit, bool CanManage, string EditRole, ProgrammeBoardField[] Fields,
-    string[] SceneMedia, ProgrammeBoardRow[] Rows, int Total, int Page, int PageCount, int MaxFieldLength);
+    string[] SceneMedia, ProgrammeBoardRow[] Rows, int Total, int Page, int PageCount, int MaxFieldLength, string? LiveRowId);
 public sealed record ProgrammeBoardEditRequest(string Action, string? Id = null, int? Revision = null, int? Page = null,
     string? RowId = null, Dictionary<string, string>? Values = null, string? Name = null, string? Template = null, string? Role = null);
 public sealed record ProgrammeBoardPasteRequest(string Action, string Id, int Revision, string Format, string Text, string? Review);
 public sealed record ProgrammeBoardPastePreview(string Review, ProgrammeBoardField[] Fields, Dictionary<string, string>[] Rows, int[] SkippedLines);
 public sealed record ProgrammeBoardPasteResult(ProgrammeBoardPastePreview? Preview, int? SavedPage);
+public sealed record ProgrammeBoardAirRequest(string Action, string Id, int Revision, string RowId, string? Review);
+public sealed record ProgrammeBoardAirField(string Label, string Value);
+public sealed record ProgrammeBoardAirPreview(string Review, int Layer, string Template, ProgrammeBoardAirField[] Fields,
+    bool ReplacesGraphic, string? GraphicName, int? AutoHideSeconds, bool StopsUrgent = false, bool StopsBulletin = false);
+public sealed record ProgrammeBoardAirResult(ProgrammeBoardAirPreview? Preview, string? LiveRowId, bool AutoHideFailed = false);
 public sealed record BulletinField(string Name, string Label, string Kind);
 public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped, string? ImageMode = null);
 public sealed record BulletinImageChoice(string RowId, int RowNumber);

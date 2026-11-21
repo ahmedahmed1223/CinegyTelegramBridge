@@ -190,22 +190,30 @@ function Stop-RelayProcess {
 # commands here confines their effects to the simulated on-air state.
 function Invoke-ShowTemplateResult {
     param([string]$Key, [hashtable]$Variables, [long]$UserId, [int]$AutoHideSeconds, [string]$ExpectedLayerStamp,
-        [int]$ExpectedLayer, [string]$ExpectedTemplatePath)
+        [int]$ExpectedLayer, [string]$ExpectedTemplatePath, [long]$ExpectedLayerStartedAtTicks)
     $template = (Get-TemplateStore).Map[$Key]
     $layer = [int]$template.Layer
+    $observed = Get-TitlerLayerStatus -Layer $layer
     if (($ExpectedLayer -gt 0 -and $layer -ne $ExpectedLayer) -or
         ($ExpectedTemplatePath -and [string]$template.Path -cne $ExpectedTemplatePath) -or
-        ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status (Get-TitlerLayerStatus -Layer $layer)) -cne $ExpectedLayerStamp)) {
+        ($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status $observed) -cne $ExpectedLayerStamp) -or
+        ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $observed))) {
         return @{ Success = $false }
     }
     $shownAt = Get-Date
     $activeId = [guid]::NewGuid().ToString()
-    $script:OnAir[$layer] = @{ Key = $Key; At = $shownAt; ActiveId = $activeId; UserId = $UserId; Source = 'bridge'; Variables = $Variables }
+    $script:OnAir[$layer] = @{
+        Key = $Key; At = $shownAt; ActiveId = $activeId; ActiveIdConfirmed = $true
+        UserId = $UserId; Source = 'bridge'; Variables = $Variables
+    }
     $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $layer })
     if ($AutoHideSeconds -gt 0) {
         $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
     }
-    return @{ Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0; ActiveId = $activeId; ActiveIdConfirmed = $true }
+    return @{
+        Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0; ActiveId = $activeId; ActiveIdConfirmed = $true
+        EngineStartedAtUtc = $shownAt.ToUniversalTime(); EventIdentityConfirmed = $true
+    }
 }
 
 function Show-TitlerTemplate {
@@ -227,7 +235,10 @@ function Set-AutoHideTimer {
 }
 
 function Invoke-HideLayer {
-    param([int]$Layer)
+    param([int]$Layer, [string]$ExpectedLayerStamp, [long]$ExpectedLayerStartedAtTicks)
+    $observed = Get-TitlerLayerStatus -Layer $Layer
+    if (($ExpectedLayerStamp -and (Get-CinegyLayerReviewStamp -Status $observed) -cne $ExpectedLayerStamp) -or
+        ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $observed))) { return $false }
     $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $Layer })
     if (-not $script:OnAir.ContainsKey($Layer)) { return $false }
     $script:OnAir.Remove($Layer)
@@ -253,9 +264,11 @@ function Send-PostboxValues {
 function Get-TitlerLayerStatus {
     param([int]$Layer)
     $live = $script:OnAir[$Layer]
+    $startedAt = Get-JsonProp $live 'At'
     return @{
         Success = $true; IsOnAir = $null -ne $live
         ActiveId = Get-JsonProp $live 'ActiveId'; ActiveName = Get-JsonProp $live 'Key'
+        ActiveXml = if ($startedAt -is [datetime]) { '<Item ScheduledAt="{0:o}" />' -f $startedAt.ToUniversalTime() } else { '' }
     }
 }
 

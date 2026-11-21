@@ -581,7 +581,8 @@ function Invoke-HideLayer {
         [switch]$Quiet,
         [switch]$MaintenanceOverride,
         [switch]$System,
-        [string]$ExpectedLayerStamp = ''
+        [string]$ExpectedLayerStamp = '',
+        [long]$ExpectedLayerStartedAtTicks = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action HIDE -Layer $Layer -UserId $UserId
@@ -617,7 +618,8 @@ function Invoke-HideLayer {
     if ($ExpectedLayerStamp) {
         $verified = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
             -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
-        if ((Get-CinegyLayerReviewStamp -Status $verified) -cne $ExpectedLayerStamp) {
+        if ((Get-CinegyLayerReviewStamp -Status $verified) -cne $ExpectedLayerStamp -or
+            ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $verified))) {
             Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'reviewed scene changed'
             return $false
         }

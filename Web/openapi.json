@@ -3298,6 +3298,85 @@
         }
       }
     },
+    "/api/content/boards/air": {
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgrammeBoardAirRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgrammeBoardAirResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/content/boards/{id}": {
       "delete": {
         "tags": [
@@ -4588,6 +4667,121 @@
           }
         }
       },
+      "ProgrammeBoardAirField": {
+        "required": [
+          "label",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "ProgrammeBoardAirPreview": {
+        "required": [
+          "review",
+          "layer",
+          "template",
+          "fields",
+          "replacesGraphic",
+          "graphicName",
+          "autoHideSeconds"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "template": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgrammeBoardAirField"
+            }
+          },
+          "replacesGraphic": {
+            "type": "boolean"
+          },
+          "graphicName": {
+            "type": "string",
+            "nullable": true
+          },
+          "autoHideSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "stopsUrgent": {
+            "type": "boolean",
+            "default": false
+          },
+          "stopsBulletin": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "nullable": true
+      },
+      "ProgrammeBoardAirRequest": {
+        "required": [
+          "action",
+          "id",
+          "revision",
+          "rowId",
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rowId": {
+            "type": "string"
+          },
+          "review": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ProgrammeBoardAirResult": {
+        "required": [
+          "preview",
+          "liveRowId"
+        ],
+        "type": "object",
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/ProgrammeBoardAirPreview"
+          },
+          "liveRowId": {
+            "type": "string",
+            "nullable": true
+          },
+          "autoHideFailed": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
       "ProgrammeBoardEditor": {
         "required": [
           "id",
@@ -4602,7 +4796,8 @@
           "total",
           "page",
           "pageCount",
-          "maxFieldLength"
+          "maxFieldLength",
+          "liveRowId"
         ],
         "type": "object",
         "properties": {
@@ -4658,6 +4853,10 @@
           "maxFieldLength": {
             "type": "integer",
             "format": "int32"
+          },
+          "liveRowId": {
+            "type": "string",
+            "nullable": true
           }
         }
       },

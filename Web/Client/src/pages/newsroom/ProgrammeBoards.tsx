@@ -8,6 +8,7 @@ import { IconArrowDown, IconArrowRight, IconArrowUp, IconEdit, IconPlus, IconRef
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { ProgrammeBoardPaste } from './RowPaste'
 import classes from './NewsroomPage.module.css'
 
 type Board = Schemas['ProgrammeBoardEditor']
@@ -127,6 +128,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const [page, setPage] = useState(0)
   const [draft, setDraft] = useState<{ rowId?: string; revision: number; values: Record<string, string> } | null>(null)
   const [role, setRole] = useState<{ value: string; revision: number } | null>(null)
+  const [pasting, setPasting] = useState(false)
   const [saved, setSaved] = useState(false)
   const cache = useQueryClient()
   const query = useQuery({
@@ -139,20 +141,19 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     retry: false,
     refetchOnWindowFocus: false,
   })
-  const write = useMutation({
-    mutationFn: writeBoard,
-    onSuccess: (board) => {
-      cache.setQueryData(editorKey(id, board.page), board)
-      void cache.invalidateQueries({ queryKey: listKey })
-      setPage(board.page)
-      setDraft(null)
-      setRole(null)
-      setSaved(true)
-    },
-  })
+  function acceptSaved(board: Board) {
+    cache.setQueryData(editorKey(id, board.page), board)
+    void cache.invalidateQueries({ queryKey: listKey })
+    setPage(board.page)
+    setDraft(null)
+    setRole(null)
+    setPasting(false)
+    setSaved(true)
+  }
+  const write = useMutation({ mutationFn: writeBoard, onSuccess: acceptSaved })
   const board = query.data
   const busy = write.isPending || query.isFetching
-  const editing = !!draft || !!role
+  const editing = !!draft || !!role || pasting
   const blocked = busy || editing
   function startRow(row?: Row) {
     if (!board) return
@@ -184,7 +185,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     return <Table.Tr key={key}>
       <Table.Td>{rank === undefined ? 'جديد' : number.format(rank)}</Table.Td>
       {board.fields.map(({ name, label }, index) => <Table.Td key={name} className={classes.urgentCell}>
-        <Textarea aria-label={label} dir="auto" minRows={2} autosize maxRows={5} maxLength={500}
+        <Textarea aria-label={label} dir="auto" minRows={2} autosize maxRows={5} maxLength={board.maxFieldLength}
           autoFocus={index === 0} disabled={write.isPending} value={draft.values[name] ?? ''}
           onChange={(event) => setDraft({ ...draft, values: { ...draft.values, [name]: event.currentTarget.value } })} />
       </Table.Td>)}
@@ -213,9 +214,19 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
           {board.canManage && <Button variant="default" disabled={blocked} onClick={() => {
             setSaved(false); write.reset(); setRole({ value: board.editRole, revision: board.revision })
           }}>صلاحية التحرير</Button>}
+          {board.canEdit && board.fields.length > 0 && <Button variant="default" disabled={blocked} onClick={() => {
+            setSaved(false); write.reset(); setPasting(true)
+          }}>لصق صفوف</Button>}
           {board.canEdit && board.fields.length > 0 && <Button disabled={blocked} leftSection={<IconPlus size={16} />} onClick={() => startRow()}>إضافة صف</Button>}
         </Group>
       </Group>
+      {pasting && <ProgrammeBoardPaste board={board} onSave={(nextPage) => {
+        void cache.invalidateQueries({ queryKey: ['programme-board', id] })
+        void cache.invalidateQueries({ queryKey: listKey })
+        setPage(nextPage)
+        setPasting(false)
+        setSaved(true)
+      }} onCancel={() => setPasting(false)} />}
       {role && <Paper withBorder p="md" radius="lg">
         <form onSubmit={(event) => {
           event.preventDefault()

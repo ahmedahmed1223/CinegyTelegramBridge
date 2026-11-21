@@ -3218,6 +3218,85 @@
           }
         }
       }
+    },
+    "/api/content/boards/paste": {
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgrammeBoardPasteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgrammeBoardPasteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4451,7 +4530,8 @@
           "rows",
           "total",
           "page",
-          "pageCount"
+          "pageCount",
+          "maxFieldLength"
         ],
         "type": "object",
         "properties": {
@@ -4501,6 +4581,10 @@
             "format": "int32"
           },
           "pageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxFieldLength": {
             "type": "integer",
             "format": "int32"
           }
@@ -4607,6 +4691,93 @@
           },
           "canCreate": {
             "type": "boolean"
+          }
+        }
+      },
+      "ProgrammeBoardPastePreview": {
+        "required": [
+          "review",
+          "fields",
+          "rows",
+          "skippedLines"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgrammeBoardField"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "skippedLines": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        },
+        "nullable": true
+      },
+      "ProgrammeBoardPasteRequest": {
+        "required": [
+          "action",
+          "id",
+          "revision",
+          "format",
+          "text",
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "format": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "review": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ProgrammeBoardPasteResult": {
+        "required": [
+          "preview",
+          "savedPage"
+        ],
+        "type": "object",
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/ProgrammeBoardPastePreview"
+          },
+          "savedPage": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         }
       },

@@ -7,30 +7,57 @@ import classes from './NewsroomPage.module.css'
 
 const number = new Intl.NumberFormat('ar')
 type Bulletin = Schemas['BulletinEditor']
-type Preview = Schemas['BulletinPastePreview']
+type Preview = Omit<Schemas['BulletinPastePreview'], 'fields'> & { fields: Schemas['ProgrammeBoardField'][] }
+type Board = Schemas['ProgrammeBoardEditor']
 
 export function BulletinPaste({ bulletin, onSave, onCancel }: {
   bulletin: Bulletin
   onSave: (page: number) => void
   onCancel: () => void
 }) {
-  const [text, setText] = useState('')
-  const [format, setFormat] = useState('table')
-  const [preview, setPreview] = useState<Preview | null>(null)
-  const fields = bulletin.fields.filter((field) => field.kind === 'text')
-  const exceedsLimit = text.length > 8000
-  const paste = useMutation({
-    mutationFn: async (review: string | null) => {
+  return <RowPaste title="لصق صفوف الموجز" fields={bulletin.fields.filter((field) => field.kind === 'text')}
+    alternative={bulletin.headlinePaste ? { value: 'headlines', label: 'عناوين ونصوص', instructions: 'الصق خبرًا في كل سطر بصيغة «العنوان | نص الخبر»، أو الصق نص الخبر وحده.' } : undefined}
+    onCancel={onCancel} submit={async (text, format, review) => {
       const { data, error, response } = await api.POST('/api/content/bulletins/paste', {
         body: { action: review ? 'commit' : 'preview', id: bulletin.id, revision: bulletin.revision, text, format, review },
       })
       if (!data) throw new Error(error?.message || messageFor(errorCode(error, response)))
-      return data
-    },
-    onSuccess: ({ preview: next, savedPage }) => {
-      if (savedPage != null) onSave(savedPage)
-      else if (next) setPreview(next)
-    },
+      if (data.savedPage != null) onSave(data.savedPage)
+      return data.preview
+    }} />
+}
+
+export function ProgrammeBoardPaste({ board, onSave, onCancel }: {
+  board: Board
+  onSave: (page: number) => void
+  onCancel: () => void
+}) {
+  return <RowPaste title="لصق صفوف لوحة البرنامج" fields={board.fields}
+    alternative={{ value: 'pipe', label: 'نص مفصول بـ |', instructions: 'اكتب صفًا في كل سطر وافصل بين الحقول بعلامة | بالترتيب الموضّح.' }}
+    onCancel={onCancel} submit={async (text, format, review) => {
+      const { data, error, response } = await api.POST('/api/content/boards/paste', {
+        body: { action: review ? 'commit' : 'preview', id: board.id, revision: board.revision, text, format, review },
+      })
+      if (!data) throw new Error(error?.message || messageFor(errorCode(error, response)))
+      if (data.savedPage != null) onSave(data.savedPage)
+      return data.preview
+    }} />
+}
+
+function RowPaste({ title, fields, alternative, submit, onCancel }: {
+  title: string
+  fields: Preview['fields']
+  alternative?: { value: string; label: string; instructions: string }
+  submit: (text: string, format: string, review: string | null) => Promise<Preview | null | undefined>
+  onCancel: () => void
+}) {
+  const [text, setText] = useState('')
+  const [format, setFormat] = useState('table')
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const exceedsLimit = text.length > 8000
+  const paste = useMutation({
+    mutationFn: (review: string | null) => submit(text, format, review),
+    onSuccess: (next) => { if (next) setPreview(next) },
   })
   return (
     <Paper radius="lg" withBorder className={classes.urgentGrid}>
@@ -40,21 +67,20 @@ export function BulletinPaste({ bulletin, onSave, onCancel }: {
         paste.mutate(preview?.review ?? null)
       }}>
         <Stack gap="sm" p="md">
-          <Title order={4}>{preview ? 'مراجعة الصفوف قبل الإضافة' : 'لصق صفوف الموجز'}</Title>
+          <Title order={4}>{preview ? 'مراجعة الصفوف قبل الإضافة' : title}</Title>
           {!preview && (
             <>
-              {bulletin.headlinePaste && (
+              {alternative && (
                 <Group>
                   <SegmentedControl<string> aria-label="صيغة اللصق" value={format} onChange={setFormat} disabled={paste.isPending}
-                    data={[{ value: 'table', label: 'من جدول' }, { value: 'headlines', label: 'عناوين ونصوص' }]} />
+                    data={[{ value: 'table', label: 'من جدول' }, { value: alternative.value, label: alternative.label }]} />
                 </Group>
               )}
-              <Text size="sm" c="dimmed" id="bulletin-paste-instructions">
-                {format === 'table'
-                  ? <>انسخ خلايا النص بالترتيب <strong>{fields.map((field) => field.label).join('، ')}</strong>. اترك الخلية فارغة عند الحاجة.</>
-                  : <>الصق خبرًا في كل سطر بصيغة «العنوان | نص الخبر»، أو الصق نص الخبر وحده.</>}
+              <Text size="sm" c="dimmed" id="row-paste-instructions">
+                {format !== 'table' && alternative && <>{alternative.instructions} </>}
+                ترتيب الأعمدة <strong>{fields.map((field) => field.label).join('، ')}</strong>. اترك الخلية فارغة عند الحاجة.
               </Text>
-              <Textarea label="الصفوف المنسوخة" aria-describedby="bulletin-paste-instructions"
+              <Textarea label="الصفوف المنسوخة" aria-describedby="row-paste-instructions"
                 dir="auto" autosize minRows={4} maxRows={9}
                 autoFocus disabled={paste.isPending} value={text} onChange={(event) => setText(event.currentTarget.value)} />
               <Text size="xs" c="dimmed">حتى ٤٠ صفًا و٨٠٠٠ حرف في الدفعة الواحدة.</Text>
@@ -67,7 +93,7 @@ export function BulletinPaste({ bulletin, onSave, onCancel }: {
               {!!preview.skippedLines.length && (
                 <Alert color="yellow">
                   صفوف لن تُضاف ({preview.skippedLines.map((line) => number.format(line)).join('، ')}).
-                  راجع عدد الخلايا ومحتواها. لا تُحسب الأسطر الفارغة.
+                  راجع عدد الخلايا ومحتواها والمساحة المتاحة. لا تُحسب الأسطر الفارغة.
                 </Alert>
               )}
               {!preview.rows.length && <Text c="dimmed">لا توجد صفوف صالحة. عدّل النص ثم أعد المعاينة.</Text>}

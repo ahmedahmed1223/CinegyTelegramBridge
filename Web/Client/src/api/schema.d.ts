@@ -3424,6 +3424,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/content/boards/paste": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProgrammeBoardPasteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProgrammeBoardPasteResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3837,6 +3921,8 @@ export interface components {
             page: number;
             /** Format: int32 */
             pageCount: number;
+            /** Format: int32 */
+            maxFieldLength: number;
         };
         ProgrammeBoardEditRequest: {
             action: string;
@@ -3878,6 +3964,28 @@ export interface components {
             /** Format: int32 */
             pageCount: number;
             canCreate: boolean;
+        };
+        ProgrammeBoardPastePreview: {
+            review: string;
+            fields: components["schemas"]["ProgrammeBoardField"][];
+            rows: {
+                [key: string]: string;
+            }[];
+            skippedLines: number[];
+        } | null;
+        ProgrammeBoardPasteRequest: {
+            action: string;
+            id: string;
+            /** Format: int32 */
+            revision: number;
+            format: string;
+            text: string;
+            review: string | null;
+        };
+        ProgrammeBoardPasteResult: {
+            preview: components["schemas"]["ProgrammeBoardPastePreview"];
+            /** Format: int32 */
+            savedPage: number | null;
         };
         ProgrammeBoardRow: {
             id: string;

@@ -835,6 +835,7 @@ function Get-WebProgrammeBoardEditor {
         revision = [int](Get-BoardProperty $Board 'Revision'); canEdit = (Test-BoardEditAllowed -Board $Board -ChatId $Actor -UserId $Actor)
         editRole = [string](Get-BoardProperty $Board 'EditRole' 'all'); canManage = (Test-Admin -ChatId $Actor -UserId $Actor)
         fields = $fields; sceneMedia = $sceneMedia; rows = $rows; total = $items.Count; page = $window.Page; pageCount = $window.PageCount
+        maxFieldLength = Get-SettingInt 'MaxFieldLength' 1
     }
 }
 
@@ -885,7 +886,8 @@ function Invoke-WebProgrammeBoardEdit {
     }
     if ((Get-JsonProp $Arguments 'revision') -ne (Get-BoardProperty $board 'Revision')) { return @{ ok = $false; error = 'board_stale' } }
     $rowId = [string](Get-JsonProp $Arguments 'rowId')
-    if ($action -notin @('add', 'role') -and (-not $rowId -or -not (Get-BoardItem -Board $board -ItemId $rowId))) {
+    $priorRow = if ($rowId) { Get-BoardItem -Board $board -ItemId $rowId }
+    if ($action -notin @('add', 'role') -and -not $priorRow) {
         return @{ ok = $false; error = 'not_found' }
     }
     $edit = @{ Board = $board; UserId = $actor }
@@ -893,14 +895,20 @@ function Invoke-WebProgrammeBoardEdit {
         $textFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' '')))
         $values = Get-JsonProp $Arguments 'values'
         if ($values -isnot [System.Collections.IDictionary] -or -not $values.Count) { return @{ ok = $false; error = 'board_invalid' } }
+        $previousValues = Get-BoardProperty $priorRow 'Values'
         $rowValues = @{}
         foreach ($name in $values.Keys) {
             if ($name -cnotin $textFields) { return @{ ok = $false; error = 'board_unknown_field' } }
             if ($values[$name] -isnot [string]) { return @{ ok = $false; error = 'board_invalid' } }
+            if ($action -eq 'update' -and $values[$name] -ceq [string](Get-BoardProperty $previousValues $name '')) { continue }
             $rowValues[$name] = $values[$name]
+        }
+        if ($action -eq 'update' -and -not $rowValues.Count) {
+            return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $board -Actor $actor -Page $page }
         }
         $edit.Values = $rowValues
         $edit.TextFields = $textFields
+        $edit.MaxFieldLength = Get-SettingInt 'MaxFieldLength' 1
     }
     $result = switch ($action) {
         'add' { Add-BoardItem @edit -MaxItems (Get-SettingInt 'BoardMaxItems' 100) }
@@ -917,4 +925,82 @@ function Invoke-WebProgrammeBoardEdit {
     Add-AuditEntry "Web programme board $action by $(Format-UserAuditActor -UserId $actor) ($boardId)"
     if ($action -eq 'add') { $page = [int][math]::Floor((@(Get-BoardProperty $result.Value 'Items' @()).Count - 1) / 20) }
     return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $result.Value -Actor $actor -Page $page }
+}
+
+function Read-WebProgrammeBoardPaste {
+    param([string]$Text, [string]$Format, [object[]]$Fields, [string[]]$Names)
+    if ($Format -eq 'table') { Read-WebTablePaste -Text $Text -Fields $Fields; return }
+    foreach ($line in ($Text -split '\r?\n')) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $parsed = ConvertFrom-BoardPasteText -Text $line -TextFields $Names
+        @{ values = $parsed.Rows | Select-Object -First 1 }
+    }
+}
+
+function Invoke-WebProgrammeBoardPaste {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $boardId = [string](Get-JsonProp $Arguments 'id')
+    if (-not $boardId) { return @{ ok = $false; error = 'not_found' } }
+    $board = Get-ContentBoard -BoardId $boardId
+    if (-not $board) { return @{ ok = $false; error = 'not_found' } }
+    if (-not (Test-BoardEditAllowed -Board $board -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $revision = Get-BoardProperty $board 'Revision'
+    if ((Get-JsonProp $Arguments 'revision') -ne $revision) { return @{ ok = $false; error = 'board_stale' } }
+
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $format = [string](Get-JsonProp $Arguments 'format')
+    $pasteText = [string](Get-JsonProp $Arguments 'text')
+    if ($action -notin 'preview', 'commit' -or $format -notin 'table', 'pipe' -or
+        [string]::IsNullOrWhiteSpace($pasteText) -or $pasteText.Length -gt 8000) {
+        return @{ ok = $false; error = 'board_paste_invalid' }
+    }
+    $template = [string](Get-BoardProperty $board 'TemplateKey' '')
+    $names = @(Get-BoardTextFields -TemplateKey $template)
+    if (-not $names.Count) { return @{ ok = $false; error = 'board_no_fields' } }
+    $fields = @(foreach ($name in $names) { @{ name = $name; label = Get-MojazFieldLabel -TemplateKey $template -FieldName $name } })
+    $pasted = @(Read-WebProgrammeBoardPaste -Text $pasteText -Format $format -Fields $fields -Names $names | Select-Object -First 41)
+    if ($pasted.Count -gt 40) { return @{ ok = $false; error = 'board_paste_invalid' } }
+
+    $capacity = (Get-SettingInt 'BoardMaxItems' 1) - @(Get-BoardProperty $board 'Items' @()).Count
+    $maxLength = Get-SettingInt 'MaxFieldLength' 1
+    $preparedRows = [System.Collections.Generic.List[object]]::new()
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $skipped = [System.Collections.Generic.List[int]]::new()
+    for ($index = 0; $index -lt $pasted.Count; $index++) {
+        $values = $pasted[$index].values
+        if ($values -and $rows.Count -lt $capacity) {
+            $item = New-BoardItemData -Values $values -TextFields $names -UserId $actor -MaxFieldLength $maxLength
+            if ($item.Success) {
+                $previewRow = [ordered]@{}
+                foreach ($name in $names) { $previewRow[$name] = [string](Get-BoardProperty $item.Value.Values $name '') }
+                $rows.Add($previewRow)
+                $preparedRows.Add($item.Value)
+                continue
+            }
+        }
+        $skipped.Add($index + 1)
+    }
+    $columns = @(foreach ($field in $fields) { , @($field.name, $field.label) })
+    $fingerprint = ConvertTo-Json -Depth 6 -Compress -InputObject @(
+        $actor, $boardId, $revision, $template, $format, $columns, $rows.ToArray(), $skipped.ToArray()
+    )
+    $review = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($fingerprint)))
+    if ($action -eq 'preview') {
+        return @{ ok = $true; data = @{ preview = @{
+                    review = $review; fields = $fields; rows = $rows.ToArray(); skippedLines = $skipped.ToArray()
+                } } }
+    }
+    if ((Get-JsonProp $Arguments 'review') -cne $review) { return @{ ok = $false; error = 'board_stale' } }
+    if (-not $preparedRows.Count) { return @{ ok = $false; error = 'board_paste_invalid' } }
+    $result = Update-ContentBoard -Board $board -UserId $actor -Change {
+        param($copy)
+        $copy.Items = @(@(Get-BoardProperty $copy 'Items' @()) + $preparedRows.ToArray())
+    }
+    if (-not $result.Success -or -not (Save-ContentBoard -Board $result.Value)) { return @{ ok = $false; error = 'board_save_failed' } }
+    Add-AuditEntry "Web programme board paste ($($rows.Count) rows) by $(Format-UserAuditActor -UserId $actor) ($boardId)"
+    $window = Get-BridgePageWindow -ItemCount @(Get-BoardProperty $result.Value 'Items' @()).Count -Page ([int]::MaxValue)
+    return @{ ok = $true; data = @{ savedPage = $window.Page } }
 }

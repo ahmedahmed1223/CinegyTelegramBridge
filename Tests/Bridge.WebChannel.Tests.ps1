@@ -1594,6 +1594,68 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'reviews a programme board paste and commits the same rows once' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-BoardsAvailable { $true }
+        Mock Get-BoardTextFields { 'programme.title'; 'programme.guest' }
+        Mock Get-MojazFieldLabel { $FieldName }
+        Mock Write-BridgeValidatedJson { $true }
+        $board = (New-ContentBoard -Name 'برنامج الاختبار' -TemplateKey 'Programme' -EditRole 'admin').Value
+        try {
+            Save-ContentBoard -Board $board | Should -BeTrue
+            $request = @{ actor = 4321; action = 'preview'; id = $board.Id; revision = $board.Revision; format = 'table'
+                text = "`tضيف أول`nفقرة ثانية`tضيف ثانٍ`nأ`tب`tج" }
+            $send = {
+                $line = @{ op = 'board.paste'; args = $request } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $preview = & $send
+            $preview.ok | Should -BeTrue
+            $preview.data.preview.rows.Count | Should -Be 2
+            $preview.data.preview.rows[0].'programme.title' | Should -BeNullOrEmpty
+            $preview.data.preview.rows[0].'programme.guest' | Should -Be 'ضيف أول'
+            $preview.data.preview.skippedLines | Should -Be @(3)
+            (Get-ContentBoard -BoardId $board.Id).Items.Count | Should -Be 0
+            $request.action = 'commit'
+            $request.review = $preview.data.preview.review
+            $request.actor = 4322
+            (& $send).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $originalText = $request.text
+            $request.text += "`nفقرة مختلفة`tضيف مختلف"
+            (& $send).error | Should -Be 'board_stale'
+            $request.text = $originalText
+            $saved = & $send
+            $saved.ok | Should -BeTrue
+            $saved.data.savedPage | Should -Be 0
+            $savedBoard = Get-ContentBoard -BoardId $board.Id
+            $savedBoard.Revision | Should -Be ($board.Revision + 1)
+            $savedBoard.Items.Count | Should -Be 2
+            (& $send).error | Should -Be 'board_stale'
+            $request.action = 'preview'
+            $request.revision = $savedBoard.Revision
+            $request.format = 'pipe'
+            $request.text = 'افتتاح | ضيف الافتتاح'
+            $pipePreview = & $send
+            $pipePreview.data.preview.rows[0].'programme.guest' | Should -Be 'ضيف الافتتاح'
+
+            $legacyTitle = 'أ' * 500
+            $legacy = Add-BoardItem -Board (Get-ContentBoard -BoardId $board.Id) -TextFields @('programme.title', 'programme.guest') `
+                -Values @{ 'programme.title' = $legacyTitle; 'programme.guest' = 'ضيف سابق' } -MaxFieldLength 500
+            Save-ContentBoard -Board $legacy.Value | Should -BeTrue
+            $legacyRow = $legacy.Value.Items[-1]
+            $line = @{ op = 'board.edit'; args = @{ actor = 4321; action = 'update'; id = $board.Id
+                    revision = $legacy.Value.Revision; rowId = $legacyRow.Id
+                    values = @{ 'programme.title' = $legacyTitle; 'programme.guest' = 'ضيف جديد' } } } | ConvertTo-Json -Compress -Depth 5
+            $edited = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            $edited.ok | Should -BeTrue
+            $edited.data.rows[-1].values.'programme.title' | Should -Be $legacyTitle
+            $edited.data.rows[-1].values.'programme.guest' | Should -Be 'ضيف جديد'
+        }
+        finally { Remove-ContentBoardFile -BoardId $board.Id }
+    }
+
     It 'shares programme boards with the bot and applies its row permissions and revision checks' {
         Mock Test-Authorized { $UserId -in 4321, 4322 }
         Mock Test-Admin { $UserId -eq 4321 }

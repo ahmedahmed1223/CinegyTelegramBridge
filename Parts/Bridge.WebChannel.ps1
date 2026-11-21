@@ -368,6 +368,7 @@ function Invoke-WebChannelOperation {
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'board.list' { return Get-WebProgrammeBoards -Arguments $arguments }
         'board.edit' { return Invoke-WebProgrammeBoardEdit -Arguments $arguments }
+        'board.paste' { return Invoke-WebProgrammeBoardPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
         'media.capture' { return Invoke-WebCapture -Arguments $arguments }
     }
@@ -1125,6 +1126,11 @@ function Read-WebBulletinPaste {
         }
         return
     }
+    Read-WebTablePaste -Text $Text -Fields $Fields
+}
+
+function Read-WebTablePaste {
+    param([string]$Text, [object[]]$Fields)
     $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new([IO.StringReader]::new($Text))
     try {
         $parser.SetDelimiters("`t")

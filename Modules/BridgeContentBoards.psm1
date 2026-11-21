@@ -212,6 +212,17 @@ function Add-BoardItem {
     if ($items.Count -ge $MaxItems) {
         return (New-BoardResult $false $null 'full' "بلغ الجدول سقفه ($MaxItems صفًّا).")
     }
+    $preparedItem = New-BoardItemData -Values $Values -TextFields $TextFields -UserId $UserId -MaxFieldLength $MaxFieldLength
+    if (-not $preparedItem.Success) { return $preparedItem }
+    return (Update-ContentBoard -Board $Board -UserId $UserId -Change {
+            param($board)
+            $board.Items = @(@($board.Items) + $preparedItem.Value)
+        })
+}
+
+function New-BoardItemData {
+    param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][string[]]$TextFields,
+        [long]$UserId = 0, [int]$MaxFieldLength = 500)
     $clean = @{}
     $filled = 0
     foreach ($field in $TextFields) {
@@ -230,16 +241,13 @@ function Add-BoardItem {
     if ($filled -lt 1) {
         return (New-BoardResult $false $null 'empty' 'لا بدّ من ملء حقل واحد على الأقل.')
     }
-    return (Update-ContentBoard -Board $Board -UserId $UserId -Change {
-            param($board)
-            $board.Items = @(@($board.Items) + [pscustomobject]@{
-                    Id = New-BoardItemId
-                    Values = [pscustomobject]$clean
-                    Enabled = $true
-                    UpdatedAt = [datetimeoffset]::Now.ToString('o')
-                    UpdatedByUserId = [long]$UserId
-                })
-        })
+    return (New-BoardResult $true ([pscustomobject]@{
+                Id = New-BoardItemId
+                Values = [pscustomobject]$clean
+                Enabled = $true
+                UpdatedAt = [datetimeoffset]::Now.ToString('o')
+                UpdatedByUserId = [long]$UserId
+            }))
 }
 
 function Set-BoardItemField {
@@ -413,6 +421,6 @@ function ConvertFrom-BoardPasteText {
 }
 
 Export-ModuleMember -Function New-BoardResult, Get-BoardProperty, Copy-BoardValue, New-BoardId,
-New-BoardItemId, ConvertTo-BoardText, Test-BoardEditRole, New-ContentBoard, Get-BoardItem,
+New-BoardItemId, New-BoardItemData, ConvertTo-BoardText, Test-BoardEditRole, New-ContentBoard, Get-BoardItem,
 Get-BoardItemPosition, Update-ContentBoard, Set-BoardEditRole, Add-BoardItem, Set-BoardItemField, Set-BoardItemFields, Set-BoardItemEnabled,
 Move-BoardItem, Remove-BoardItem, Get-BoardItemValues, Get-BoardOrphanFields, ConvertFrom-BoardPasteText

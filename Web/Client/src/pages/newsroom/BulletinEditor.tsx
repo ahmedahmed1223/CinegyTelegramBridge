@@ -8,7 +8,7 @@ import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, I
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
-import { BulletinPaste } from './BulletinPaste'
+import { BulletinPaste } from './RowPaste'
 import { BulletinPhotoDialog } from './BulletinPhotoDialog'
 import { BulletinPreview } from './BulletinPreview'
 import { BulletinRunStatus } from './BulletinPlayback'

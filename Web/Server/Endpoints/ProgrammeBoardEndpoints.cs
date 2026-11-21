@@ -23,6 +23,10 @@ internal static class ProgrammeBoardEndpoints
             .Produces<ProgrammeBoardEditor>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        boards.MapPost("/paste", Paste)
+            .Produces<ProgrammeBoardPasteResult>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
     }
 
     private static async Task<IResult> List(int? page, IBridgeChannel bridge, HttpContext http)
@@ -54,12 +58,24 @@ internal static class ProgrammeBoardEndpoints
         return TypedResults.Ok(reply.Data.Deserialize<ProgrammeBoardTemplates>(JsonDefaults.Options));
     }
 
+    private static async Task<IResult> Paste(ProgrammeBoardPasteRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("board.paste", new
+        {
+            actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.Format, request.Text, request.Review
+        }, http.RequestAborted);
+        if (!reply.Ok) return Error(reply.Error);
+        http.Response.Headers.CacheControl = "no-store";
+        return TypedResults.Ok(reply.Data.Deserialize<ProgrammeBoardPasteResult>(JsonDefaults.Options));
+    }
+
     private static IResult Error(string code) => code switch
     {
         "forbidden" => ApiErrors.Of(403, code),
         "not_found" or "content_disabled" or "board_missing_item" => ApiErrors.Of(404, code),
         "board_invalid" or "board_unknown_field" or "board_no_fields" or "board_too_long" or "board_empty" or "board_full"
             or "board_invalid_text" or "board_invalid_template" or "board_invalid_name" or "board_name_too_long" or "board_invalid_role"
+            or "board_paste_invalid"
             => ApiErrors.Of(400, code),
         "board_stale" or "board_at_edge" or "board_capacity" => ApiErrors.Of(409, code),
         "board_save_failed" => ApiErrors.Of(503, code),

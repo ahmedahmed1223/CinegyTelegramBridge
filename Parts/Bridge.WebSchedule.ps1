@@ -1,4 +1,5 @@
 $script:WebTemplateScheduleReviews = @{}
+$script:WebScheduleHoldReviews = @{}
 
 function ConvertTo-WebTemplateScheduleItem {
     param([hashtable]$Entry, [long]$Actor = 0, [array]$MaterialItems = @())
@@ -331,4 +332,68 @@ function Invoke-WebTemplateSchedule {
         }
         default { return @{ ok = $false; error = 'schedule_invalid' } }
     }
+}
+
+
+function Get-WebScheduleHoldSnapshot {
+    $paused = Get-Setting 'SchedulePaused'
+    $maintenance = Get-Setting 'MaintenanceMode'
+    if ($paused -isnot [bool] -or $maintenance -isnot [bool]) { return $null }
+
+    # This is the template queue gated by SchedulePaused. In particular, no
+    # material-feed lookup or scheduler tick is needed to review that gate.
+    $revisions = @(Get-UpcomingScheduleEvents | ForEach-Object { Get-ScheduledShowEventRevision -ScheduleEntry $_ } | Sort-Object)
+    return @{
+        paused = $paused; maintenance = $maintenance; pendingAppointments = $revisions.Count
+        fingerprint = ConvertTo-Json -InputObject @($paused, $maintenance, $revisions) -Compress
+    }
+}
+
+function New-WebScheduleHoldReview {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline)
+
+    $actor = Get-WebAdminSettingActor -Arguments $Arguments
+    if (-not $actor) { return @{ ok = $false; error = 'forbidden' } }
+    $desired = Get-JsonProp $Arguments 'paused'
+    if ($desired -isnot [bool]) { return @{ ok = $false; error = 'schedule_hold_invalid' } }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+    $state = Get-WebScheduleHoldSnapshot
+    if (-not $state) { return @{ ok = $false; error = 'schedule_hold_unavailable' } }
+    if ($desired -eq $state.paused) { return @{ ok = $false; error = 'schedule_hold_stale' } }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+
+    $token = New-WebAirReview -Actor $actor -Fingerprint $state.fingerprint -Reviews $script:WebScheduleHoldReviews
+    $script:WebScheduleHoldReviews[$actor].Paused = $desired
+    return @{ ok = $true; data = @{
+        review = $token; currentlyPaused = $state.paused; paused = $desired
+        pendingAppointments = $state.pendingAppointments; maintenance = $state.maintenance
+    } }
+}
+
+function Complete-WebScheduleHoldReview {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline)
+
+    $actor = Get-WebAdminSettingActor -Arguments $Arguments
+    if (-not $actor) { return @{ ok = $false; error = 'forbidden' } }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+    $stale = @{ ok = $false; error = 'schedule_hold_stale' }
+    $reviewed = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebScheduleHoldReviews
+    if (-not $reviewed) { return $stale }
+    $state = Get-WebScheduleHoldSnapshot
+    if (-not $state -or $reviewed.Fingerprint -cne $state.fingerprint -or $reviewed.Paused -eq $state.paused) { return $stale }
+
+    $secondsLeft = ($reviewed.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
+    if ($secondsLeft -le 0) { return $stale }
+    $writeDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($secondsLeft * [Diagnostics.Stopwatch]::Frequency)
+    if ($Deadline -gt 0) { $writeDeadline = [math]::Min($Deadline, $writeDeadline) }
+    $expected = @{ SchedulePaused = $state.paused; MaintenanceMode = $state.maintenance }
+    $patch = @(@{ Name = 'SchedulePaused'; From = $state.paused; To = [bool]$reviewed.Paused })
+    if (-not (Set-ImportedSettings -Changes $patch -ReviewedExpected $expected -Deadline $writeDeadline)) {
+        if ($script:LastConfigSaveConflict) { return $stale }
+        return @{ ok = $false; error = 'schedule_hold_save_failed' }
+    }
+    Add-AuditEntry (T 'kb.settingAudit' 'SchedulePaused' $reviewed.Paused (Format-UserAuditActor -UserId $actor)) | Out-Null
+    return @{ ok = $true; data = @{
+        paused = [bool]$reviewed.Paused; pendingAppointments = $state.pendingAppointments; maintenance = $state.maintenance
+    } }
 }

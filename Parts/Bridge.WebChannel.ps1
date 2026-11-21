@@ -357,6 +357,11 @@ function Invoke-WebChannelOperation {
         'air.templateScene' { return Invoke-WebTemplateSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateCatalogue' { return Start-WebSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateDefinition' { return Invoke-WebTemplateDefinition -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.templateFavorites' { return Get-WebTemplateFavorites -Arguments $arguments }
+        'air.templateFavorite.set' { return Set-WebTemplateFavorite -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.settings.import.review' { return New-WebAdminSettingsImportReview -Arguments $arguments }
+        'admin.settings.import.confirm' { return Complete-WebAdminSettingsImportReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.settings.export' { return Get-WebAdminSettingsExport -Arguments $arguments }
         'admin.settings.review' { return New-WebAdminSettingReview -Arguments $arguments }
         'admin.settings.confirm' { return Complete-WebAdminSettingReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.notifications.coverage' { return Get-WebAdminNotificationCoverage -Arguments $arguments }
@@ -385,6 +390,8 @@ function Invoke-WebChannelOperation {
         'admin.announcements.cancel.confirm' { return Complete-WebAnnouncementCancelReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.diagnostics.runtime-files' { return Get-WebRuntimeFileDiagnostics -Arguments $arguments }
         'schedule.executions' { return Get-WebScheduleExecutionPage -Arguments $arguments }
+        'schedule.hold.review' { return New-WebScheduleHoldReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'schedule.hold.confirm' { return Complete-WebScheduleHoldReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'reports.templates' { return Get-WebTemplateReport -Arguments $arguments }
         'reports.weekly' { return Get-WebWeeklyReport -Arguments $arguments }
         'reports.handover' { return Get-WebShiftHandoverReport -Arguments $arguments }
@@ -392,6 +399,7 @@ function Invoke-WebChannelOperation {
         'reports.bulletins' { return Get-WebBulletinReport -Arguments $arguments }
         'reports.work-summary' { return Get-WebWorkSummary -Arguments $arguments }
         'shift.history' { return Invoke-WebShiftHistory -Arguments $arguments }
+        'shift.operation-reference' { return Get-WebOperationReferenceLookup -Arguments $arguments }
         'air.maintenance' { return Invoke-WebAirMaintenance -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.emergency-hide' { return Invoke-WebEmergencyHide -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.timer' { return Invoke-WebAirTimer -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -400,6 +408,9 @@ function Invoke-WebChannelOperation {
         'air.rerun' { return Invoke-WebAirRerun -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'schedule.templates' { return Invoke-WebTemplateSchedule -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.requests' { return Get-WebTelegramAccessRequests -Arguments $arguments }
+        'admin.layerNames' { return Get-WebLayerNames -Arguments $arguments }
+        'admin.layerName.review' { return New-WebLayerNameReview -Arguments $arguments }
+        'admin.layerName.confirm' { return Complete-WebLayerNameReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.review' { return New-WebTelegramAccessDecisionReview -Arguments $arguments }
         'telegram.access.decide' { return Invoke-WebTelegramAccessDecision -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.role' { return Set-WebTelegramAccessRole -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -409,6 +420,11 @@ function Invoke-WebChannelOperation {
         'air.show' { return Invoke-WebAirShow -Arguments $arguments }
         'air.template-issues' { return Invoke-WebTemplateIssue -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.template-backups' { return Invoke-WebTemplateBackup -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.template-registry-export' { return Invoke-WebTemplateRegistryExport -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.template-registry-import' { return Invoke-WebTemplateRegistryImport -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.templateMaxAir' { return Get-WebTemplateMaxAir -Arguments $arguments }
+        'air.templateMaxAir.review' { return New-WebTemplateMaxAirReview -Arguments $arguments }
+        'air.templateMaxAir.confirm' { return Complete-WebTemplateMaxAirReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.layer-removal' { return Invoke-WebLayerRemoval -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
@@ -770,11 +786,11 @@ function Revoke-WebOnlyAccount {
 # ------------------------------------------------------------- air operations
 
 function Get-WebSceneItem {
-    param([string]$Root, [string]$RelativePath)
+    param([string]$Root, [string]$RelativePath, [switch]$IncludeHidden)
 
     # The configured root is trusted. Reject links at every descendant so a
     # junction cannot turn this picker into a browser for the rest of the host.
-    $cursor = Get-Item -LiteralPath $Root -ErrorAction SilentlyContinue
+    $cursor = Get-Item -LiteralPath $Root -Force:$IncludeHidden -ErrorAction SilentlyContinue
     if (-not $cursor -or -not $cursor.PSIsContainer) { return }
     if (-not $RelativePath) { return $cursor }
     if ($RelativePath.Length -gt 1024) { return }
@@ -782,7 +798,7 @@ function Get-WebSceneItem {
         if (-not $cursor.PSIsContainer -or -not $segment -or $segment -in '.', '..' -or
             $segment.EndsWith('.') -or $segment.EndsWith(' ') -or
             $segment.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) { return }
-        $cursor = Get-Item -LiteralPath (Join-Path $cursor.FullName $segment) -ErrorAction SilentlyContinue
+        $cursor = Get-Item -LiteralPath (Join-Path $cursor.FullName $segment) -Force:$IncludeHidden -ErrorAction SilentlyContinue
         if (-not $cursor -or ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
     }
     return $cursor

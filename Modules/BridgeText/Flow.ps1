@@ -23,7 +23,10 @@ function Add-BridgeTextFlow {
     $catalogue['cmd.empty'] = @{ ar = '(فارغ)'; en = '(empty)' }
     $catalogue['cmd.pressToToggle'] = @{ ar = 'اضغط خيارًا لتبديله أو تغيير قيمته.'; en = 'Press an option to toggle it or change its value.' }
     $catalogue['cmd.noLayersSelected'] = @{ ar = 'لا توجد طبقات محددة'; en = 'No layers are selected' }
-    $catalogue['cmd.nameTooLong'] = @{ ar = '❌ الاسم يجب أن يكون حتى 60 حرفًا، ولا يحتوي على ; أو =. لم يتغيّر شيء.'; en = '❌ The name must be at most 60 characters and contain no ; or =. Nothing changed.' }
+    $catalogue['cmd.nameTooLong'] = @{ ar = 'اكتب اسمًا قصيرًا للطبقة، حتى ٦٠ حرفًا ومن دون ; أو =.'; en = 'Enter a short layer label of up to 60 characters without ; or =.' }
+    $catalogue['cmd.layerNameSingleLine'] = @{ ar = 'أرسل اسم الطبقة في سطر واحد.'; en = 'Send the layer name on one line.' }
+    $catalogue['cmd.layerNameGone'] = @{ ar = 'لم تعد الطبقة ضمن القائمة.'; en = 'The layer is no longer in the list.' }
+    $catalogue['cmd.layerNameNotSaved'] = @{ ar = 'تعذّر حفظ اسم الطبقة.'; en = 'The layer name could not be saved.' }
     $catalogue['cmd.noNameYet'] = @{ ar = 'لا يوجد اسم حاليًا.'; en = 'There is no name at present.' }
     $catalogue['cmd.nameEmpty'] = @{ ar = '❌ الاسم فارغ. استخدم زر «مسح الاسم» إن أردت حذفه.'; en = '❌ The name is empty. Use the "clear the name" button if you want it gone.' }
     $catalogue['cmd.layerNotInTemplates'] = @{ ar = 'هذه الطبقة لم تعد ضمن القوالب المعرّفة.'; en = 'That layer is no longer among the defined templates.' }

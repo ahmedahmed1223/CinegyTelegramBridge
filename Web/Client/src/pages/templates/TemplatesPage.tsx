@@ -14,7 +14,7 @@ import {
   TextInput,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { IconFlask, IconPlayerPlay, IconPlus, IconRefresh, IconSearch, IconSettings } from '@tabler/icons-react'
+import { IconFlask, IconPlayerPlay, IconPlus, IconRefresh, IconSearch, IconSettings, IconStar, IconStarFilled } from '@tabler/icons-react'
 import { useState } from 'react'
 import { getTemplates, type TemplateDto } from '../../api/air'
 import { messageFor } from '../../api/messages'
@@ -23,9 +23,13 @@ import { PageHeader } from '../../components/PageHeader'
 import { ShowModal } from './ShowModal'
 import { TemplateIssues } from './TemplateIssues'
 import { TemplateBackups } from './TemplateBackups'
+import { TemplateRegistryExport } from './TemplateRegistryExport'
+import { TemplateRegistryImport } from './TemplateRegistryImport'
 import { TemplateRehearsal } from './TemplateRehearsal'
 import { TemplateRegistration } from './TemplateRegistration'
 import { TemplateDefinitionEditor } from './TemplateDefinitionEditor'
+import { useTemplateFavorites } from './useTemplateFavorites'
+import { TemplateMaxAirEditor } from './TemplateMaxAirEditor'
 import { TemplateRerun, type TemplateRerunKind } from './TemplateRerun'
 
 export function TemplatesPage() {
@@ -34,11 +38,20 @@ export function TemplatesPage() {
   const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
   const [registering, setRegistering] = useState(false)
   const [backupsOpen, setBackupsOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [managingKey, setManagingKey] = useState<string | null>(null)
+  const [airLimitKey, setAirLimitKey] = useState<string | null>(null)
   const [rerunKind, setRerunKind] = useState<TemplateRerunKind | null>(null)
   const session = useSession()
   const canRehearse = isAdmin(session.data)
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const { favorites, toggle } = useTemplateFavorites(session.data?.id)
+  const favoritesEnabled = favorites.data?.enabled === true && !favorites.isError
+  const favoriteKeys = new Set(favorites.data?.selectedKeys)
+  const eligibleKeys = new Set(favorites.data?.eligibleKeys)
+  const favoritesFiltered = favoritesEnabled && favoritesOnly
   const { data: templates, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['templates'],
     queryFn: getTemplates,
@@ -46,6 +59,7 @@ export function TemplatesPage() {
 
   const q = search.trim().toLowerCase()
   const filtered = (templates ?? []).filter((t) => {
+    if (favoritesFiltered && !favoriteKeys.has(t.key)) return false
     if (!q) return true
     return (
       t.name.toLowerCase().includes(q) ||
@@ -66,6 +80,8 @@ export function TemplatesPage() {
             <Menu.Dropdown>
               <Menu.Item leftSection={<IconPlus size={17} />} onClick={() => setRegistering(true)}>تسجيل قالب</Menu.Item>
               <Menu.Item onClick={() => setBackupsOpen(true)}>نسخ القوالب</Menu.Item>
+              <Menu.Item onClick={() => setExporting(true)}>تنزيل سجل القوالب</Menu.Item>
+              <Menu.Item onClick={() => setImporting(true)}>استيراد سجل القوالب</Menu.Item>
               <Menu.Item onClick={() => setIssuesOpen(true)}>قوالب غير صالحة</Menu.Item>
             </Menu.Dropdown>
           </Menu>}
@@ -84,6 +100,8 @@ export function TemplatesPage() {
       {registering && <TemplateRegistration onClose={() => setRegistering(false)} />}
       {issuesOpen && <TemplateIssues onClose={() => setIssuesOpen(false)} />}
       {backupsOpen && <TemplateBackups onClose={() => setBackupsOpen(false)} />}
+      {exporting && <TemplateRegistryExport onClose={() => setExporting(false)} />}
+      {importing && <TemplateRegistryImport onClose={() => setImporting(false)} onSaved={() => void refetch()} />}
       {rerunKind && <TemplateRerun key={rerunKind} kind={rerunKind} onClose={() => setRerunKind(null)} />}
 
       <TextInput
@@ -96,6 +114,14 @@ export function TemplatesPage() {
         radius="md"
       />
 
+      {favoritesEnabled && (
+        <Group>
+          <Button variant={favoritesFiltered ? 'light' : 'default'} aria-pressed={favoritesFiltered}
+            leftSection={<IconStar size={17} />} onClick={() => setFavoritesOnly((current) => !current)}>
+            المفضّلة فقط
+          </Button>
+        </Group>
+      )}
       {error ? (
         <Alert color="red" title="تعذّر تحميل القوالب" role="alert">
           <Stack align="flex-start" gap="xs">
@@ -113,9 +139,9 @@ export function TemplatesPage() {
         </SimpleGrid>
       ) : filtered.length === 0 ? (
         <Paper p="xl" radius="lg" ta="center">
-          <Text fw={600}>{q ? 'لا توجد قوالب مطابقة' : 'مكتبة القوالب فارغة'}</Text>
+          <Text fw={600}>{q ? 'لا توجد قوالب مطابقة' : favoritesFiltered ? 'لا توجد قوالب في المفضّلة' : 'مكتبة القوالب فارغة'}</Text>
           <Text size="sm" c="dimmed" mt={4}>
-            {q ? 'جرّب اسمًا آخر أو رقم الطبقة.' : 'تظهر هنا القوالب المسجّلة في الجسر.'}
+            {q ? 'جرّب اسمًا آخر أو رقم الطبقة.' : favoritesFiltered ? 'أضف قالبًا إلى المفضّلة من قائمة القوالب.' : 'تظهر هنا القوالب المسجّلة في الجسر.'}
           </Text>
         </Paper>
       ) : (
@@ -136,10 +162,17 @@ export function TemplatesPage() {
                     <Badge color="blue" variant="light" size="sm" radius="sm" style={{ flexShrink: 0 }}>
                       طبقة {template.layer}
                     </Badge>
-                    {canRehearse && <ActionIcon variant="subtle" color="gray" style={{ flexShrink: 0 }}
-                      aria-label={`إدارة قالب ${template.name}`} onClick={() => setManagingKey(template.key)}>
-                      <IconSettings size={18} />
-                    </ActionIcon>}
+                    {canRehearse && <Menu>
+                      <Menu.Target>
+                        <ActionIcon variant="subtle" color="gray" style={{ flexShrink: 0 }} aria-label={`إدارة قالب ${template.name}`}>
+                          <IconSettings size={18} />
+                        </ActionIcon>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        <Menu.Item onClick={() => setManagingKey(template.key)}>تعريف القالب</Menu.Item>
+                        <Menu.Item onClick={() => setAirLimitKey(template.key)}>أقصى مدة على الهواء</Menu.Item>
+                      </Menu.Dropdown>
+                    </Menu>}
                   </Group>
 
                   <Group gap={6} mt={4}>
@@ -156,6 +189,14 @@ export function TemplatesPage() {
                     <Badge variant="subtle" color="gray" size="xs">
                       {template.fields.length} حقول
                     </Badge>
+                    {favoritesEnabled && eligibleKeys.has(template.key) && (
+                      <ActionIcon variant="subtle" color={favoriteKeys.has(template.key) ? 'yellow' : 'gray'}
+                        size="sm" disabled={toggle.isPending} aria-pressed={favoriteKeys.has(template.key)}
+                        aria-label={`المفضّلة: ${template.name}`}
+                        onClick={() => toggle.mutate({ key: template.key, selected: !favoriteKeys.has(template.key) })}>
+                        {favoriteKeys.has(template.key) ? <IconStarFilled size={17} /> : <IconStar size={17} />}
+                      </ActionIcon>
+                    )}
                   </Group>
                 </Stack>
 
@@ -174,6 +215,7 @@ export function TemplatesPage() {
       {selectedTemplate && <ShowModal template={selectedTemplate} onClose={() => setSelectedTemplate(null)} />}
       {trialTemplate && <TemplateRehearsal template={trialTemplate} onClose={() => setTrialTemplate(null)} />}
       {managingKey && <TemplateDefinitionEditor templateKey={managingKey} onClose={() => setManagingKey(null)} />}
+      {airLimitKey && <TemplateMaxAirEditor templateKey={airLimitKey} onClose={() => setAirLimitKey(null)} />}
     </Stack>
   )
 }

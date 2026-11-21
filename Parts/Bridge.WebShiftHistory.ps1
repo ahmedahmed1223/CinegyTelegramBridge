@@ -72,8 +72,7 @@ function Get-WebShiftHistoryRequest {
 function ConvertTo-WebShiftHistoryItem {
     param($Record, [bool]$ShowOperator)
 
-    $reference = [string]$Record.OperationId
-    if ($reference -cnotmatch '^[A-Za-z0-9_-]{1,80}$') { $reference = '' }
+    $reference = Get-WebAirOperationReference -EventName ([string]$Record.Event) -OperationId ([string]$Record.OperationId)
     $at = [datetimeoffset]([datetime]$Record.When)
     $operatorId = if ($ShowOperator -and [string]$Record.UserId -match '^[1-9][0-9]{0,18}$') { [string]$Record.UserId } else { '' }
     return [ordered]@{

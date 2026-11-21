@@ -43,11 +43,26 @@ export async function uploadBulletinPhoto(file: File, id: string, rowId: string 
   return await response.json() as Schemas['BulletinEditor']
 }
 
-async function postBinary(path: string, query: URLSearchParams, file: File, sizeError: string) {
-  const response = await fetch(`${path}?${query}`, {
+export async function uploadTemplateRegistry(file: File, review?: string): Promise<Schemas['TemplateRegistryImportReview'] | null> {
+  const path = (review ? '/api/air/template-registry/import/confirm' : '/api/air/template-registry/import/review') satisfies keyof paths
+  const headers = review ? { 'X-Template-Registry-Review': review } : undefined
+  const response = await postBinary(path, new URLSearchParams(), file, 'template_registry_import_size', headers)
+  return response.status === 204 ? null : await response.json() as Schemas['TemplateRegistryImportReview']
+}
+
+export async function uploadAdminSettingsImport(file: File): Promise<Schemas['WebSettingsImportPreview']> {
+  const path = '/api/admin/settings/import/review' satisfies keyof paths
+  const response = await postBinary(path, new URLSearchParams(), file, 'settings_import_size', undefined, 'application/json')
+  return await response.json() as Schemas['WebSettingsImportPreview']
+}
+
+async function postBinary(path: string, query: URLSearchParams, file: File, sizeError: string,
+  extraHeaders?: Record<string, string>, contentType = 'application/octet-stream') {
+  const target = query.size ? `${path}?${query}` : path
+  const response = await fetch(target, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/octet-stream', 'X-XSRF-TOKEN': csrfToken },
+    headers: { 'Content-Type': contentType, 'X-XSRF-TOKEN': csrfToken, ...extraHeaders },
     body: file,
   })
   if (response.status === 413) throw new Error(sizeError)

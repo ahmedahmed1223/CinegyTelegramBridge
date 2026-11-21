@@ -152,34 +152,19 @@ function Set-LayerName {
         [long]$UserId = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
-    $trimmed = $Name.Trim()
-    if ($trimmed.Length -gt 60 -or $trimmed.IndexOfAny([char[]]';=') -ge 0) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.nameTooLong') -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
+    $saved = Save-LayerName -Layer $Layer -Name $Name -UserId $UserId -NormalizeOtherPairs
+    if (-not $saved.ok) {
+        $failure = switch ($saved.error) {
+            'layer_name_invalid' { (T 'cmd.nameTooLong') }
+            'layer_name_single_line' { (T 'cmd.layerNameSingleLine') }
+            'layer_name_not_found' { (T 'cmd.layerNameGone') }
+            default { (T 'cmd.layerNameNotSaved') }
+        }
+        Send-TelegramMessage -ChatId $ChatId -Text $failure -ReplyMarkup (Get-LayerNameEditKeyboard -Layer $Layer)
         return $false
     }
-
-    $names = [ordered]@{}
-    foreach ($pair in @([string](Get-Setting 'LayerNames') -split ';')) {
-        if ([string]::IsNullOrWhiteSpace($pair)) { continue }
-        $parts = $pair -split '=', 2
-        if ($parts.Count -lt 2) { continue }
-        $number = 0
-        if ([int]::TryParse($parts[0].Trim(), [ref]$number) -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
-            $key = [string]$number
-            $names[$key] = $parts[1].Trim()
-        }
-    }
-    $layerKey = [string]$Layer
-    if ([string]::IsNullOrWhiteSpace($trimmed)) { $names.Remove($layerKey) | Out-Null }
-    else { $names[$layerKey] = $trimmed }
-
-    $stored = @($names.Keys | Sort-Object { [int]$_ } | ForEach-Object { "$_=$($names[$_])" }) -join ';'
-    Set-Setting -Name 'LayerNames' -Value $stored
-    $action = if ([string]::IsNullOrWhiteSpace($trimmed)) { 'cleared' } else { "set to '$trimmed'" }
-    Write-BridgeLog "User $UserId $action layer $Layer name"
-    Add-AuditEntry (T 'cmd.layerNameAudit' $Layer $action $(Format-UserAuditActor -UserId $UserId))
-    $message = if ([string]::IsNullOrWhiteSpace($trimmed)) { (T 'cmd.layerNameCleared' $Layer) } else { (T 'cmd.nameSaved' $(Get-LayerDisplayName -Layer $Layer)) }
-    Send-TelegramMessage -ChatId $ChatId -Text "$message$(Get-ConfigSaveWarning)" -ReplyMarkup (Get-LayerNamesKeyboard)
+    $message = if ($saved.name) { (T 'cmd.nameSaved' (Get-LayerDisplayName -Layer $Layer)) } else { (T 'cmd.layerNameCleared' $Layer) }
+    Send-TelegramMessage -ChatId $ChatId -Text $message -ReplyMarkup (Get-LayerNamesKeyboard)
     return $true
 }
 
@@ -197,6 +182,7 @@ function Complete-LayerName {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or $state.Mode -ne 'layer_name') { return }
     Clear-PendingState -ChatId $ChatId
+    if (-not (Test-Admin -ChatId $ChatId -UserId ([long]$state.UserId))) { return }
     if ([string]::IsNullOrWhiteSpace($Value)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.nameEmpty') -ReplyMarkup (Get-LayerNameEditKeyboard -Layer ([int]$state.Layer))
         return
@@ -336,15 +322,9 @@ function Complete-TemplateMaxAirCustom {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.range1to3600') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
-    $previous = Get-Setting 'TemplateMaxAirSeconds'
-    $map = @{}
-    if ($previous) { $map = ($previous | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable) }
     $key = [string](Get-JsonProp $state 'Key')
-    $map[$key] = $seconds
-    $script:LastConfigSaveFailed = $false
-    Set-Setting -Name TemplateMaxAirSeconds -Value $map
-    if ($script:LastConfigSaveFailed) {
-        Set-JsonProp $config.Settings 'TemplateMaxAirSeconds' $previous
+    $saved = Set-TemplateMaxAirPolicy -Key $key -Seconds $seconds -UserId ([long](Get-JsonProp $state 'UserId'))
+    if (-not $saved.ok) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.limitSaveFailed') -ReplyMarkup (Get-SettingsKeyboard)
         return
     }
@@ -354,7 +334,6 @@ function Complete-TemplateMaxAirCustom {
         $s = $seconds % 60
         if ($s -eq 0) { (T 'cmd.minutes' $m) } else { (T 'cmd.minutesSeconds' $m $s) }
     } else { (T 'cmd.seconds' $seconds) }
-    Write-BridgeLog "Template maximum on-air policy updated by $($state.UserId) to $seconds seconds (custom input)."
     Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.ceilingSet' $key $friendly) -ReplyMarkup (Get-SettingsKeyboard)
 }
 

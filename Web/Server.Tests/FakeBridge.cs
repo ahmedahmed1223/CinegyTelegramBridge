@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text.Json;
 using CinegyBridge.Web.Bridge;
 
@@ -21,6 +22,9 @@ public sealed class FakeBridge : IBridgeChannel
     public string CaptureId { get; } = Guid.NewGuid().ToString("N");
     public string? TickerTxtDirectory { get; set; }
     public byte[]? TickerTxtBytes { get; private set; }
+    public string? RegistryTransferDirectory { get; set; }
+    public byte[] RegistryTransferBytes { get; set; } = [123, 32, 13, 10, 125];
+    public byte[]? RegistryUploadBytes { get; private set; }
 
     public Task<BridgeReply> SendAsync(string op, object? args = null, CancellationToken cancellationToken = default)
     {
@@ -75,6 +79,15 @@ public sealed class FakeBridge : IBridgeChannel
                 new BridgeReply(false, default, "forbidden"),
             "reports.ticker" when a.GetProperty("action").GetString() == "export" =>
                 Reply("""{"html":"<!doctype html><p>Fixture ticker</p>","days":1,"publishes":2,"truncated":false}"""),
+            "air.template-registry-import" => RegistryTransfer(a, export: false),
+            "air.template-registry-export" => RegistryTransfer(a, export: true),
+            "shift.operation-reference" => a.GetProperty("reference").GetString() switch
+            {
+                "5023333B" => Reply("""{"status":"found","readLimit":5000,"truncated":false,"items":[{"atMs":1773133200000,"stationTime":"2026-03-10 09:00:00 +00:00","action":"SHOW","result":"failed","layer":7,"durationMs":50}]}"""),
+                "abcdef01" => Reply("""{"status":"collision","readLimit":5000,"truncated":false,"items":[]}"""),
+                "f00dcafe" => Reply("""{"status":"missing","readLimit":5000,"truncated":false,"items":[]}"""),
+                _ => new BridgeReply(false, default, "operation_reference_invalid"),
+            },
             "reports.weekly" => Reply("""{"from":"2026-03-04 00:00:00 +02:00","through":"2026-03-10 09:00:00 +02:00","tickerPublishes":2,"tickerLast":"","urgentRuns":1,"urgentStories":1,"nearLimit":false,"peakScreen":"","peakPercent":0,"idleCount":0,"idle":[],"repeatCounts":[2],"changedCount":0,"changed":[],"truncated":false}"""),
             "reports.handover" => Reply("""{"hours":4,"truncated":false,"connection":"Cinegy: healthy","activeCount":0,"active":[],"showCount":2,"hiddenGroups":0,"shows":[],"removalCount":1,"lastRemoval":"","failureCount":0,"blockedCount":0,"notableCount":0,"recentFailures":[]}"""),
             "reports.templates" when a.GetProperty("scope").GetString() == "all" && a.GetProperty("actor").GetInt64() == WebApp.Operator =>
@@ -109,6 +122,40 @@ public sealed class FakeBridge : IBridgeChannel
                 : new BridgeReply(false, default, "urgent_stale"),
             _ => new BridgeReply(false, default, "unknown_op"),
         });
+    }
+
+    private BridgeReply RegistryTransfer(JsonElement args, bool export)
+    {
+        const string ticket = "0123456789abcdef0123456789abcdef";
+        var action = args.GetProperty("action").GetString();
+        if (RegistryTransferDirectory is not { } directory) return BridgeReply.Unavailable;
+        if (action == "prepare")
+            return Reply(JsonSerializer.Serialize(new { directory, maximumBytes = 10 * 1024 * 1024 }));
+        if (export && action == "review")
+            return Reply(JsonSerializer.Serialize(new { review = ticket, templates = 1, bytes = RegistryTransferBytes.Length }));
+        if (action != "review" && args.GetProperty("review").GetString() != ticket)
+            return new BridgeReply(false, default, "template_registry_import_stale");
+        var id = args.GetProperty("transferId").GetString();
+        var path = Path.Combine(directory, $"{(export ? "download" : "upload")}-{id}.json");
+        const FileShare share = FileShare.ReadWrite | FileShare.Delete;
+        if (export)
+        {
+            using var target = new FileStream(path, FileMode.Open, FileAccess.Write, share);
+            target.Write(RegistryTransferBytes);
+            return Reply(JsonSerializer.Serialize(new
+            {
+                bytes = RegistryTransferBytes.Length,
+                sha256 = Convert.ToHexString(SHA256.HashData(RegistryTransferBytes)),
+            }));
+        }
+        using var upload = new FileStream(path, FileMode.Open, FileAccess.Read, share);
+        var bytes = new byte[checked((int)upload.Length)];
+        upload.ReadExactly(bytes);
+        RegistryUploadBytes = bytes;
+        if (action == "review")
+            return Reply("""{"review":"0123456789abcdef0123456789abcdef","templates":2,"added":1,"changed":0,"removed":0,"unchanged":1}""");
+        RegistryTransferBytes = bytes;
+        return Reply("{}");
     }
 
     private BridgeReply TickerTxt(JsonElement args)

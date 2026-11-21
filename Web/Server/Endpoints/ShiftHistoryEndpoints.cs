@@ -30,6 +30,8 @@ public static class ShiftHistoryEndpoints
     public static void MapShiftHistoryEndpoints(this IEndpointRouteBuilder app)
     {
         var history = app.MapGroup("/api/history").WithTags("Shift history").RequireAuthorization();
+        history.MapGet("/operation-reference", LookupOperationReference).RequireAuthorization(AccountEndpoints.AdminPolicy)
+            .Produces<OperationReferenceLookup>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
         history.MapGet("/operations", Operations).Produces<ShiftHistoryPage>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
         history.MapGet("/audit", Audit).RequireAuthorization(AccountEndpoints.AdminPolicy).Produces<ShiftHistoryPage>()
@@ -38,6 +40,19 @@ public static class ShiftHistoryEndpoints
             .Produces<ShiftHistoryExport>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
         history.MapGet("/audit/export", ExportAudit).RequireAuthorization(AccountEndpoints.AdminPolicy)
             .Produces<ShiftHistoryExport>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
+    }
+
+    private static async Task<IResult> LookupOperationReference(string? reference, HttpContext http, IBridgeChannel bridge)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("shift.operation-reference", new { actor = http.User.UserId(), reference }, http.RequestAborted);
+        if (reply.Ok) return TypedResults.Ok(reply.Data.Deserialize<OperationReferenceLookup>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "operation_reference_invalid" => ApiErrors.Of(400, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
     }
 
     private static Task<IResult> Operations([AsParameters] ShiftHistoryQuery filters, HttpContext http, IBridgeChannel bridge) =>

@@ -169,6 +169,74 @@ Describe 'Web channel: the pipe' {
     }
     AfterAll { Stop-WebChannel }
 
+    It 'shares saved template favorites with the Bot through the named pipe and isolates operators' {
+        $previousFavorites = $script:UserFavorites
+        $script:UserFavorites = @{ '4321' = @('Caption') }
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Get-TemplateStore {
+            @{
+                Order = @('Caption', 'Headline')
+                Map = @{ Caption = @{ Key = 'Caption'; Layer = 5 }; Headline = @{ Key = 'Headline'; Layer = 6 } }
+            }
+        }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableFavorites' }
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'FavoritesCount' }
+        Mock Save-UserFavorites { $true }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'air.templateFavorites' @{ actor = 4321 }).data.selectedKeys | Should -Be @('Caption')
+            $edit = @{ actor = 4321; key = 'Headline'; selected = $true }
+            $updated = & $call 'air.templateFavorite.set' $edit
+            $updated.ok | Should -BeTrue
+            $updated.data.selectedKeys | Should -Be @('Caption', 'Headline')
+            $updated.data.promotedKeys | Should -Be @('Caption')
+            @(Get-UserFavoriteSelection -UserId 4321) | Should -Be @('Caption', 'Headline')
+            (& $call 'air.templateFavorite.set' $edit).ok | Should -BeTrue
+            @((& $call 'air.templateFavorites' @{ actor = 4322 }).data.selectedKeys).Count | Should -Be 0
+            Should -Invoke Save-UserFavorites -Times 1 -Exactly
+        }
+        finally { $script:UserFavorites = $previousFavorites }
+    }
+
+    It 'sets a reviewed template maximum through the named pipe without sending any air command' {
+        $previousReviews = $script:WebTemplateMaxAirReviews
+        $script:WebTemplateMaxAirReviews = @{}
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-TemplateStore { @{ Map = @{ Caption = @{ Key = 'Caption'; Layer = 5 } } } }
+        Mock Get-TemplatePresetRegistryRevision { 'registry-revision' }
+        Mock Get-Setting { @{ Caption = 120 } } -ParameterFilter { $Name -eq 'TemplateMaxAirSeconds' }
+        Mock Set-TemplateMaxAirPolicy { @{ ok = $true } }
+        Mock Invoke-ShowTemplateResult { throw 'A configuration review cannot show a template.' }
+        Mock Invoke-HideLayer { throw 'A configuration review cannot hide a template.' }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'air.templateMaxAir' @{ actor = 4322; key = 'Caption' }).error | Should -Be 'forbidden'
+            $current = & $call 'air.templateMaxAir' @{ actor = 4321; key = 'Caption' }
+            $current.data.seconds | Should -Be 120
+            $edit = @{ actor = 4321; key = 'Caption'; revision = $current.data.revision; mode = 'set'; seconds = 90 }
+            $review = & $call 'air.templateMaxAir.review' $edit
+            $review.data.seconds | Should -Be 90
+            Should -Invoke Set-TemplateMaxAirPolicy -Times 0 -Exactly
+            $confirm = @{ actor = 4321; key = 'Caption'; review = $review.data.review }
+            (& $call 'air.templateMaxAir.confirm' $confirm).data.seconds | Should -Be 90
+            (& $call 'air.templateMaxAir.confirm' $confirm).error | Should -Be 'template_air_limit_stale'
+            Should -Invoke Set-TemplateMaxAirPolicy -Times 1 -Exactly -ParameterFilter { $Key -ceq 'Caption' -and $Seconds -eq 90 -and $UserId -eq 4321 }
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        }
+        finally { $script:WebTemplateMaxAirReviews = $previousReviews }
+    }
+
     It 'uses shared urgent timing rules and refuses stale changes without calling air' {
         $oldSettings = Get-JsonProp $config 'Settings'
         $oldRun = $script:UrgentBoardRun
@@ -458,6 +526,113 @@ Describe 'Web channel: the pipe' {
         $shift = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $handover | ConvertFrom-Json
         $shift.ok | Should -BeTrue
         $shift.data.showCount | Should -Be 0
+    }
+
+    It 'round-trips an over-frame registry through the real private pipe with bounded file references' {
+        $oldLog = $script:logDir
+        $oldOnAir = $script:OnAir
+        $script:OnAir = @{}
+        $script:logDir = $TestDrive
+        $script:PipeRegistryExportFixture = Join-Path $TestDrive 'registry-transfer.json'
+        $catalogue = New-Item -Path (Join-Path $TestDrive 'registry-catalogue') -ItemType Directory
+        $scene = Join-Path $catalogue.FullName 'fixture.cintitle'
+        [IO.File]::WriteAllText($scene, '<synthetic />')
+        $before = @{ Fixture = @{ path = $scene; layer = 12 } }
+        [IO.File]::WriteAllText($script:PipeRegistryExportFixture, (ConvertTo-Json -InputObject $before))
+        $candidate = @{ Fixture = @{ path = $scene; layer = 12; fields = @('TITLE')
+                presets = @(@{ name = 'Large fixture'; values = @(('a' * 100000)) })
+            } }
+        $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $candidate -Depth 8))
+        $bytes.Length | Should -BeGreaterThan 65536
+        Mock Get-TemplateRegistryFilePath { $script:PipeRegistryExportFixture }
+        Mock Test-WebSceneCatalogueAccess { $Actor -eq 4321 }
+        Mock Add-AuditEntry {}
+        $request = {
+            param([string]$Operation, [hashtable]$ArgsForWire)
+            $line = @{ op = $Operation; args = (@{ actor = 4321 } + $ArgsForWire) } | ConvertTo-Json -Compress
+            $line.Length | Should -BeLessThan 1024
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        $import = 'air.template-registry-import'
+        $export = 'air.template-registry-export'
+        try {
+            $policy = & $request $import @{ action = 'prepare' }
+            $policy.ok | Should -BeTrue
+            $policy.data.maximumBytes | Should -Be 10MB
+            $uploadId = [guid]::NewGuid().ToString('N')
+            $path = Join-Path $policy.data.directory "upload-$uploadId.json"
+            $share = [IO.FileShare]::Read -bor [IO.FileShare]::Delete
+            $upload = [IO.FileStream]::new($path, 'CreateNew', 'Write', $share, 4096, [IO.FileOptions]::DeleteOnClose)
+            try {
+                $upload.Write($bytes)
+                $upload.Flush()
+                $review = & $request $import @{ action = 'review'; transferId = $uploadId }
+                $review.ok | Should -BeTrue
+                $review.data.changed | Should -Be 1
+                (& $request $import @{ action = 'confirm'; transferId = $uploadId; review = $review.data.review }).ok | Should -BeTrue
+            }
+            finally { $upload.Dispose() }
+            Test-Path -LiteralPath $path | Should -BeFalse
+
+            $receipt = & $request $export @{ action = 'review' }
+            $receipt.data.bytes | Should -Be $bytes.Length
+            $downloadId = [guid]::NewGuid().ToString('N')
+            $downloadPath = Join-Path $policy.data.directory "download-$downloadId.json"
+            $downloadShare = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+            $download = [IO.FileStream]::new($downloadPath, 'CreateNew', 'ReadWrite', $downloadShare, 4096, [IO.FileOptions]::DeleteOnClose)
+            try {
+                $result = & $request $export @{ action = 'download'; transferId = $downloadId; review = $receipt.data.review }
+                $result.data.bytes | Should -Be $bytes.Length
+                $result.data.PSObject.Properties.Name | Should -Not -Contain 'base64'
+                $roundtrip = [byte[]]::new($result.data.bytes)
+                $download.ReadExactly($roundtrip)
+                [Convert]::ToBase64String($roundtrip) | Should -BeExactly ([Convert]::ToBase64String($bytes))
+            }
+            finally { $download.Dispose() }
+            Test-Path -LiteralPath $downloadPath | Should -BeFalse
+
+            $oversizedId = [guid]::NewGuid().ToString('N')
+            $oversizedPath = Join-Path $policy.data.directory "upload-$oversizedId.json"
+            $oversized = [IO.FileStream]::new($oversizedPath, 'CreateNew', 'Write', $share, 4096, [IO.FileOptions]::DeleteOnClose)
+            try {
+                $oversized.SetLength(10MB + 1)
+                $oversized.Flush()
+                (& $request $import @{ action = 'review'; transferId = $oversizedId }).error | Should -Be 'template_registry_import_size'
+            }
+            finally { $oversized.Dispose() }
+            Test-Path -LiteralPath $oversizedPath | Should -BeFalse
+        }
+        finally {
+            $script:logDir = $oldLog
+            $script:OnAir = $oldOnAir
+        }
+    }
+
+
+    It 'looks up a redacted exact incident reference over the private named pipe' {
+        $before = $script:auditFile
+        $script:auditFile = Join-Path $TestDrive 'incident-audit.jsonl'
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4322 }
+        $id = 'air-5023333b032c476eb48204ca08032a98'
+        $record = @{
+            operationId = $id; event = 'air_control'; timestampUtc = '2026-03-10T09:00:00.0000000Z'
+            action = 'SHOW'; result = 'failed'; layer = 7; durationMs = 56
+            target = 'C:\private\path.cintitle'; message = 'operator secret fixture'
+        }
+        try {
+            [IO.File]::WriteAllText($script:auditFile, ($record | ConvertTo-Json -Compress))
+            $request = @{ op = 'shift.operation-reference'; args = @{ actor = 4322; reference = '5023333B' } }
+            $line = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Compress)
+            $result = $line | ConvertFrom-Json
+            $result.data.status | Should -Be 'found'
+            $result.data.items[0].durationMs | Should -Be 56
+            $line | Should -Not -Match 'private|secret|cintitle|5023333b032c'
+            $request.args.actor = 4321
+            (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Compress) | ConvertFrom-Json).error |
+                Should -Be 'forbidden'
+        }
+        finally { $script:auditFile = $before }
     }
 
     It 'carries a queued request to the bridge thread and its answer back' {
@@ -984,12 +1159,98 @@ Describe 'Web channel: the pipe' {
             $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
             Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
         }
-        foreach ($operation in @('admin.announcements.list', 'admin.diagnostics.runtime-files', 'admin.readiness', 'admin.notifications.coverage', 'telegram.access.blocked', 'telegram.access.history', 'telegram.access.suspended-operators')) {
+        foreach ($operation in @('admin.announcements.list', 'admin.diagnostics.runtime-files', 'admin.readiness', 'admin.settings.export', 'admin.notifications.coverage', 'telegram.access.blocked', 'telegram.access.history', 'telegram.access.suspended-operators')) {
             (& $call $operation @{ actor = 4321 }).error | Should -Be 'forbidden'
         }
         (& $call 'shift.notices' @{ actor = 4321; area = 'personal'; action = 'read' }).ok | Should -BeTrue
         (& $call 'schedule.executions' @{ actor = 9876 }).error | Should -Be 'forbidden'
         (& $call 'schedule.executions' @{ actor = 4321; kind = 'all'; result = 'all' }).ok | Should -BeTrue
+    }
+
+    It 'holds and resumes the shared template queue through the named pipe after a current administrator review' {
+        Mock Test-Authorized { $UserId -in 4321, 4876, 9876 }
+        Mock Test-Admin { $UserId -eq 4876 -or ($UserId -eq 4321 -and $script:ScheduleHoldActorIsAdmin) }
+        Mock Add-AuditEntry {}
+        Mock Invoke-ShowTemplateResult { throw 'The hold control must not execute a show.' }
+        Mock Update-ScheduleQueue { throw 'The hold control must not run a scheduler tick.' }
+        Mock Save-Config {
+            $script:LastConfigSaveConflict = $false
+            $script:LastConfigSaveFailed = $script:ScheduleHoldSimulatedSaveFailure
+        }
+
+        $previousSettings = Get-JsonProp $config 'Settings'
+        $previousEvents = $script:ScheduleEvents
+        $previousSave = $script:LastConfigSaveFailed
+        $previousConflict = Get-Variable LastConfigSaveConflict -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $script:ScheduleHoldActorIsAdmin = $true
+        $script:ScheduleHoldSimulatedSaveFailure = $false
+        $script:WebScheduleHoldReviews.Clear()
+        Set-JsonProp $config 'Settings' @{ SchedulePaused = $false; MaintenanceMode = $false }
+        $appointment = @{
+            Id = 'fixture-schedule-hold'; Status = 'pending'; TemplateKey = 'Evening'
+            ScheduledAt = '2031-02-24T12:45:00.0000000+00:00'; MutationId = 'fixture-first'
+        }
+        $script:ScheduleEvents = @($appointment)
+        $call = {
+            param([string]$Operation, [long]$Actor = 4321, [hashtable]$Values = @{})
+            $line = @{ op = "schedule.hold.$Operation"; args = @{ actor = $Actor } + $Values } | ConvertTo-Json -Compress -Depth 5
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+
+        try {
+            (& $call 'review' 9876 @{ paused = $true }).error | Should -Be 'forbidden'
+            (& $call 'review' 4321 @{ paused = 'true' }).error | Should -Be 'schedule_hold_invalid'
+            $review = & $call 'review' 4321 @{ paused = $true }
+            $review.ok | Should -BeTrue
+            $review.data.currentlyPaused | Should -BeFalse
+            $review.data.pendingAppointments | Should -Be 1
+            $confirm = @{ review = $review.data.review }
+            (Get-Setting 'SchedulePaused') | Should -BeFalse
+            (& $call 'confirm' 4876 $confirm).error | Should -Be 'schedule_hold_stale'
+            $script:ScheduleHoldActorIsAdmin = $false
+            (& $call 'confirm' 4321 $confirm).error | Should -Be 'forbidden'
+            $script:ScheduleHoldActorIsAdmin = $true
+            $appointment.MutationId = 'fixture-second'
+            (& $call 'confirm' 4321 $confirm).error | Should -Be 'schedule_hold_stale'
+            Should -Invoke Save-Config -Exactly -Times 0
+
+            $review = & $call 'review' 4321 @{ paused = $true }
+            $confirm.review = $review.data.review
+            $script:ScheduleHoldSimulatedSaveFailure = $true
+            (& $call 'confirm' 4321 $confirm).error | Should -Be 'schedule_hold_save_failed'
+            (Get-Setting 'SchedulePaused') | Should -BeFalse
+            (& $call 'confirm' 4321 $confirm).error | Should -Be 'schedule_hold_stale'
+            $script:ScheduleHoldSimulatedSaveFailure = $false
+
+            $review = & $call 'review' 4321 @{ paused = $true }
+            $confirm.review = $review.data.review
+            (& $call 'confirm' 4321 $confirm).data.paused | Should -BeTrue
+            (Get-Setting 'SchedulePaused') | Should -BeTrue
+            (& $call 'confirm' 4321 $confirm).error | Should -Be 'schedule_hold_stale'
+
+            $review = & $call 'review' 4321 @{ paused = $false }
+            $confirm.review = $review.data.review
+            Set-JsonProp (Get-JsonProp $config 'Settings') 'MaintenanceMode' $true
+            (& $call 'confirm' 4321 $confirm).error | Should -Be 'schedule_hold_stale'
+            $review = & $call 'review' 4321 @{ paused = $false }
+            $review.data.maintenance | Should -BeTrue
+            $confirm.review = $review.data.review
+            (& $call 'confirm' 4321 $confirm).data.paused | Should -BeFalse
+            (Get-Setting 'SchedulePaused') | Should -BeFalse
+            (Get-Setting 'MaintenanceMode') | Should -BeTrue
+            $appointment.Status | Should -Be 'pending'
+            $appointment.MutationId | Should -Be 'fixture-second'
+            Should -Invoke Save-Config -Exactly -Times 3
+            Should -Invoke Invoke-ShowTemplateResult -Exactly -Times 0
+            Should -Invoke Update-ScheduleQueue -Exactly -Times 0
+        }
+        finally {
+            Set-JsonProp $config 'Settings' $previousSettings
+            $script:ScheduleEvents = $previousEvents
+            $script:LastConfigSaveFailed = $previousSave
+            $script:LastConfigSaveConflict = $previousConflict
+            $script:WebScheduleHoldReviews.Clear()
+        }
     }
 
     It 'rechecks air permissions before loading sensitive scene data through the named pipe' {

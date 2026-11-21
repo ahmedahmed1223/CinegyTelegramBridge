@@ -8,6 +8,8 @@ import { Link } from 'react-router'
 import { getTemplates } from '../../api/air'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { isAdmin, useSession } from '../../api/session'
+import { ScheduleHoldControl } from './ScheduleHoldControl'
 
 type SchedulePage = Schemas['TemplateSchedulePage']
 type ScheduleItem = Schemas['PendingTemplateSchedule']
@@ -349,6 +351,7 @@ function ScheduleDialog({ stationTimeZone, selection, materialsEnabled, onClose,
 }
 
 export function TemplateSchedulePage() {
+  const admin = isAdmin(useSession().data)
   const [page, setPage] = useState(0)
   const [editing, setEditing] = useState<ScheduleSelection | null>(null)
   const [showMaterials, setShowMaterials] = useState(false)
@@ -384,6 +387,19 @@ export function TemplateSchedulePage() {
           </Text>}
         </Stack>
         <Group gap="xs">
+          {admin && schedule && !schedules.isError && (
+            <ScheduleHoldControl paused={schedule.paused} onRefresh={async (result) => {
+              if (result) {
+                queryClient.setQueryData<SchedulePage>([...scheduleKey, page], current =>
+                  current ? { ...current, paused: result.paused } : current)
+              }
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: scheduleKey }),
+                queryClient.invalidateQueries({ queryKey: ['admin-overview'] }),
+                queryClient.invalidateQueries({ queryKey: ['admin-readiness'] }),
+              ])
+            }} />
+          )}
           {schedule?.materialsEnabled && <Button variant="default" aria-expanded={showMaterials}
             onClick={() => setShowMaterials((previous) => !previous)}>جدول المواد</Button>}
           <Button component={Link} to="/schedule/executions" variant="default">سجل تنفيذ المواعيد</Button>
@@ -399,7 +415,7 @@ export function TemplateSchedulePage() {
         </Group>
       </Alert>}
       {schedule && !schedule.clockValid && <Alert color="orange" role="alert">{scheduleMessages.schedule_clock}</Alert>}
-      {schedule?.paused && <Alert color="orange">تنفيذ المواعيد متوقّف مؤقتًا.</Alert>}
+      {schedule?.paused && <Alert color="orange">تنفيذ مواعيد القوالب متوقّف مؤقتًا.</Alert>}
       <Paper withBorder p="md">
         <Stack gap="sm">
           <Group justify="space-between">

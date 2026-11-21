@@ -15,6 +15,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.127.0
+
+Administrators can review and rename a broadcast layer in the web interface using the shared layer names used by the Bot. The Schedule page can review pausing and resuming the station-wide template queue. Shift History can look up a recorded air operation by its short reference.
+
+## Version 8.126.0
+
+Web administrators can download and review an exact template registry copy before importing changes. The settings screen also supports downloading and applying a reviewed batch of Web-editable values.
+
+The template library shares each operator's favorites with the Bot. The administrator can review and change the maximum air time for future shows from the template card.
+
 ## Version 8.125.0
 
 Web administration adds the Bot shift readiness checks, notification coverage counts, and a bounded Telegram delivery quarantine list. An administrator can review and clear a private chat quarantine. The existing sender resumes normal delivery after persistence succeeds.

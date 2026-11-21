@@ -476,6 +476,7 @@ function Save-UserFavorites {
 
 function Set-UserFavorite {
     param([Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][bool]$Enabled)
+    if ($UserId -le 0 -or -not (Get-Setting 'EnableFavorites')) { return $false }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($TemplateKey)) { return $false }
     $id = [string]$UserId
@@ -487,13 +488,21 @@ function Set-UserFavorite {
     # silently filtered out. Both favourites vanished from the menu and no
     # error was raised anywhere.
     $current = [System.Collections.Generic.List[string]]::new()
-    if ($script:UserFavorites.ContainsKey($id)) {
-        foreach ($existing in @($script:UserFavorites[$id])) { $current.Add([string]$existing) }
+    $hadSelection = $script:UserFavorites.ContainsKey($id)
+    $previous = $script:UserFavorites[$id]
+    if ($hadSelection) {
+        foreach ($existing in @($previous)) { $current.Add([string]$existing) }
     }
-    if ($Enabled) { if (-not $current.Contains($TemplateKey)) { $current.Add($TemplateKey) } }
+    # A no-op must not materialize an empty selection for a new user: the
+    # absent entry is what lets the Bot promote usage defaults for that user.
+    if (($current -contains $TemplateKey) -eq $Enabled) { return $true }
+    if ($Enabled) { $current.Add($TemplateKey) }
     else { $current.RemoveAll({ param($k) $k -eq $TemplateKey }) | Out-Null }
     $script:UserFavorites[$id] = $current.ToArray()
-    return Save-UserFavorites
+    if (Save-UserFavorites) { return $true }
+    if ($hadSelection) { $script:UserFavorites[$id] = $previous }
+    else { $script:UserFavorites.Remove($id) }
+    return $false
 }
 
 function Import-UserAliases {

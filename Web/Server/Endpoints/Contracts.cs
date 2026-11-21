@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CinegyBridge.Web.Endpoints;
 
 // The public shape of the API. Web/openapi.json is generated from these at
@@ -34,6 +36,22 @@ public sealed record TemplateDefinitionView(string Key, string Revision, string 
     string Description, string Category, int PresetCount, TemplateDefinitionField[] Fields, int ReminderMinutes);
 public sealed record TemplateDefinitionPreview(string Review, TemplateDefinitionView Before, TemplateDefinitionView? After);
 public sealed record TemplateDefinitionResult(TemplateDefinitionView? Definition, TemplateDefinitionPreview? Preview);
+public sealed record LayerNameView(int Layer, string Name, bool HasCustomName);
+public sealed record LayerNamesPage(LayerNameView[] Items, int Page, int PageSize, int Total);
+public sealed record LayerNameReviewCommand(string? Name);
+public sealed record LayerNamePreview(LayerNameView Current, string Name, string Review, DateTimeOffset ExpiresAt);
+public sealed record LayerNameConfirmCommand(string Review);
+public sealed record TemplateFavoritesView(bool Enabled, string[] SelectedKeys, string[] PromotedKeys, string[] EligibleKeys);
+public sealed record TemplateFavoriteCommand(bool? Selected);
+public sealed record TemplateMaxAirView(string Key, int Seconds, string Revision);
+public sealed record TemplateMaxAirReviewCommand(string Revision, string Mode)
+{
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.Strict)]
+    public int? Seconds { get; init; }
+}
+public sealed record TemplateMaxAirPreview(TemplateMaxAirView Current, int Seconds, string Review, DateTimeOffset ExpiresAt);
+public sealed record TemplateMaxAirConfirm(string Review);
+public sealed record TemplateMaxAirResult(string Key, int Seconds);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);
@@ -179,6 +197,9 @@ public sealed record TemplateScheduleReviewCommand(string? Key = null, string? T
     string? RecurrenceUntil = null, Dictionary<string, string>? Variables = null, string? Operation = null,
     string? ScheduleId = null, string? Revision = null, string? AnchorMaterialId = null, int? AnchorOffsetSeconds = null);
 public sealed record TemplateScheduleConfirmCommand(string Review);
+public sealed record ScheduleHoldReviewCommand(bool? Paused);
+public sealed record ScheduleHoldReview(string Review, bool CurrentlyPaused, bool Paused, int PendingAppointments, bool Maintenance);
+public sealed record ScheduleHoldResult(bool Paused, int PendingAppointments, bool Maintenance);
 public sealed record ScheduleMaterialItem(string Id, string Name, long StartsAtMs, string StationTime, double DurationSeconds,
     bool Active, bool CanAnchor);
 public sealed record ScheduleMaterialPage(ScheduleMaterialItem[] Items, int Page, int PageCount, int Total, bool ActiveKnown,
@@ -207,6 +228,30 @@ public sealed record AdminSettingReviewCommand(bool? Enabled, int? Value);
 public sealed record AdminSettingConfirmCommand(string Review);
 public sealed record AdminSettingPreview(AdminOverviewSetting Setting, bool? Enabled, int? Value, string Review);
 public sealed record AdminSettingResult(AdminOverviewSetting Setting);
+
+public sealed record WebEditableSettingsValues(
+    [property: JsonPropertyName("NotifyAdminsOnAccessRequest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? NotifyAdminsOnAccessRequest = null,
+    [property: JsonPropertyName("AskRequesterName"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? AskRequesterName = null,
+    [property: JsonPropertyName("MaxPendingApprovals"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MaxPendingApprovals = null,
+    [property: JsonPropertyName("PendingStateTimeoutMinutes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? PendingStateTimeoutMinutes = null,
+    [property: JsonPropertyName("OneHandMode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? OneHandMode = null,
+    [property: JsonPropertyName("EnablePersistentMenuButton"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? EnablePersistentMenuButton = null);
+
+public sealed record WebSettingsImportChange(string Id, string Kind, bool? BeforeEnabled, bool? AfterEnabled, int? BeforeValue, int? AfterValue);
+public sealed record WebSettingsImportPreview(WebSettingsImportChange[] Changes, string? Review);
+public sealed record WebSettingsImportResult(int Applied);
+
+public sealed record WebEditableSettingsExport(
+    [property: JsonPropertyName("Kind")] string Kind,
+    [property: JsonPropertyName("BridgeVersion")] string BridgeVersion,
+    [property: JsonPropertyName("ExportedAt")] DateTimeOffset ExportedAt,
+    [property: JsonPropertyName("Settings")] WebEditableSettingsValues Settings);
 public sealed record AirMaintenanceCommand(string Action, bool? Enabled = null, string? Review = null);
 public sealed record AirMaintenanceState(bool ManualEnabled, bool WindowActive, bool EffectiveBlocked,
     string? WindowStart, string? WindowEnd, bool? RequestedEnabled, bool? EffectiveAfter, string? Review);
@@ -269,6 +314,8 @@ public sealed record ScheduleExecutionPage(ScheduleExecutionItem[] Items, int Pa
     string StationTimeZone);
 public sealed record ShiftHistoryItem(string Reference, string Event, long AtMs, string StationTime, string Action,
     string Target, string Result, int Layer, long DurationMs, string OperatorId, string OperatorName);
+public sealed record OperationReferenceItem(long AtMs, string StationTime, string Action, string Result, int Layer, long DurationMs);
+public sealed record OperationReferenceLookup(string Status, int ReadLimit, bool Truncated, OperationReferenceItem[] Items);
 public sealed record ShiftHistoryOption(string Value, string Label, int Count);
 public sealed record ShiftHistoryOperatorOption(string Value, string Label, int Count);
 public sealed record ShiftHistoryEventOption(string Value, string Label, int Count);
@@ -296,6 +343,9 @@ public sealed record BlockedAccessPage(BlockedAccessItem[] Items, int Page, int 
 public sealed record AccessUnblockPreview(BlockedAccessItem Item, string Review);
 public sealed record AccessUnblockCommand(string Review);
 public sealed record AccessUnblockResult(long ChatId);
+public sealed record TemplateRegistryExportReview(string Review, int Templates, long Bytes);
+public sealed record TemplateRegistryExportDownload(string Review);
+public sealed record TemplateRegistryImportReview(string Review, int Templates, int Added, int Changed, int Removed, int Unchanged);
 public sealed record TemplateBackupCommand(string Action, string? Id = null, string? Review = null);
 public sealed record TemplateBackupSummary(string Id, long SavedAt, long Bytes);
 public sealed record TemplateBackupPreview(string Id, string[] Added, string[] Changed, string[] Removed, string Review);

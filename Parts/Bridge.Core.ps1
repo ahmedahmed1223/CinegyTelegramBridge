@@ -87,13 +87,86 @@ function Remove-JsonProp {
     $Object.PSObject.Properties.Remove($Name) | Out-Null
 }
 
+function Save-ReviewedConfigSettings {
+    param([string]$Path, [System.Collections.IDictionary]$Patch, [System.Collections.IDictionary]$Expected, [long]$Deadline)
+
+    # Save-Config holds the same mutex used by the manager. Review writes
+    # touch only the approved scalars and never republish the secret store.
+    $temporary = "$Path.review-$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        if (-not $Patch.Count -or -not $Expected.Count -or ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline)) { return 'failed' }
+        $source = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $backup = Get-Item -LiteralPath "$Path.bak" -Force -ErrorAction SilentlyContinue
+        if ($source -isnot [IO.FileInfo] -or $source.Length -gt 16MB -or
+            ($source.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            ($backup -and ($backup -isnot [IO.FileInfo] -or ($backup.Attributes -band [IO.FileAttributes]::ReparsePoint)))) { return 'failed' }
+        $original = [IO.File]::ReadAllText($Path)
+        $nodeOptions = [System.Text.Json.Nodes.JsonNodeOptions]@{ PropertyNameCaseInsensitive = $true }
+        $documentOptions = [System.Text.Json.JsonDocumentOptions]@{
+            CommentHandling = [System.Text.Json.JsonCommentHandling]::Skip
+            AllowTrailingCommas = $true
+            MaxDepth = 100
+        }
+        $document = [System.Text.Json.Nodes.JsonNode]::Parse($original, $nodeOptions, $documentOptions)
+        if ($document -isnot [System.Text.Json.Nodes.JsonObject]) { return 'failed' }
+        if (-not $document.ContainsKey('Settings')) { $document['Settings'] = [System.Text.Json.Nodes.JsonObject]::new($nodeOptions) }
+        $diskSettings = $document['Settings']
+        if ($diskSettings -isnot [System.Text.Json.Nodes.JsonObject]) { return 'failed' }
+
+        foreach ($name in $Expected.Keys) {
+            $current = if ($diskSettings.ContainsKey([string]$name)) {
+                $node = $diskSettings[[string]$name]
+                if ($null -ne $node) { ConvertFrom-Json -InputObject $node.ToJsonString() -NoEnumerate -ErrorAction Stop }
+            }
+            else { $script:DefaultSettings[$name] }
+            if ($name -ceq 'LayerNames') {
+                if ($null -eq $current) { $current = '' }
+                if ($current -isnot [string]) { return 'stale' }
+            }
+            else {
+                try { $current = ConvertTo-ImportedSettingValue -Name ([string]$name) -Value $current }
+                catch { return 'stale' }
+            }
+            if (-not [object]::Equals($current, $Expected[$name])) { return 'stale' }
+        }
+        foreach ($name in $Patch.Keys) {
+            $value = $Patch[$name]
+            $valid = if ($name -ceq 'LayerNames') { $value -is [string] }
+            else { $value -is [bool] -or $value -is [int] }
+            if (-not $Expected.Contains($name) -or -not $valid) { return 'failed' }
+            $diskSettings[[string]$name] = [System.Text.Json.Nodes.JsonNode]::Parse((ConvertTo-Json -InputObject $Patch[$name] -Compress))
+        }
+        $outputOptions = [System.Text.Json.JsonSerializerOptions]@{ WriteIndented = $true; MaxDepth = 100 }
+        [IO.File]::WriteAllText($temporary, $document.ToJsonString($outputOptions))
+        Protect-BridgePathAcl -Path @($temporary) | Out-Null
+        Protect-BridgeConfigurationAcl -ConfigPath $Path | Out-Null
+        if ([IO.File]::ReadAllText($Path) -cne $original) { return 'stale' }
+        if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return 'failed' }
+
+        # On Windows an atomic replacement with a sibling backup retains the
+        # exact previous bytes. A filesystem that cannot do this fails closed.
+        [IO.File]::Replace($temporary, $Path, "$Path.bak", $false)
+        return 'saved'
+    }
+    catch {
+        Write-BridgeLog 'Reviewed settings import could not publish a staged configuration.' 'ERROR'
+        return 'failed'
+    }
+    finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Save-Config {
     <# Persists config changes (approved users, settings, stream URL) back to
        disk. Re-reads the file first and only overwrites the blocks this bot
        manages, so a manual edit made while the bridge is running is not
        clobbered by the next approval - and the in-memory copy picks that
        manual edit up at the same time. #>
-    param([string]$Path = $ConfigPath, [long]$Deadline = 0)
+    param([string]$Path = $ConfigPath, [long]$Deadline = 0,
+        [System.Collections.IDictionary]$ReviewedPatch, [System.Collections.IDictionary]$ReviewedExpected)
+    $reviewed = $PSBoundParameters.ContainsKey('ReviewedPatch')
+    if ($reviewed) { $script:LastConfigSaveConflict = $false }
     if ($LoadOnly -and [IO.Path]::GetFullPath($Path) -eq [IO.Path]::GetFullPath($ConfigPath) -and
         [IO.Path]::GetFileName($Path) -eq 'config.example.json') {
         $script:LastConfigSaveFailed = $false
@@ -112,6 +185,18 @@ function Save-Config {
         $script:LastConfigSaveFailed = $true
         $configMutex.Dispose()
         Write-BridgeLog "Timed out waiting for the config write lock. Change applies to this session only." "ERROR"
+        return
+    }
+    if ($reviewed) {
+        try {
+            $status = Save-ReviewedConfigSettings -Path $Path -Patch $ReviewedPatch -Expected $ReviewedExpected -Deadline $Deadline
+            $script:LastConfigSaveFailed = $status -cne 'saved'
+            $script:LastConfigSaveConflict = $status -ceq 'stale'
+        }
+        finally {
+            $configMutex.ReleaseMutex()
+            $configMutex.Dispose()
+        }
         return
     }
     $managed = @('AllowedChatIds', 'AdminChatIds', 'AllowedUserIds', 'AdminUserIds', 'Settings', 'LiveStream')
@@ -475,19 +560,27 @@ function TF {
     return (Get-BridgeText -Key $Key -Language (Get-BridgeLanguage) -Fallback $Fallback)
 }
 
+function ConvertFrom-LayerNamePair {
+    param([AllowEmptyString()][string]$Pair)
+    $parts = $Pair -split '=', 2
+    $layer = 0
+    if ($parts.Count -eq 2 -and [int]::TryParse($parts[0].Trim(), [ref]$layer)) {
+        return @{ layer = $layer; name = $parts[1].Trim() }
+    }
+}
+
+function Get-LayerNameSettingPairs {
+    param([int]$Layer)
+    foreach ($pair in ([string](Get-Setting 'LayerNames') -split ';')) {
+        $entry = ConvertFrom-LayerNamePair -Pair $pair
+        if ($entry -and $entry.layer -eq $Layer) { $pair }
+    }
+}
+
 function Get-LayerName {
     param([Parameter(Mandatory)][int]$Layer)
-    foreach ($pair in @([string](Get-Setting 'LayerNames') -split ';')) {
-        if ([string]::IsNullOrWhiteSpace($pair)) { continue }
-        $parts = $pair -split '=', 2
-        if ($parts.Count -lt 2) { continue }
-        $number = 0
-        if ([int]::TryParse($parts[0].Trim(), [ref]$number) -and $number -eq $Layer) {
-            $name = $parts[1].Trim()
-            if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
-            return ''
-        }
-    }
+    $pair = Get-LayerNameSettingPairs -Layer $Layer | Select-Object -First 1
+    if ($null -ne $pair) { return [string](Get-JsonProp (ConvertFrom-LayerNamePair -Pair $pair) 'name') }
     return ''
 }
 

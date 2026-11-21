@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { isAdmin, useSession } from '../../api/session'
+import { OperationReferenceDialog } from './OperationReferenceDialog'
 
 type View = 'mine' | 'operations' | 'audit'
 type Filters = { period: string; day: string; target: string; operatorId: string; kind: string; result: string }
@@ -61,6 +62,7 @@ export function ShiftHistoryPage() {
   const [filters, setFilters] = useState(initialFilters)
   const [page, setPage] = useState(0)
   const [feedback, setFeedback] = useState('')
+  const [lookupReference, setLookupReference] = useState<string | null>(null)
   const view = admin ? selected : 'mine'
   const showOperator = view !== 'mine'
   const audit = view === 'audit'
@@ -125,6 +127,7 @@ export function ShiftHistoryPage() {
 
   return (
     <Stack gap="lg" dir="rtl">
+      {admin && lookupReference !== null && <OperationReferenceDialog initialReference={lookupReference} onClose={() => setLookupReference(null)} />}
       <Group justify="space-between" align="flex-start">
         <Stack gap={4}>
           <Title order={2}>سجل العمليات</Title>
@@ -142,6 +145,7 @@ export function ShiftHistoryPage() {
               <Menu.Item component={Link} to="/reports/ticker">تقرير شريط الأخبار</Menu.Item>
             </Menu.Dropdown>
           </Menu>
+          {admin && <Button variant="default" onClick={() => setLookupReference('')}>البحث بمرجع العملية</Button>}
           {admin && <Button variant="default" loading={csv.isPending} disabled={!ready || !data?.total || records.isError}
             onClick={() => { setFeedback(''); csv.mutate() }}>تصدير CSV</Button>}
         </Group>
@@ -208,7 +212,9 @@ export function ShiftHistoryPage() {
                         {resultLabels[item.result] ?? (item.result || '—')}
                       </Text></Table.Td>
                       {showOperator && <Table.Td><bdi dir="auto">{item.operatorName || item.operatorId || '—'}</bdi></Table.Td>}
-                      <Table.Td><bdi dir="ltr" className="cgb-mono">{item.reference || '—'}</bdi></Table.Td>
+                      <Table.Td>{admin && /^[0-9a-f]{8}$/.test(item.reference)
+                        ? <Button variant="subtle" size="compact-xs" onClick={() => setLookupReference(item.reference)}><bdi dir="ltr">{item.reference}</bdi></Button>
+                        : <bdi dir="ltr" className="cgb-mono">{item.reference || '—'}</bdi>}</Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>

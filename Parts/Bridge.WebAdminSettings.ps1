@@ -1,6 +1,7 @@
 #requires -Version 7
 
 $script:WebAdminSettingReviews = @{}
+$script:WebAdminSettingsImportReviews = @{}
 
 function Get-WebAdminPresentationSettingSchema {
     param([AllowEmptyString()][string]$Name)
@@ -36,20 +37,50 @@ function Get-WebAdminPresentationSettingView {
     }
 }
 
-function Get-WebAdminEditableSetting {
+function Get-WebAdminSettingActor {
     param([System.Collections.IDictionary]$Arguments)
     $actor = 0L
     if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
         -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-Admin -ChatId $actor -UserId $actor)) {
-        return @{ error = 'forbidden' }
+        return 0L
     }
-    # These settings take effect through already established reads. Protected
-    # controls and settings that need side effects stay in their existing screens.
+    return $actor
+}
+
+function Get-WebAdminEditableSettingId {
+    # Protected controls and changes with side effects stay in their existing
+    # screens. This list governs both editing and the portable Web snapshot.
+    $ids = @('NotifyAdminsOnAccessRequest', 'AskRequesterName', 'MaxPendingApprovals', 'PendingStateTimeoutMinutes')
+    $ids += @(Get-WebAdminPresentationSettingSchema | ForEach-Object { $_.Name })
+    foreach ($id in $ids) {
+        if ($script:ProtectedSettings -notcontains $id) { $id }
+    }
+}
+
+function Get-WebAdminSettingsExport {
+    param([System.Collections.IDictionary]$Arguments, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    if (-not (Get-WebAdminSettingActor -Arguments $Arguments)) { return @{ ok = $false; error = 'forbidden' } }
+
+    $settings = [ordered]@{}
+    foreach ($id in Get-WebAdminEditableSettingId) {
+        $current = Get-Setting -Name $id
+        # Never serialize an unsupported type, even if a station file
+        # contains a hand-edited value of the wrong shape.
+        if ($current -isnot [bool] -and $current -isnot [int] -and $current -isnot [long]) { continue }
+        try { $normalized = ConvertTo-ImportedSettingValue -Name $id -Value $current }
+        catch { continue }
+        if ($normalized -is [bool] -or $normalized -is [int]) { $settings[$id] = $normalized }
+    }
+    if (-not $settings.Count) { return @{ ok = $false; error = 'setting_export_unavailable' } }
+    return @{ ok = $true; data = (New-BridgeSettingsExportDocument -Settings $settings -Now $Now) }
+}
+
+function Get-WebAdminEditableSetting {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = Get-WebAdminSettingActor -Arguments $Arguments
+    if (-not $actor) { return @{ error = 'forbidden' } }
     $id = [string](Get-JsonProp $Arguments 'id')
-    if (($id -cnotin 'NotifyAdminsOnAccessRequest', 'AskRequesterName', 'MaxPendingApprovals', 'PendingStateTimeoutMinutes' -and
-            -not (Get-WebAdminPresentationSettingSchema -Name $id)) -or $script:ProtectedSettings -contains $id) {
-        return @{ error = 'setting_not_editable' }
-    }
+    if ($id -cnotin @(Get-WebAdminEditableSettingId)) { return @{ error = 'setting_not_editable' } }
     $setting = Get-WebAdminSettingView | Where-Object { $_.id -ceq $id } | Select-Object -First 1
     if (-not $setting) { return @{ error = 'setting_not_editable' } }
     return @{
@@ -116,4 +147,87 @@ function Complete-WebAdminSettingReview {
     Add-AuditEntry (T 'kb.settingAudit' $id $review.Desired (Format-UserAuditActor -UserId $actor)) | Out-Null
     $saved = Get-WebAdminSettingView | Where-Object { $_.id -ceq $id } | Select-Object -First 1
     return @{ ok = $true; data = @{ setting = $saved } }
+}
+
+
+function Get-WebAdminSettingsImportPlan {
+    param([System.Collections.IDictionary]$Requested)
+
+    if ($null -eq $Requested -or -not $Requested.Count) { return @{ error = 'settings_import_invalid' } }
+    $before = [ordered]@{}
+    $after = [ordered]@{}
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $allowed = @(Get-WebAdminEditableSettingId)
+    foreach ($id in @($Requested.Keys | Sort-Object -CaseSensitive)) {
+        $desired = $Requested[$id]
+        if ($id -cnotin $allowed -or ($desired -isnot [bool] -and $desired -isnot [int] -and $desired -isnot [long])) {
+            return @{ error = 'settings_import_invalid' }
+        }
+        try {
+            $current = ConvertTo-ImportedSettingValue -Name $id -Value (Get-Setting -Name $id)
+            $target = ConvertTo-ImportedSettingValue -Name $id -Value $desired
+        }
+        catch { return @{ error = 'settings_import_invalid' } }
+        if ($target -isnot [bool] -and $target -isnot [int]) { return @{ error = 'settings_import_invalid' } }
+        $before[$id] = $current
+        $after[$id] = $target
+        if (-not [object]::Equals($current, $target)) {
+            $changes.Add(@{ Name = $id; From = $current; To = $target })
+        }
+    }
+    return @{
+        before = $before; after = $after; changes = $changes.ToArray()
+        fingerprint = ConvertTo-Json -InputObject @($before, $after) -Compress
+    }
+}
+
+function New-WebAdminSettingsImportReview {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = Get-WebAdminSettingActor -Arguments $Arguments
+    if (-not $actor) { return @{ ok = $false; error = 'forbidden' } }
+    $requested = Get-JsonProp $Arguments 'settings'
+    if ($requested -isnot [System.Collections.IDictionary]) { return @{ ok = $false; error = 'settings_import_invalid' } }
+    $plan = Get-WebAdminSettingsImportPlan -Requested $requested
+    if ($plan.ContainsKey('error')) { return @{ ok = $false; error = $plan.error } }
+    $changes = @(foreach ($change in $plan.changes) {
+        @{
+            id = $change.Name; kind = if ($change.To -is [bool]) { 'boolean' } else { 'integer' }
+            beforeEnabled = if ($change.From -is [bool]) { $change.From }
+            afterEnabled = if ($change.To -is [bool]) { $change.To }
+            beforeValue = if ($change.From -is [int]) { $change.From }
+            afterValue = if ($change.To -is [int]) { $change.To }
+        }
+    })
+    $token = $null
+    # An unchanged file also invalidates an older review in this browser actor slot.
+    $script:WebAdminSettingsImportReviews.Remove($actor)
+    if ($changes.Count) {
+        $token = New-WebAirReview -Actor $actor -Fingerprint $plan.fingerprint -Reviews $script:WebAdminSettingsImportReviews
+        $script:WebAdminSettingsImportReviews[$actor].Desired = $plan.after
+    }
+    return @{ ok = $true; data = @{ changes = $changes; review = $token } }
+}
+
+function Complete-WebAdminSettingsImportReview {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline)
+    $actor = Get-WebAdminSettingActor -Arguments $Arguments
+    if (-not $actor) { return @{ ok = $false; error = 'forbidden' } }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+        return @{ ok = $false; error = 'bridge_busy' }
+    }
+    $approved = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebAdminSettingsImportReviews
+    $stale = @{ ok = $false; error = 'setting_stale' }
+    if (-not $approved) { return $stale }
+    $plan = Get-WebAdminSettingsImportPlan -Requested $approved.Desired
+    if ($plan.ContainsKey('error') -or $approved.Fingerprint -cne $plan.fingerprint -or -not $plan.changes.Count) { return $stale }
+    $remaining = ($approved.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
+    if ($remaining -le 0) { return $stale }
+    $writeDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($remaining * [Diagnostics.Stopwatch]::Frequency)
+    if ($Deadline -gt 0) { $writeDeadline = [math]::Min($Deadline, $writeDeadline) }
+    if (-not (Set-ImportedSettings -Changes $plan.changes -Deadline $writeDeadline -ReviewedExpected $plan.before)) {
+        if ($script:LastConfigSaveConflict) { return $stale }
+        return @{ ok = $false; error = 'setting_save_failed' }
+    }
+    Add-AuditEntry (T 'cfg.importAudit' $plan.changes.Count $(Format-UserAuditActor -UserId $actor)) | Out-Null
+    return @{ ok = $true; data = @{ applied = $plan.changes.Count } }
 }

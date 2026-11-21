@@ -139,13 +139,14 @@ function Save-TemplatePresetChange {
 }
 
 function Read-TemplateRegistryBackupBytes {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path, [long]$MaximumBytes = $script:TemplateRegistryImportMaximumBytes,
+        [IO.FileShare]$Share = [IO.FileShare]::Read)
 
     # Bound the same handle used for the actual read. A file supplied by
     # station tooling may have been replaced since the list was displayed.
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $Share)
     try {
-        if ($stream.Length -le 0 -or $stream.Length -gt $script:TemplateRegistryImportMaximumBytes) {
+        if ($stream.Length -le 0 -or $stream.Length -gt $MaximumBytes) {
             throw 'Registry backup size is outside the supported range.'
         }
         $bytes = [byte[]]::new([int]$stream.Length)
@@ -184,7 +185,7 @@ function Restore-TemplateRegistryBackup {
         longer name or hide by key.
     #>
     param(
-        [Parameter(Mandatory)][string]$BackupPath,
+        [string]$BackupPath,
         [string]$Path = (Get-TemplateRegistryFilePath),
         [byte[]]$ReviewedBytes,
         [string]$ExpectedRegistryHash = '',
@@ -205,7 +206,7 @@ function Restore-TemplateRegistryBackup {
             if ($blocker) { return [pscustomobject]@{ Success = $false; Error = ''; Code = $blocker; Comparison = $null } }
         }
         else {
-            if (-not (Test-Path -LiteralPath $BackupPath)) { throw (T 'tpl.backupFileMissing') }
+            if (-not $BackupPath -or -not (Test-Path -LiteralPath $BackupPath)) { throw (T 'tpl.backupFileMissing') }
             $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
             if (-not $candidate -or @($candidate.PSObject.Properties.Name).Count -eq 0) { throw (T 'tpl.backupEmpty') }
             $current = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop

@@ -11,6 +11,16 @@
     dot-sourced parts share one.
 #>
 
+function New-BridgeSettingsExportDocument {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Settings, [datetimeoffset]$Now = [datetimeoffset]::Now)
+    return [ordered]@{
+        Kind          = 'CinegyTelegramBridge.Settings'
+        BridgeVersion = $script:BridgeVersion
+        ExportedAt    = $Now.ToString('o')
+        Settings      = $Settings
+    }
+}
+
 function Invoke-SettingsExport {
     <#
         Exports the Settings block only - never the whole config.
@@ -30,12 +40,7 @@ function Invoke-SettingsExport {
         if ($name -match 'token|secret|password|apikey') { continue }
         $payload[$name] = Get-Setting $name
     }
-    $document = [ordered]@{
-        Kind          = 'CinegyTelegramBridge.Settings'
-        BridgeVersion = $script:BridgeVersion
-        ExportedAt    = (Get-Date).ToString('o')
-        Settings      = $payload
-    }
+    $document = New-BridgeSettingsExportDocument -Settings $payload
     $path = Join-Path $script:logDir "settings-export-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
     try {
         # The log directory normally exists, but the export must not depend on
@@ -82,7 +87,28 @@ function ConvertTo-ImportedSettingValue {
 }
 
 function Set-ImportedSettings {
-    param([Parameter(Mandatory)][object[]]$Changes, [long]$Deadline = 0)
+    param([Parameter(Mandatory)][object[]]$Changes, [long]$Deadline = 0,
+        [System.Collections.IDictionary]$ReviewedExpected)
+    if ($PSBoundParameters.ContainsKey('ReviewedExpected')) {
+        $original = Get-JsonProp $config 'Settings'
+        $snapshot = [ordered]@{}
+        if ($original -is [System.Collections.IDictionary]) {
+            foreach ($key in $original.Keys) { $snapshot[$key] = $original[$key] }
+        }
+        elseif ($original) {
+            foreach ($property in $original.PSObject.Properties) { $snapshot[$property.Name] = $property.Value }
+        }
+        $patch = [ordered]@{}
+        foreach ($change in $Changes) {
+            $patch[[string]$change.Name] = $change.To
+            $snapshot[[string]$change.Name] = $change.To
+        }
+        $updated = [pscustomobject]$snapshot
+        Save-Config -Deadline $Deadline -ReviewedPatch $patch -ReviewedExpected $ReviewedExpected
+        if ($script:LastConfigSaveFailed) { return $false }
+        Set-JsonProp -Object $config -Name 'Settings' -Value $updated
+        return $true
+    }
     $original = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
     $updated = $config.Settings | ConvertTo-Json -Depth 10 | ConvertFrom-Json
     foreach ($change in $Changes) {
@@ -314,33 +340,42 @@ function Confirm-TemplateTest {
     Send-TelegramMessage -ChatId $ChatId -Text (T 'cfg.templateTestStarted' $($template.Key) $testLayer $(Get-ArabicCountNoun -Count $seconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds')) -ReplyMarkup (Get-AfterShowKeyboard -Layer $testLayer -ChatId $ChatId -UserId $UserId)
 }
 
+function Get-TemplateRegistryValidatedCount {
+    param([Parameter(Mandatory)]$Document, $Current)
+
+    $properties = @($document.PSObject.Properties)
+    $maximumTemplates = Get-SettingInt 'TemplateRegistryImportMaxTemplates' 1
+    if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw (T 'cfg.registerSize' $(Get-ArabicCountNoun -Count $maximumTemplates -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates')) }
+    foreach ($property in $properties) {
+        if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw (T 'cfg.badTemplateKey' $($property.Name)) }
+        $entry = $property.Value
+        $templatePath = [string](Get-JsonProp $entry 'path')
+        $previousPath = [string](Get-JsonProp (Get-JsonProp $Current $property.Name) 'path')
+        $rootedOrExisting = [IO.Path]::IsPathRooted($templatePath) -or ($previousPath -and $previousPath -ceq $templatePath)
+        if ([string]::IsNullOrWhiteSpace($templatePath) -or -not $rootedOrExisting -or
+            -not [IO.Path]::GetExtension($templatePath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
+            throw (T 'cfg.needsAbsolutePath' $($property.Name))
+        }
+        $layer = 0
+        if (-not [int]::TryParse([string](Get-JsonProp $entry 'layer'), [ref]$layer) -or $layer -le 0) {
+            throw (T 'cfg.needsLayer' $($property.Name))
+        }
+        foreach ($field in @(Get-JsonProp $entry 'fields' | Where-Object { $null -ne $_ })) {
+            $fieldName = if ($field -is [string]) { [string]$field } else { [string](Get-JsonProp $field 'name') }
+            if ([string]::IsNullOrWhiteSpace($fieldName)) { throw (T 'cfg.hasUnnamedField' $($property.Name)) }
+        }
+    }
+    return $properties.Count
+}
+
 function Test-TemplateRegistryImport {
     param([Parameter(Mandatory)][string]$Path)
     try {
         $rawText = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
         if ([Text.Encoding]::UTF8.GetByteCount($rawText) -gt $script:TemplateRegistryImportMaximumBytes) { throw (T 'cfg.fileTooBig') }
         $document = $rawText | ConvertFrom-Json -ErrorAction Stop
-        $properties = @($document.PSObject.Properties)
-        $maximumTemplates = Get-SettingInt 'TemplateRegistryImportMaxTemplates' 1
-        if ($properties.Count -eq 0 -or $properties.Count -gt $maximumTemplates) { throw (T 'cfg.registerSize' $(Get-ArabicCountNoun -Count $maximumTemplates -One 'قالب' -Two 'قالبان' -Few 'قوالب' -Many 'قالبًا' -EnglishOne 'template' -EnglishMany 'templates')) }
-        foreach ($property in $properties) {
-            if ($property.Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$') { throw (T 'cfg.badTemplateKey' $($property.Name)) }
-            $entry = $property.Value
-            $templatePath = [string](Get-JsonProp $entry 'path')
-            if ([string]::IsNullOrWhiteSpace($templatePath) -or -not [IO.Path]::IsPathRooted($templatePath) -or
-                -not [IO.Path]::GetExtension($templatePath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
-                throw (T 'cfg.needsAbsolutePath' $($property.Name))
-            }
-            $layer = 0
-            if (-not [int]::TryParse([string](Get-JsonProp $entry 'layer'), [ref]$layer) -or $layer -le 0) {
-                throw (T 'cfg.needsLayer' $($property.Name))
-            }
-            foreach ($field in @(Get-JsonProp $entry 'fields' | Where-Object { $null -ne $_ })) {
-                $fieldName = if ($field -is [string]) { [string]$field } else { [string](Get-JsonProp $field 'name') }
-                if ([string]::IsNullOrWhiteSpace($fieldName)) { throw (T 'cfg.hasUnnamedField' $($property.Name)) }
-            }
-        }
-        return [pscustomobject]@{ Success=$true; Error=''; Document=$document; Count=$properties.Count }
+        $count = Get-TemplateRegistryValidatedCount -Document $document
+        return [pscustomobject]@{ Success=$true; Error=''; Document=$document; Count=$count }
     }
     catch { return [pscustomobject]@{ Success=$false; Error=Protect-SensitiveText $_.Exception.Message; Document=$null; Count=0 } }
 }

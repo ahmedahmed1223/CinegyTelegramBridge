@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.125.0'
+$script:BridgeVersion = '8.127.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -139,6 +139,7 @@ foreach ($part in @(
         'Bridge.WebRollback'
         'Bridge.WebAirText'
         'Bridge.WebShiftHistory'
+        'Bridge.WebOperationReference'
         'Bridge.WebShiftNotices'
         'Bridge.WebTelegramRoster'
         'Bridge.WebTelegramUnblock'
@@ -146,6 +147,11 @@ foreach ($part in @(
         'Bridge.WebTelegramSuspension'
         'Bridge.WebTelegramAlias'
         'Bridge.WebTelegramOperatorActivity'
+        'Bridge.LayerNames'
+        'Bridge.WebLayerNames'
+        'Bridge.WebTemplateFavorites'
+        'Bridge.TemplateMaxAir'
+        'Bridge.WebTemplateMaxAir'
         'Bridge.WebTelegramDeliveryQuarantine'
         'Bridge.WebAnnouncements'
         'Bridge.WebRuntimeFileDiagnostics'
@@ -163,6 +169,9 @@ foreach ($part in @(
         'Bridge.WebAirTimer'
         'Bridge.WebLayerRemoval'
         'Bridge.WebTemplateBackups'
+        'Bridge.WebTemplateRegistryTransfer'
+        'Bridge.WebTemplateRegistryExport'
+        'Bridge.WebTemplateRegistryImport'
         'Bridge.WebTemplateIssues'
     )) {
     . (Join-Path $scriptRoot "Parts/$part.ps1")
@@ -1258,6 +1267,7 @@ $script:PendingSettingsImport = $null
 $script:LastUsageDigestDate = [datetime]::MinValue
 $script:LastHeartbeatDate = [datetime]::MinValue.Date
 $script:LastConfigSaveFailed = $false
+$script:LastConfigSaveConflict = $false
 # Layers already reported as stale, so the alert fires once per record.
 # Layer -> @{ Count; LastAt }. A count, not a flag: one notice that goes
 # unread used to be the end of it, and a graphic could sit on air for the rest

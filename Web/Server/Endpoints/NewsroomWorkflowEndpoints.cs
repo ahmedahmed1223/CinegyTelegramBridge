@@ -25,6 +25,12 @@ public static class NewsroomWorkflowEndpoints
         schedule.MapPost("/confirm", SaveSchedule).Produces<TemplateSchedulePage>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
+        var hold = schedule.MapGroup("/hold").RequireAuthorization(AccountEndpoints.AdminPolicy);
+        hold.MapPost("/review", ReviewScheduleHold).Produces<ScheduleHoldReview>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        hold.MapPost("/confirm", ConfirmScheduleHold).Produces<ScheduleHoldResult>()
+            .Produces<ErrorResponse>(403).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+
         app.MapGet("/api/schedule/materials", ScheduleMaterials).WithTags("Template schedule").RequireAuthorization()
             .Produces<ScheduleMaterialPage>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
@@ -67,6 +73,12 @@ public static class NewsroomWorkflowEndpoints
                 request.AnchorMaterialId, request.AnchorOffsetSeconds
             });
 
+    private static Task<IResult> ReviewScheduleHold(ScheduleHoldReviewCommand request, IBridgeChannel bridge, HttpContext http) =>
+        Send<ScheduleHoldReview>(bridge, http, "schedule.hold.review", new { actor = http.User.UserId(), request.Paused });
+
+    private static Task<IResult> ConfirmScheduleHold(TemplateScheduleConfirmCommand request, IBridgeChannel bridge, HttpContext http) =>
+        Send<ScheduleHoldResult>(bridge, http, "schedule.hold.confirm", new { actor = http.User.UserId(), request.Review });
+
     private static async Task<IResult> SaveSchedule(TemplateScheduleConfirmCommand request, IBridgeChannel bridge, HttpContext http) =>
         await Send<TemplateSchedulePage>(bridge, http, "schedule.templates",
             new { actor = http.User.UserId(), action = "confirm", request.Review });
@@ -87,9 +99,9 @@ public static class NewsroomWorkflowEndpoints
         {
             "forbidden" or "owner_only" => 403,
             "rerun_missing" => 404,
-            "bad_request" or "schedule_invalid" or "schedule_invalid_time" or "schedule_invalid_end" or
+            "bad_request" or "schedule_hold_invalid" or "schedule_invalid" or "schedule_invalid_time" or "schedule_invalid_end" or
                 "schedule_invalid_fields" or "schedule_material_invalid" or "rerun_invalid" or "rerun_required" or "rerun_too_long" => 400,
-            "access_request_stale" or "access_role_stale" or "access_role_refused" or "schedule_stale" or
+            "access_request_stale" or "access_role_stale" or "access_role_refused" or "schedule_stale" or "schedule_hold_stale" or
                 "schedule_template_unavailable" or "schedule_maintenance" or "schedule_clock" or
                 "schedule_material_disabled" or "schedule_material_stale" or "rerun_stale" or
                 "rerun_refused" or "rerun_busy" or "rerun_unverified" or "rerun_ambiguous" => 409,

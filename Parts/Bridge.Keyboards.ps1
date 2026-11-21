@@ -2722,19 +2722,12 @@ function Invoke-TemplateMaxAirPick {
                 }
                 if ($seconds -lt 1 -or $seconds -gt 3600) { return $false }
             }
-            $previous = Get-Setting 'TemplateMaxAirSeconds'
-            $map = @{}
-            if ($previous) { $map = ($previous | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable) }
-            if ($seconds -eq 0) { $map.Remove($key) } else { $map[$key] = $seconds }
-            $script:LastConfigSaveFailed = $false
-            Set-Setting -Name TemplateMaxAirSeconds -Value $map
-            if ($script:LastConfigSaveFailed) {
-                Set-JsonProp $config.Settings 'TemplateMaxAirSeconds' $previous
+            $saved = Set-TemplateMaxAirPolicy -Key $key -Seconds $seconds -UserId $UserId
+            if (-not $saved.ok) {
                 Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.ceilingNotSaved')
                 return $false
             }
             $state.ConfirmDisable = $false
-            Write-BridgeLog "Template maximum on-air policy updated by $UserId to $seconds seconds."
         }
     }
     Show-TemplateMaxAirEditor -ChatId $ChatId -UserId $UserId -MessageId $MessageId -Page $page -KeepState

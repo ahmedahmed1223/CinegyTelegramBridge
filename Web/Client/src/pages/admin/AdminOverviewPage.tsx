@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Tabs, Text, Title } from '@mantine/core'
 import { IconActivityHeartbeat, IconRefresh, IconSettings } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
@@ -10,7 +11,10 @@ import { formatDateTime } from '../../lib/time'
 import { RuntimeFileDiagnosticsPage } from './RuntimeFileDiagnosticsPage'
 import { ShiftReadinessPanel } from './ShiftReadinessPanel'
 import { NotificationCoveragePanel } from './NotificationCoveragePanel'
+import { SettingsExportButton } from './SettingsExportButton'
+import { SettingsImportDialog } from './SettingsImportDialog'
 import { AdminSettingEditor } from './AdminSettingEditor'
+import { LayerNamesPanel } from './LayerNamesPanel'
 
 type Overview = Schemas['AdminOverview']
 type Setting = Schemas['AdminOverviewSetting']
@@ -118,9 +122,19 @@ function SettingValue({ setting }: { setting: Setting }) {
 }
 
 function SettingsPanel({ settings }: { settings: Setting[] }) {
+  const [importOpen, setImportOpen] = useState(false)
   return (
     <Stack gap="lg">
-      <Text size="sm" c="dimmed">راجع التغييرات المتاحة هنا قبل حفظها. بقية الخيارات في إعدادات البوت.</Text>
+      <Group justify="space-between">
+        <Text size="sm" c="dimmed">نزّل الإعدادات القابلة للتعديل هنا أو استوردها وراجع التغييرات قبل الحفظ.</Text>
+        <Group>
+          <SettingsExportButton />
+          <Button variant="default" onClick={() => setImportOpen(true)}>استيراد إعدادات الويب</Button>
+        </Group>
+      </Group>
+      {importOpen && <SettingsImportDialog labels={Object.fromEntries(settings.map((setting) => [setting.id, setting.label]))}
+        onClose={() => setImportOpen(false)} />}
+      <LayerNamesPanel />
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" style={{ alignItems: 'start' }}>
         {settingGroups.map(([id, label]) => {
           const group = settings.filter((setting) => setting.category === id)

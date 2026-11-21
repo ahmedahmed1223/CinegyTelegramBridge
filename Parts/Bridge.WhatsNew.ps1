@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.127.0'; Items = @('Review and rename a broadcast layer in Web Administration.', 'Review a template schedule hold or resume. Look up a recorded air operation by its reference from Shift History.') },
+                @{ Version = '8.126.0'; Items = @('Download the template registry or editable Web settings and review changes before importing.', 'Open your shared template favorites and review the maximum air time for a future show.') },
                 @{ Version = '8.125.0'; Items = @('Check shift readiness and Telegram notification coverage in Administration.', 'Open the weekly and handover reports from Shift History, review resuming Telegram delivery, or set a reminder in the template editor.') },
                 @{ Version = '8.124.0'; Items = @('Review template backups and invalid definitions, open reports from Shift History, and see activity for each operator or review a working-name change.') },
                 @{ Version = '8.123.0'; Items = @('Review the exact layer before Hide or Exit, select an existing picture for a bulletin row, and review Telegram access history and temporary operator suspension.') },
@@ -366,6 +368,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.127.0'; Items = @('راجع اسم الطبقة وعدّله من إدارة الويب.', 'راجع إيقاف جدولة القوالب أو استئنافها، وابحث بمرجع العملية في سجل المناوبة.') },
+                @{ Version = '8.126.0'; Items = @('نزّل سجل القوالب أو إعدادات الويب القابلة للتحرير، وراجع التغييرات قبل الاستيراد.', 'افتح مفضلة القوالب المشتركة وراجع أقصى مدة لعرض القالب في التشغيلات الجديدة.') },
                 @{ Version = '8.125.0'; Items = @('تحقّق من جاهزية المناوبة وتغطية إشعارات Telegram في الإدارة.', 'افتح تقريري الأسبوع وتسليم المناوبة من سجل العمليات، أو راجع إعادة الإرسال عبر Telegram، أو اضبط التذكير من محرّر القالب.') },
                 @{ Version = '8.124.0'; Items = @('راجع نسخ سجل القوالب والتعريفات غير الصالحة. افتح التقارير من سجل العمليات، وتابع نشاط المشغّل أو راجع تغيير اسمه.') },
                 @{ Version = '8.123.0'; Items = @('راجع المشهد قبل إخفائه أو الخروج من حلقته. اختر صورة موجودة للموجز، وراجع قرارات الوصول والتعطيل المؤقت للمشغّلين.') },

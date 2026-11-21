@@ -1353,6 +1353,160 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/air/templates/{key}/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                };
+                header?: never;
+                path: {
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplatePresetPage"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplatePresetRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplatePresetPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Service Unavailable */
                 503: {
                     headers: {
@@ -4248,6 +4402,13 @@ export interface components {
             } | null;
             /** Format: int32 */
             autoHideSeconds: number;
+            /**
+             * Format: int32
+             * @default null
+             */
+            presetIndex: number | null;
+            /** @default null */
+            presetRevision: string | null;
         };
         StatusEnvelope: {
             online: boolean;
@@ -4285,6 +4446,47 @@ export interface components {
             required: boolean;
             /** Format: int32 */
             maxLength: number | null;
+            /** @default false */
+            sensitive: boolean;
+        };
+        TemplatePresetItem: {
+            /** Format: int32 */
+            index: number;
+            name: string;
+            values: {
+                [key: string]: string;
+            };
+            hiddenFields: string[];
+        };
+        TemplatePresetPage: {
+            items: components["schemas"]["TemplatePresetItem"][];
+            fields: components["schemas"]["TemplateFieldDto"][];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageCount: number;
+            revision: string;
+            canManage: boolean;
+        };
+        TemplatePresetRequest: {
+            action: string;
+            revision: string;
+            /**
+             * Format: int32
+             * @default null
+             */
+            index: number | null;
+            /** @default null */
+            name: string | null;
+            /** @default null */
+            values: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            page: number | null;
         };
         TickerBackupItem: {
             id: string;

@@ -1817,6 +1817,58 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'shares template presets without exposing sensitive fields and rejects stale changes or playout' {
+        Mock Test-Authorized { $UserId -in 4321, 4322, 4323 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-TemplateAccess { @{ Allowed = ($UserId -ne 4323) } }
+        Mock Invoke-ShowTemplateResult { @{ Success = $true } }
+        Mock Publish-WebChannelState {}
+        $script:PresetFixtureRegistry = Join-Path $TestDrive 'web-presets.json'
+        Mock Get-TemplateRegistryFilePath { $script:PresetFixtureRegistry }
+        $scene = Join-Path $TestDrive 'preset-scene.cintitle'
+        Set-Content -LiteralPath $scene -Value '<Scene />'
+        @{
+            Programme = @{
+                layer = 7; path = $scene
+                fields = @(@{ name = 'title'; label = 'العنوان'; required = $true },
+                    @{ name = 'studioCode'; sensitive = $true; required = $true }, 'streamKey')
+                presets = @(@{ name = 'الافتتاح'; values = @($null, 'private-fixture-code', 'private-fixture-stream') })
+            }
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:PresetFixtureRegistry
+        $sendPreset = {
+            param($operation, $payload)
+            $line = @{ op = $operation; args = $payload } | ConvertTo-Json -Depth 8 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        (& $sendPreset 'air.presets' @{ actor = 4323; key = 'Programme' }).error | Should -Be 'forbidden'
+        $list = & $sendPreset 'air.presets' @{ actor = 4322; key = 'Programme' }
+        $list.ok | Should -BeTrue
+        $list.data.canManage | Should -BeFalse
+        (Get-JsonProp $list.data.items[0].values 'title') | Should -BeNullOrEmpty
+        $list.data.items[0].hiddenFields | Should -Be @('studioCode', 'streamKey')
+        ($list | ConvertTo-Json -Depth 8) | Should -Not -Match 'private-fixture'
+        $oldButton = 'pad:0:0:{0}' -f $list.data.revision.Substring(0, 16)
+        (Read-TemplatePresetButton -Data $oldButton).Preset.Name | Should -Be 'الافتتاح'
+        $request = @{ actor = 4322; key = 'Programme'; action = 'edit'; index = 0; revision = $list.data.revision
+            values = @{ title = 'خبر جديد' } }
+        (& $sendPreset 'air.preset-change' $request).error | Should -Be 'forbidden'
+        $request.actor = 4321
+        $changed = & $sendPreset 'air.preset-change' $request
+        $changed.ok | Should -BeTrue
+        $changed.data.items[0].values.title | Should -Be 'خبر جديد'
+        Read-TemplatePresetButton -Data $oldButton | Should -BeNullOrEmpty
+        (& $sendPreset 'air.preset-change' $request).error | Should -Be 'preset_stale'
+        $show = @{ actor = 4322; key = 'Programme'; presetIndex = 0; presetRevision = $list.data.revision
+            variables = @{ title = 'العنوان المباشر' }; autoHideSeconds = 0 }
+        (& $sendPreset 'air.show' $show).error | Should -Be 'preset_stale'
+        Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+        $show.presetRevision = $changed.data.revision
+        (& $sendPreset 'air.show' $show).ok | Should -BeTrue
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
+            $Variables['title'] -ceq 'العنوان المباشر' -and $Variables['studioCode'] -ceq 'private-fixture-code'
+        }
+    }
+
     It 'reviews a live programme correction and writes only selected fields to the confirmed scene' {
         Mock Test-Authorized { $UserId -in 4321, 4322 }
         Mock Test-Admin { $UserId -eq 4321 }

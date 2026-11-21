@@ -65,6 +65,31 @@ Describe 'Safe in-memory layer rollback' {
         $script:LastSuccessfulLayerShows[5].Key | Should -Be 'beta'
     }
 
+    It 'sends sensitive template fields to Cinegy without writing them to history or XML logs' {
+        Mock Get-TemplateStore {
+            @{ Order = @('beta'); Map = @{ beta = @{
+                        Key = 'beta'; Layer = 5; Path = 'C:\Scenes\Beta.cintitle'; Fields = @('Title', 'Secret')
+                        FieldSensitive = @($false, $true); FieldTypes = @{}; Presets = @()
+                    } }; Errors = @() }
+        }
+        Mock Get-Setting {
+            if ($Name -in 'AuditTemplateValues', 'LogAirXml') { return $true }
+            return Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name
+        }
+        Mock Get-TitlerLayerStatus { @{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Show-TitlerTemplate { @{ Success = $true; EventId = 'event-sensitive'; Error = ''; Xml = '<Secret>synthetic-value</Secret>' } }
+        $result = Invoke-ShowTemplateResult -Key beta -Variables @{ Title = 'public-copy'; Secret = 'synthetic-value' } -ChatId 10 -UserId 10
+        $result.Success | Should -BeTrue
+        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Variables.Secret -ceq 'synthetic-value' }
+        Should -Invoke Write-AirOperationResult -Times 1 -Exactly -ParameterFilter {
+            $Result -eq 'success' -and $Values -match 'public-copy' -and $Values -notmatch 'synthetic-value'
+        }
+        Should -Invoke Write-BridgeLog -Times 0 -Exactly -ParameterFilter { $Message -match 'synthetic-value' }
+        $script:OnAir[5].ScreenCopy | Should -Not -Match 'synthetic-value'
+        $script:LastShow[[long]10].Variables.ContainsKey('Secret') | Should -BeFalse
+        $script:LastShowAttempts['10'].Variables.ContainsKey('Secret') | Should -BeFalse
+    }
+
     It 'offers an undo that clears a layer that was empty before the push' {
         # The commonest daily error: the wrong template, onto a layer that
         # had nothing on it. Before this there was nothing to press.

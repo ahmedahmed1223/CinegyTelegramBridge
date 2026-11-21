@@ -4,11 +4,12 @@ using CinegyBridge.Web.Bridge;
 
 namespace CinegyBridge.Web.Endpoints;
 
-public sealed record TemplateFieldDto(string Name, string Label, bool Required, int? MaxLength);
+public sealed record TemplateFieldDto(string Name, string Label, bool Required, int? MaxLength, bool Sensitive = false);
 
 public sealed record TemplateDto(string Key, string Name, int Layer, string? Category, bool Disabled, IReadOnlyList<TemplateFieldDto> Fields);
 
-public sealed record ShowTemplateRequest(string Key, Dictionary<string, string>? Variables, int AutoHideSeconds);
+public sealed record ShowTemplateRequest(string Key, Dictionary<string, string>? Variables, int AutoHideSeconds,
+    int? PresetIndex = null, string? PresetRevision = null);
 
 public static class AirEndpoints
 {
@@ -24,7 +25,17 @@ public static class AirEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        api.MapGet("/templates/{key}/presets", GetPresets)
+            .Produces<TemplatePresetPage>()
+            .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
+        api.MapPost("/templates/{key}/presets", ChangePreset)
+            .Produces<TemplatePresetPage>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
         api.MapPost("/hide/{layer:int}", Hide)
             .Produces(StatusCodes.Status204NoContent)
@@ -58,10 +69,34 @@ public static class AirEndpoints
             actor,
             key = request.Key.Trim(),
             variables = request.Variables ?? new Dictionary<string, string>(),
-            autoHideSeconds = request.AutoHideSeconds
+            autoHideSeconds = request.AutoHideSeconds,
+            request.PresetIndex,
+            request.PresetRevision
         }, http.RequestAborted);
 
         return AirResult(reply);
+    }
+
+    private static async Task<IResult> GetPresets(string key, int? page, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("air.presets", new { actor = http.User.UserId(), key, page }, http.RequestAborted);
+        return PresetResult(reply, http);
+    }
+
+    private static async Task<IResult> ChangePreset(string key, TemplatePresetRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("air.preset-change", new
+        {
+            actor = http.User.UserId(), key, request.Action, request.Revision, request.Index, request.Name, request.Values, request.Page
+        }, http.RequestAborted);
+        return PresetResult(reply, http);
+    }
+
+    private static IResult PresetResult(BridgeReply reply, HttpContext http)
+    {
+        if (!reply.Ok) return AirResult(reply);
+        http.Response.Headers.CacheControl = "no-store";
+        return TypedResults.Ok(reply.Data.Deserialize<TemplatePresetPage>(JsonDefaults.Options));
     }
 
     private static async Task<IResult> Hide(int layer, IBridgeChannel bridge, HttpContext http)
@@ -83,6 +118,10 @@ public static class AirEndpoints
     private static IResult AirResult(BridgeReply reply) => reply.Ok ? TypedResults.NoContent() : reply.Error switch
     {
         "forbidden" => ApiErrors.Of(403, reply.Error),
+        "not_found" => ApiErrors.Of(404, reply.Error),
+        "preset_stale" or "preset_duplicate" => ApiErrors.Of(409, reply.Error),
+        "preset_invalid" or "preset_invalid_name" or "preset_too_long" => ApiErrors.Of(400, reply.Error),
+        "preset_save_failed" => ApiErrors.Of(503, reply.Error),
         "bad_duration" => ApiErrors.Of(400, reply.Error),
         "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
         _ => ApiErrors.BridgeUnavailable()

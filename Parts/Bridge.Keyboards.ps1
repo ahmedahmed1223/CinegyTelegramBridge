@@ -720,8 +720,9 @@ function Get-TemplatesKeyboard {
         # Presets are only meaningful for an immediate show.
         if ($Prefix -eq 'tpl') {
             $presetRow = @()
+            $presetStamp = Get-TemplatePresetButtonStamp -Template $t
             for ($p = 0; $p -lt $t.Presets.Count; $p++) {
-                $presetRow += (New-Button "  ⚡ $($t.Presets[$p].Name)" "preset:$i`:$p")
+                $presetRow += (New-Button "  ⚡ $($t.Presets[$p].Name)" ('preset:{0}:{1}:{2}' -f $i, $p, $presetStamp))
                 if ($presetRow.Count -eq 2) { $rows += , $presetRow; $presetRow = @() }
             }
             if ($presetRow.Count -gt 0) { $rows += , $presetRow }
@@ -1224,9 +1225,10 @@ function Get-PresetAdminKeyboard {
         # a template with fewer than twenty presets renders exactly as before,
         # since the pager row appears only when there is a second page.
         $presetWindow = Get-BridgePageWindow -ItemCount @($template.Presets).Count -Page $Page -PageSize 20
+        $presetStamp = Get-TemplatePresetButtonStamp -Template $template
         if ($presetWindow.EndIndex -ge $presetWindow.StartIndex) {
             for ($i = $presetWindow.StartIndex; $i -le $presetWindow.EndIndex; $i++) {
-                $rows += , @( (New-Button "⚡ $($template.Presets[$i].Name)" "pa:$TemplateIndex`:$i") )
+                $rows += , @( (New-Button "⚡ $($template.Presets[$i].Name)" ('pa:{0}:{1}:{2}' -f $TemplateIndex, $i, $presetStamp)) )
             }
         }
         $presetPager = @(Get-BridgePagerButtons -Window $presetWindow -Prefix "papage:$TemplateIndex")
@@ -1238,16 +1240,18 @@ function Get-PresetAdminKeyboard {
 }
 
 function Get-PresetActionKeyboard {
-    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex)
+    param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [string]$Stamp)
+    $target = '{0}:{1}:{2}' -f $TemplateIndex, $PresetIndex, $Stamp
     return @{ inline_keyboard = @(
-            , @( (New-Button (T 'kb.editValues') "pae:$TemplateIndex`:$PresetIndex"), (New-Button (T 'common.rename') "par:$TemplateIndex`:$PresetIndex") )
-            , @( (New-Button (T 'common.delete') "pad:$TemplateIndex`:$PresetIndex" -Style danger), (New-Button (T 'kb.back') "padm:$TemplateIndex") )
+            , @( (New-Button (T 'kb.editValues') "pae:$target"), (New-Button (T 'common.rename') "par:$target") )
+            , @( (New-Button (T 'common.delete') "pad:$target" -Style danger), (New-Button (T 'kb.back') "padm:$TemplateIndex") )
         ) }
 }
 
 function Get-PresetReviewKeyboard {
+    param([string]$Nonce)
     return @{ inline_keyboard = @(
-            , @( (New-Button (T 'common.saveChange') 'presetadmin:confirm' -Style success), (New-Button (T 'common.cancel') 'cancel') )
+            , @( (New-Button (T 'common.saveChange') "presetadmin:confirm:$Nonce" -Style success), (New-Button (T 'common.cancel') 'cancel') )
         ) }
 }
 

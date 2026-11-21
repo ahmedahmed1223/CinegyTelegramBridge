@@ -372,6 +372,8 @@ function Format-ShowReviewText {
     }
     $lines.Add("")
     $lines.Add((T 'flow.whatWillShow'))
+    $sensitiveNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $sensitivity = @{ FieldSensitive = Get-JsonProp $State 'Sensitives' }
     for ($i = 0; $i -lt @($State.Fields).Count; $i++) {
         $name = [string]$State.Fields[$i]
         $label = $name
@@ -380,7 +382,13 @@ function Format-ShowReviewText {
         # says so in italics rather than sitting in a code span pretending to
         # be text that will appear.
         if ($State.Values.ContainsKey($name)) {
-            $lines.Add("$(ConvertTo-TelegramHtmlText $label):`n<code>$(ConvertTo-TelegramHtmlText ([string]$State.Values[$name]))</code>")
+            if (Test-TemplateFieldSensitive -Template $sensitivity -Index $i -Name $name) {
+                [void]$sensitiveNames.Add($name)
+                $lines.Add("$(ConvertTo-TelegramHtmlText $label): ••••")
+            }
+            else {
+                $lines.Add("$(ConvertTo-TelegramHtmlText $label):`n<code>$(ConvertTo-TelegramHtmlText ([string]$State.Values[$name]))</code>")
+            }
         }
         else {
             $lines.Add((T 'flow.leftBlank' $(ConvertTo-TelegramHtmlText $label)))
@@ -392,7 +400,7 @@ function Format-ShowReviewText {
     # name no checker knows is worse than the typo.
     if (Get-Setting 'EnableTextChecks') {
         $notes = @(foreach ($name in @($State.Fields)) {
-                if (-not $State.Values.ContainsKey($name)) { continue }
+                if (-not $State.Values.ContainsKey($name) -or $sensitiveNames.Contains([string]$name)) { continue }
                 foreach ($warning in @(Get-BridgeTextWarnings -Text ([string]$State.Values[$name]))) {
                     "• $(ConvertTo-TelegramHtmlText $warning)"
                 }
@@ -1232,6 +1240,15 @@ function Invoke-RetryLastShowAttempt {
         -InitialValues $attempt.Variables -AutoHideSeconds ([int]$attempt.AutoHideSeconds) -ReviewImmediately
 }
 
+function Get-PresetCallbackChoice {
+    param([string]$Data, [long]$ChatId, [long]$UserId)
+    $choice = Read-TemplatePresetButton -Data $Data
+    if (-not $choice) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.reviewExpired') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+    }
+    return $choice
+}
+
 function Invoke-PresetShow {
     param([Parameter(Mandatory)][int]$TemplateIndex, [Parameter(Mandatory)][int]$PresetIndex, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -1241,10 +1258,7 @@ function Invoke-PresetShow {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.presetMissing') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
-    $variables = @{}
-    for ($i = 0; $i -lt $t.Fields.Count -and $i -lt $preset.Values.Count; $i++) {
-        $variables[[string]$t.Fields[$i]] = [string]$preset.Values[$i]
-    }
+    $variables = Get-TemplatePresetValues -Template $t -Preset $preset
     Start-ShowFlow -TemplateIndex $TemplateIndex -ChatId $ChatId -UserId $UserId -InitialValues $variables -ReviewImmediately
 }
 
@@ -1274,8 +1288,9 @@ function Show-PresetAdminReview {
     $lines += ''
     $lines += (T 'flow.notWrittenUntilSave')
     $State.Mode = 'preset_admin_review'
+    $State.ReviewNonce = [guid]::NewGuid().ToString('N')
     Set-PendingState -ChatId $ChatId -State $State
-    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-PresetReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup (Get-PresetReviewKeyboard -Nonce $State.ReviewNonce)
 }
 
 function Start-PresetAdminCreate {
@@ -1285,7 +1300,7 @@ function Start-PresetAdminCreate {
     Set-PendingState -ChatId $ChatId -State @{
         Mode = 'preset_admin_name'; Action = 'create'; TemplateIndex = $TemplateIndex
         TemplateKey = [string]$template.Key; PresetIndex = -1; UserId = $UserId
-        Fields = @($template.Fields); Values = @(); Name = ''; Index = 0
+        Fields = @($template.Fields); Values = @(); Name = ''; Index = 0; PresetRevision = Get-JsonProp $template 'PresetRevision'
     }
     Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.sendReadyTextName' $($template.Key)) -ReplyMarkup (Get-CancelKeyboard)
 }
@@ -1298,7 +1313,7 @@ function Start-PresetAdminEditValues {
     $state = @{
         Mode = 'preset_admin_values'; Action = 'edit'; TemplateIndex = $TemplateIndex
         TemplateKey = [string]$template.Key; PresetIndex = $PresetIndex; UserId = $UserId
-        Fields = @($template.Fields); Values = @(); Name = [string]$editing.Name; Index = 0
+        Fields = @($template.Fields); Values = @(); Name = [string]$editing.Name; Index = 0; PresetRevision = Get-JsonProp $template 'PresetRevision'
     }
     if ($state.Fields.Count -eq 0) { Show-PresetAdminReview -ChatId $ChatId -State $state; return }
     Set-PendingState -ChatId $ChatId -State $state
@@ -1332,14 +1347,15 @@ function Complete-PresetAdminText {
 }
 
 function Confirm-PresetAdminChange {
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [string]$Nonce = '')
     $state = Get-PendingState -ChatId $ChatId
-    if (-not $state -or $state.Mode -ne 'preset_admin_review' -or [long]$state.UserId -ne $UserId) {
+    if (-not $state -or $state.Mode -ne 'preset_admin_review' -or [long]$state.UserId -ne $UserId -or
+        $Nonce -cne [string](Get-JsonProp $state 'ReviewNonce')) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.reviewExpired') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
         return
     }
     $templateIndex = [int]$state.TemplateIndex
-    $result = Save-TemplatePresetChange -TemplateKey ([string]$state.TemplateKey) -PresetIndex ([int]$state.PresetIndex) -Action ([string]$state.Action) -Name ([string]$state.Name) -Values @($state.Values)
+    $result = Save-TemplatePresetChange -TemplateKey ([string]$state.TemplateKey) -PresetIndex ([int]$state.PresetIndex) -Action ([string]$state.Action) -Name ([string]$state.Name) -Values @($state.Values) -ExpectedRevision ([string](Get-JsonProp $state 'PresetRevision'))
     Clear-PendingState -ChatId $ChatId
     if ($result.Success) {
         Write-BridgeLog "Admin $UserId applied preset $($state.Action) to template '$($state.TemplateKey)'"

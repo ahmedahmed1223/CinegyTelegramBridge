@@ -340,7 +340,10 @@ Describe 'Telegram preset management flow' {
         (Get-PendingState -ChatId 91).Mode | Should -Be 'preset_admin_review'
         Should -Invoke Save-TemplatePresetChange -Times 0 -Exactly
 
-        Confirm-PresetAdminChange -ChatId 91 -UserId 101
+        $reviewNonce = (Get-PendingState -ChatId 91).ReviewNonce
+        Confirm-PresetAdminChange -ChatId 91 -UserId 101 -Nonce 'older-review'
+        Should -Invoke Save-TemplatePresetChange -Times 0 -Exactly
+        Confirm-PresetAdminChange -ChatId 91 -UserId 101 -Nonce $reviewNonce
 
         Get-PendingState -ChatId 91 | Should -BeNullOrEmpty
         Should -Invoke Save-TemplatePresetChange -Times 1 -Exactly -ParameterFilter {
@@ -628,8 +631,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '8.114.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '8.114.0'
+        $script:BridgeVersion | Should -Be '8.115.0'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '8.115.0'
     }
 
     It 'presents the operational setting categories in a stable order' {

@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.115.0'; Items = @('Choose a ready text while preparing a template on the web. Administrators can create, edit, rename and delete texts shared with the bot.') },
                 @{ Version = '8.114.0'; Items = @('Select and review text corrections for the programme row already on air. Use the row editor for the saved version.') },
                 @{ Version = '8.113.0'; Items = @('Review the fields and layer before putting a programme row on air from the web. The hide action verifies that the same scene is still active.') },
                 @{ Version = '8.112.0'; Items = @('After importing a ticker TXT file, the window stays open until the new draft is ready to edit.') },
@@ -355,6 +356,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.115.0'; Items = @('اختر نصًا جاهزًا عند تجهيز قالب للعرض في الويب. يستطيع المشرف إضافة النصوص المشتركة مع البوت وتعديلها وتسميتها وحذفها.') },
                 @{ Version = '8.114.0'; Items = @('حدّد الحقول النصية التي تريد تصحيحها في صف البرنامج المعروض وراجعها قبل التطبيق. لتحرير النسخة المحفوظة استخدم زر تحرير الصف.') },
                 @{ Version = '8.113.0'; Items = @('راجع الحقول والطبقة قبل عرض صف من لوحات البرامج عبر الويب. يتحقق زر الإخفاء من بقاء المشهد نفسه على الهواء.') },
                 @{ Version = '8.112.0'; Items = @('بعد استيراد أخبار الشريط من ملف TXT تبقى نافذة الاستيراد مفتوحة حتى تصبح المسودة المحدّثة جاهزة للتحرير.') },

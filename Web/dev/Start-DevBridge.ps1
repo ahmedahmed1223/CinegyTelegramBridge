@@ -97,6 +97,7 @@ Set-JsonProp $config.Settings 'MaxContentBoards' 12
         path = Join-Path $runtime 'evening-programme.cintitle'; layer = 7; description = 'بطاقة البرنامج'; category = 'البرامج'
         fields = @(@{ name = 'programme.title'; label = 'عنوان الفقرة' }, @{ name = 'programme.guest'; label = 'اسم الضيف' },
             @{ name = 'programme.logo'; label = 'شعار البرنامج' })
+        presets = @(@{ name = 'افتتاح البرنامج'; values = @('بداية الحلقة', 'فريق التحرير') })
     }
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $fixtureRegistry
 @'

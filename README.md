@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.115.0
+
+The web template editor can load a saved preset before playout. Administrators can create, edit, rename and delete the same presets the bot uses. Sensitive saved values stay on the bridge, and an outdated review cannot act on a replacement preset.
+
 ## Version 8.114.0
 
 Editors can review and apply selected text corrections to a programme row already on air. The bridge checks the scene identity and the scope of the channel-wide field update. The saved board remains available for the next playout.

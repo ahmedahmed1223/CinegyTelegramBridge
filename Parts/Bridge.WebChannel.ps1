@@ -347,6 +347,8 @@ function Invoke-WebChannelOperation {
         'account.grant' { return Grant-WebOnlyAccount -Arguments $arguments }
         'account.revoke' { return Revoke-WebOnlyAccount -Arguments $arguments }
         'air.templates' { return Get-WebTemplates }
+        'air.presets' { return Get-WebTemplatePresets -Arguments $arguments }
+        'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
         'air.show' { return Invoke-WebAirShow -Arguments $arguments }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
@@ -716,6 +718,7 @@ function Get-WebTemplateFields {
             label = $label ? $label : $name
             required = $Template.FieldRequired[$index]
             maxLength = ($limit -gt 0) ? $limit : $null
+            sensitive = Test-TemplateFieldSensitive -Template $Template -Index $index -Name $name
         }
     }
 }
@@ -743,6 +746,107 @@ function Get-WebTemplates {
     return @{ ok = $true; data = $templates.ToArray() }
 }
 
+function Get-WebPresetTemplateAccess {
+    param([long]$Actor, [string]$Key)
+    if (-not (Test-Authorized -ChatId $Actor -UserId $Actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not $Key) { return @{ ok = $false; error = 'not_found' } }
+    $template = (Get-TemplateStore).Map[$Key]
+    if (-not $template) { return @{ ok = $false; error = 'not_found' } }
+    if (-not (Test-TemplateAccess -Key $template.Key -Layer ([int]$template.Layer) -ChatId $Actor -UserId $Actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    return @{ ok = $true; template = $template }
+}
+
+function Get-WebPresetPage {
+    param($Template, [int]$Page, [bool]$CanManage)
+    $fields = @(Get-WebTemplateFields -Template $Template)
+    $presets = @(Get-JsonProp $Template 'Presets')
+    $window = Get-BridgePageWindow -ItemCount $presets.Count -Page $Page
+    $items = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
+            $preset = $presets[$index]
+            $values = Get-TemplatePresetValues -Template $Template -Preset $preset
+            $hiddenFields = @(foreach ($field in $fields) {
+                    if ($field.sensitive -and $values.ContainsKey($field.name)) {
+                        $values.Remove($field.name)
+                        $field.name
+                    }
+                })
+            @{ index = $index; name = Get-NewsScreenLine ([string]$preset.Name) 80; values = $values; hiddenFields = $hiddenFields }
+        })
+    return @{
+        items = $items; fields = $fields; page = $window.Page; pageCount = $window.PageCount
+        revision = [string](Get-JsonProp $Template 'PresetRevision'); canManage = $CanManage
+    }
+}
+
+function Get-WebTemplatePresets {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    $access = Get-WebPresetTemplateAccess -Actor $actor -Key ([string](Get-JsonProp $Arguments 'key'))
+    if (-not $access.ok) { return $access }
+    $canManage = Test-Admin -ChatId $actor -UserId $actor
+    return @{ ok = $true; data = Get-WebPresetPage -Template $access.template -Page ([int](Get-JsonProp $Arguments 'page')) -CanManage $canManage }
+}
+
+function Invoke-WebTemplatePresetChange {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    $access = Get-WebPresetTemplateAccess -Actor $actor -Key ([string](Get-JsonProp $Arguments 'key'))
+    if (-not $access.ok) { return $access }
+    if (-not (Test-Admin -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $template = $access.template
+    $revision = [string](Get-JsonProp $Arguments 'revision')
+    if (-not $revision -or $revision -cne [string](Get-JsonProp $template 'PresetRevision')) {
+        return @{ ok = $false; error = 'preset_stale' }
+    }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -cnotin @('create', 'edit', 'rename', 'delete')) { return @{ ok = $false; error = 'preset_invalid' } }
+    $index = if ($action -eq 'create') { -1 } else { Get-JsonProp $Arguments 'index' }
+    $preset = if (($index -is [int] -or $index -is [long]) -and $index -ge 0 -and $index -le [int]::MaxValue) {
+        Get-TemplatePreset -Template $template -Index $index
+    }
+    if ($action -ne 'create' -and -not $preset) { return @{ ok = $false; error = 'preset_stale' } }
+    $name = ([string](Get-JsonProp $Arguments 'name')).Trim()
+    if ($action -in @('create', 'rename')) {
+        if (-not $name -or $name.Length -gt 80 -or $name -match '[\p{Cc}]') { return @{ ok = $false; error = 'preset_invalid_name' } }
+        for ($position = 0; $position -lt $template.Presets.Count; $position++) {
+            if (($action -eq 'create' -or $position -ne $index) -and [string]$template.Presets[$position].Name -eq $name) {
+                return @{ ok = $false; error = 'preset_duplicate' }
+            }
+        }
+    }
+    $values = @()
+    if ($action -in @('create', 'edit')) {
+        $entered = Get-JsonProp $Arguments 'values'
+        if ($entered -isnot [System.Collections.IDictionary]) { return @{ ok = $false; error = 'preset_invalid' } }
+        $fields = @(Get-WebTemplateFields -Template $template)
+        foreach ($key in $entered.Keys) {
+            if ($key -cnotin $template.Fields -or $entered[$key] -isnot [string]) { return @{ ok = $false; error = 'preset_invalid' } }
+            $field = $fields | Where-Object { $_.name -ceq $key } | Select-Object -First 1
+            try { [void][System.Xml.XmlConvert]::VerifyXmlChars([string]$entered[$key]) } catch { return @{ ok = $false; error = 'preset_invalid' } }
+            if ($field.maxLength -and (Get-TextElementCount -Text $entered[$key]) -gt $field.maxLength) {
+                return @{ ok = $false; error = 'preset_too_long' }
+            }
+        }
+        $previous = @(Get-JsonProp $preset 'Values')
+        $length = [Math]::Max($fields.Count, $previous.Count)
+        $values = @(for ($position = 0; $position -lt $length; $position++) {
+                if ($position -lt $fields.Count -and $entered.Contains($fields[$position].name)) {
+                    $entered[$fields[$position].name]
+                }
+                elseif ($position -lt $previous.Count) { [string]$previous[$position] }
+                else { '' }
+            })
+    }
+    $result = Save-TemplatePresetChange -TemplateKey $template.Key -Action $action -ExpectedRevision $revision -PresetIndex ([int]$index) -Name $name -Values $values
+    if (Get-JsonProp $result 'Stale') { return @{ ok = $false; error = 'preset_stale' } }
+    if (-not $result.Success) { return @{ ok = $false; error = 'preset_save_failed' } }
+    Add-AuditEntry "Web template preset $action / $($template.Key) - $(Format-UserAuditActor -UserId $actor)"
+    $updated = (Get-TemplateStore).Map[$template.Key]
+    return @{ ok = $true; data = Get-WebPresetPage -Template $updated -Page ([int](Get-JsonProp $Arguments 'page')) -CanManage $true }
+}
+
 function Invoke-WebAirShow {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -764,6 +868,24 @@ function Invoke-WebAirShow {
 
     $template = $store.Map[$key]
     $variables = @{}
+    $hiddenPresetFields = @()
+    $presetIndex = Get-JsonProp $Arguments 'presetIndex'
+    if ($null -ne $presetIndex) {
+        $access = Get-WebPresetTemplateAccess -Actor $actor -Key $key
+        if (-not $access.ok) { return $access }
+        $template = $access.template
+        $revision = [string](Get-JsonProp $Arguments 'presetRevision')
+        $preset = if (($presetIndex -is [int] -or $presetIndex -is [long]) -and $presetIndex -ge 0 -and $presetIndex -le [int]::MaxValue) {
+            Get-TemplatePreset -Template $template -Index $presetIndex
+        }
+        if (-not $preset -or -not $revision -or $revision -cne [string](Get-JsonProp $template 'PresetRevision') -or
+            $revision -cne (Get-TemplatePresetRegistryRevision -TemplateKey $template.Key)) {
+            return @{ ok = $false; error = 'preset_stale' }
+        }
+        $variables = Get-TemplatePresetValues -Template $template -Preset $preset
+        $hiddenPresetFields = @(Get-WebTemplateFields -Template $template | Where-Object { $_.sensitive -and $variables.ContainsKey($_.name) } |
+                ForEach-Object { $_.name })
+    }
     if ($rawVars -is [System.Collections.IDictionary]) {
         foreach ($k in $rawVars.Keys) {
             if ($k -notin $template.Fields) { return @{ ok = $false; error = 'refused' } }
@@ -777,6 +899,7 @@ function Invoke-WebAirShow {
         }
         $length = Get-TextElementCount -Text $value
         if ($field.maxLength -and $length -gt $field.maxLength) {
+            if ($field.name -in $hiddenPresetFields) { return @{ ok = $false; error = 'preset_invalid' } }
             return @{ ok = $false; error = 'refused'; data = (T 'flow.textTooLong' $length $field.maxLength) }
         }
     }

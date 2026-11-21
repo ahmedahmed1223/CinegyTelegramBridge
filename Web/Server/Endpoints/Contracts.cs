@@ -6,6 +6,10 @@ namespace CinegyBridge.Web.Endpoints;
 
 public sealed record ErrorResponse(string Error, string? Message = null);
 public sealed record CaptureCreateRequest(string Kind);
+public sealed record TemplatePresetItem(int Index, string Name, Dictionary<string, string> Values, string[] HiddenFields);
+public sealed record TemplatePresetPage(TemplatePresetItem[] Items, TemplateFieldDto[] Fields, int Page, int PageCount, string Revision, bool CanManage);
+public sealed record TemplatePresetRequest(string Action, string Revision, int? Index = null, string? Name = null,
+    Dictionary<string, string>? Values = null, int? Page = null);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);

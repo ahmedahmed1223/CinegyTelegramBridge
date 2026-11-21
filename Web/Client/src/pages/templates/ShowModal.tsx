@@ -3,6 +3,8 @@ import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconSend } from '@tabler/icons-react'
 import { useState } from 'react'
 import { showTemplate, type TemplateDto } from '../../api/air'
+import type { Schemas } from '../../api/client'
+import { TemplatePresets } from './TemplatePresets'
 
 interface ShowModalProps {
   template: TemplateDto
@@ -14,6 +16,8 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
   const [autoHide, setAutoHide] = useState<number | string>(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [choosingPreset, setChoosingPreset] = useState(false)
+  const [preset, setPreset] = useState<{ item: Schemas['TemplatePresetItem']; revision: string } | null>(null)
 
   const handleFieldChange = (name: string, value: string) => {
     setVariables((prev) => ({ ...prev, [name]: value }))
@@ -26,7 +30,8 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
 
     // Validate required fields
     for (const f of template.fields) {
-      if (f.required && !variables[f.name]?.trim()) {
+      const fromPreset = preset?.item.hiddenFields.includes(f.name) && variables[f.name] === undefined
+      if (f.required && !fromPreset && !variables[f.name]?.trim()) {
         setError(`حقل "${f.label || f.name}" مطلوب.`)
         return
       }
@@ -38,6 +43,8 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
         key: template.key,
         variables,
         autoHideSeconds: Number(autoHide) || 0,
+        presetIndex: preset?.item.index ?? null,
+        presetRevision: preset?.revision ?? null,
       })
       notifications.show({
         title: 'قُبل أمر العرض',
@@ -53,8 +60,9 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
   }
 
   return (
+    <>
     <Modal
-      opened
+      opened={!choosingPreset}
       onClose={submitting ? () => {} : onClose}
       withCloseButton={!submitting}
       closeOnEscape={!submitting}
@@ -74,6 +82,16 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
           <Text size="xs" c="dimmed">
             الطبقة المستهدفة <strong className="cgb-mono">{template.layer}</strong>
           </Text>
+          <Group gap="xs">
+            <Button type="button" size="compact-sm" variant="light" disabled={submitting} onClick={() => setChoosingPreset(true)}>
+              النصوص الجاهزة
+            </Button>
+            {preset && <>
+              <Text size="sm" dir="auto">{preset.item.name}</Text>
+              <Button type="button" size="compact-xs" variant="subtle" disabled={submitting}
+                onClick={() => { setPreset(null); setVariables({}); setError(null) }}>إزالة النص الجاهز</Button>
+            </>}
+          </Group>
 
           {template.fields.length === 0 ? (
             <Text size="sm" c="dimmed">
@@ -84,8 +102,11 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
               <TextInput
                 key={f.name}
                 label={f.label || f.name}
-                required={f.required}
-                description={f.maxLength ? `الحد الأقصى ${f.maxLength} حرفًا` : undefined}
+                required={f.required && !(preset?.item.hiddenFields.includes(f.name) && variables[f.name] === undefined)}
+                type={f.sensitive ? 'password' : 'text'}
+                autoComplete={f.sensitive ? 'off' : undefined}
+                description={preset?.item.hiddenFields.includes(f.name) && variables[f.name] === undefined
+                  ? 'ستُستخدم القيمة الحساسة المحفوظة.' : f.maxLength ? `الحد الأقصى ${f.maxLength} حرفًا` : undefined}
                 disabled={submitting}
                 value={variables[f.name] || ''}
                 onChange={(e) => handleFieldChange(f.name, e.currentTarget.value)}
@@ -122,5 +143,14 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
         </Stack>
       </form>
     </Modal>
+    {choosingPreset && <TemplatePresets templateKey={template.key} templateName={template.name}
+      onClose={() => setChoosingPreset(false)}
+      onChoose={(item, revision) => {
+        setPreset({ item, revision })
+        setVariables(item.values)
+        setError(null)
+        setChoosingPreset(false)
+      }} />}
+    </>
   )
 }

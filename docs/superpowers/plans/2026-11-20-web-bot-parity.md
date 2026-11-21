@@ -4,9 +4,11 @@
 
 **Architecture** — React and Mantine provide the Arabic RTL interface. The ASP.NET Core server authenticates sessions and carries typed requests to the local pipe. The bridge executes commands on its own thread and owns concurrency, authorization, scheduling, and Cinegy state.
 
+**Release 9.0.0** — Once web parity is complete and verified, raise the bridge version to 9.0.0 and summarize the changes across the web releases in the release notes.
+
 | Workflow | In the web interface | Remaining work |
 |---|---|---|
-| Air and templates | Live layers, searchable library, Show, Hide, Exit | Live text editing, presets, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
+| Air and templates | Live layers, searchable library, Show, Hide, Exit, shared template preset selection and management | Live text editing, rehearsals, reruns, rollback, emergency and maintenance actions, template registration and editing |
 | Breaking news | Default editable table, row selection, shared timing defaults and per-story overrides, automatic run preview and playback, pause, resume, advance, stop retry, reviewed single-story and timed playback, isolated rehearsal | Cross-client acceptance checks |
 | Bulletins | Shared library and paginated design-field table, create and copy, design switching, revision-checked row editing and batch paste, shared picture choices, uploads to individual picture columns in existing or new rows, editorial and image previews, timing, schedules, reviewed start and identity-checked stop for the selected design | Other attachment types and cross-client acceptance checks |
 | Ticker | Paged published list, shared draft lock and handover, lock requests and administrative release, editing and reordering, reviewed publication and conflict resolution, paused headlines, scheduled publication, saved sets, reviewed backup restore and Google Sheets import/publication, reviewed batch paste and TXT import, clearing and cancelling drafts | Cross-client acceptance checks |

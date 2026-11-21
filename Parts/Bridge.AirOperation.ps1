@@ -654,12 +654,26 @@ function Send-PreShowValues {
     <# The story into the postbox before its scene loads, under the same
        setting as the write after. A failure is logged and does not stop
        the SHOW: the post-show write is still coming. #>
-    param([string]$Key = '', [hashtable]$Variables = @{}, [hashtable]$Types = @{})
+    param([string]$Key = '', [hashtable]$Variables = @{}, [hashtable]$Types = @{}, [switch]$SuppressPayloadLog)
     if (-not (Get-Setting 'SetValuesAfterShow') -or -not $Variables -or $Variables.Count -lt 1) { return }
     $primed = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Values $Variables -Types $Types -TimeoutSec (Get-AirTimeout)
-    if (-not $primed.Success) { Write-BridgeLog "Pre-show postbox write failed for '$Key': $([string](Get-JsonProp $primed 'Error'))" 'WARN' }
-    elseif (Get-Setting 'LogAirXml') { Write-BridgeLog "Air pre-show POSTBOX ($Key): $($primed.Xml)" }
+    if (-not $primed.Success) {
+        $detail = if (-not $SuppressPayloadLog) { [string](Get-JsonProp $primed 'Error') }
+        Write-BridgeLog "Pre-show postbox write failed for '$Key': $detail" 'WARN'
+    }
+    elseif (-not $SuppressPayloadLog -and (Get-Setting 'LogAirXml')) { Write-BridgeLog "Air pre-show POSTBOX ($Key): $($primed.Xml)" }
+}
+
+function Get-PublicTemplateValues {
+    param($Template, [hashtable]$Variables)
+    $publicValues = Copy-ShowVariables -Variables $Variables
+    $fields = @(Get-JsonProp $Template 'Fields')
+    for ($index = 0; $index -lt $fields.Count; $index++) {
+        $name = [string]$fields[$index]
+        if (Test-TemplateFieldSensitive -Template $Template -Index $index -Name $name) { $publicValues.Remove($name) }
+    }
+    return $publicValues
 }
 
 function Get-CinegyLayerReviewStamp {
@@ -693,36 +707,37 @@ function Invoke-ShowTemplateResult {
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
     $operation = New-AirOperationContext -Action SHOW -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'maintenance mode'
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'maintenance mode'
         return [pscustomobject]@{ Success = $false; Error = (T 'air.maintenanceOnShort') }
     }
     $store = Get-TemplateStore
     if (-not $store.Map.ContainsKey($Key)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'air.templateUnknown' $Key) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText 'unknown template'
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'unknown template'
         return
     }
     $template = $store.Map[$Key]
+    $publicValues = Get-PublicTemplateValues -Template $template -Variables $Variables
+    $auditedValues = Format-AuditTemplateValues -Variables $publicValues
+    $suppressPayloadLog = $publicValues.Count -lt $Variables.Count
     if (($ExpectedLayer -gt 0 -and $template.Layer -ne $ExpectedLayer) -or
         ($ExpectedTemplatePath -and [string]$template.Path -cne $ExpectedTemplatePath)) {
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'reviewed template changed'
         return [pscustomobject]@{ Success = $false; Error = (T 'tick.sceneChanged') }
     }
-    $attemptVariables = @{}
-    foreach ($variableName in $Variables.Keys) { $attemptVariables[[string]$variableName] = [string]$Variables[$variableName] }
     $script:LastShowAttempts[[string]$UserId] = @{
-        Key = $Key; Variables = $attemptVariables; AutoHideSeconds = $AutoHideSeconds
+        Key = $Key; Variables = $publicValues; AutoHideSeconds = $AutoHideSeconds
     }
     $access = Test-TemplateAccess -Key $Key -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId
     if (-not $access.Allowed) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'air.notSent' $($access.Reason)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$access.Reason)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values $auditedValues -ErrorText ([string]$access.Reason)
         return [pscustomobject]@{ Success = $false; Error = [string]$access.Reason }
     }
     $policy = Test-TemplateShowPolicy -Key $Key -Layer ([int]$template.Layer) -IsAdmin:(Test-Admin -ChatId $ChatId -UserId $UserId)
     if (-not $policy.Allowed) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'air.notSent' $($policy.Reason)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$policy.Reason)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values $auditedValues -ErrorText ([string]$policy.Reason)
         return [pscustomobject]@{ Success = $false; Error = [string]$policy.Reason }
     }
 
@@ -736,7 +751,7 @@ function Invoke-ShowTemplateResult {
         $errorText = [string](Get-JsonProp $layerStatus 'Error')
         Write-BridgeLog "Blocked SHOW '$Key' on layer $($template.Layer): live Cinegy verification failed: $errorText" 'WARN'
         Send-TelegramMessage -ChatId $ChatId -Text (T 'air.notSentLayerUnsure' $($template.Layer)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText $errorText
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values $auditedValues -ErrorText $errorText
         return [pscustomobject]@{ Success = $false; Error = (T 'air.layerCheckFailed') }
     }
     $layerStatus | Add-Member -NotePropertyName Layer -NotePropertyValue ([int]$template.Layer) -Force
@@ -836,7 +851,7 @@ function Invoke-ShowTemplateResult {
     # the previous story - and the post-show write only reaches it a tick
     # later, so an operator watched the old headline for a second or two
     # on every new urgent. The write after SHOW stays as belt and braces.
-    if (-not $SkipPostboxWrites) { Send-PreShowValues -Key $Key -Variables $Variables -Types $types }
+    if (-not $SkipPostboxWrites) { Send-PreShowValues -Key $Key -Variables $Variables -Types $types -SuppressPayloadLog:$suppressPayloadLog }
     $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
         -Types $types -DefaultType $defaultType -TimeoutSec (Get-AirTimeout)
@@ -844,7 +859,7 @@ function Invoke-ShowTemplateResult {
     # Air Pro answers 200 OK even when it does not recognise a variable name,
     # so "Success" only means the request was accepted - not that the text
     # landed. Turn on LogAirXml to see exactly what was transmitted.
-    if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
+    if (-not $suppressPayloadLog -and (Get-Setting 'LogAirXml')) { Write-BridgeLog "Air SHOW XML: $($result.Xml)" }
 
     if ($result.Success) {
         # T-15: the "before" of before/after. The last cached frame is
@@ -924,7 +939,7 @@ function Invoke-ShowTemplateResult {
             ActiveId=$activeId; ActiveIdConfirmed=$activeIdConfirmed; At=(Get-Date)
             TemplatePath=[string]$template.Path; SceneWriteTicks=$sceneWrite
         }
-        $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $Variables }
+        $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $publicValues }
         $script:MissingGraphicState.Remove($Key) | Out-Null
         Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId
@@ -933,12 +948,12 @@ function Invoke-ShowTemplateResult {
             # say what came off. Until now hide and exit recorded a layer
             # number and nothing else, and the history could only report that
             # something was hidden - never which strap.
-            AirCopy = (Format-AuditTemplateValues -Variables $Variables)
+            AirCopy = $auditedValues
             # What it says, for whoever is about to take it off. Kept apart
             # from AirCopy on purpose: that one is gated by the audit setting
             # because audit.jsonl is archived for ever, while this is read
             # once on a confirmation screen and thrown away with the record.
-            ScreenCopy = (Format-OnAirScreenCopy -Key $Key -Variables $Variables)
+            ScreenCopy = (Format-OnAirScreenCopy -Key $Key -Variables $publicValues)
         }
         Save-OnAirState
         Add-UsageCount -Key $Key
@@ -948,7 +963,7 @@ function Invoke-ShowTemplateResult {
         # The room hears about the templates it asked to hear about, with what
         # they say and how long they stay.
         Send-TemplateAirNotice -Key $Key -Layer ([int]$template.Layer) -ActorChatId $ChatId `
-            -ActorName $actor -Copy (Format-OnAirScreenCopy -Key $Key -Variables $Variables) `
+            -ActorName $actor -Copy (Format-OnAirScreenCopy -Key $Key -Variables $publicValues) `
             -AutoHideSeconds $AutoHideSeconds | Out-Null
 
         # Belt and braces: also write the values through the postbox, which is
@@ -962,6 +977,7 @@ function Invoke-ShowTemplateResult {
                     At = (Get-Date).AddMilliseconds($delay); Values = $Variables; Types = $types
                     Layer = [int]$template.Layer; Key = $Key
                     ActiveId = if ($liveScene) { [string](Get-JsonProp $liveScene 'ActiveId') } else { '' }
+                    SuppressPayloadLog = $suppressPayloadLog
                 })
         }
 
@@ -1000,11 +1016,12 @@ function Invoke-ShowTemplateResult {
         # something back off air meant going 🙈 -> pick layer, which is several
         # taps too many when a wrong graphic is live.
         Send-TelegramMessage -ChatId $ChatId -Text (T 'air.shown' $Key $($template.Layer) $suffix) -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values $auditedValues
     }
     else {
+        if ($suppressPayloadLog) { Set-JsonProp $result 'Error' (T 'air.noConfirmAfterShow') }
         Write-BridgeLog "User $(Format-UserAuditActor -UserId $UserId) failed to push template '$Key': $($result.Error)" "ERROR"
-        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values (Format-AuditTemplateValues -Variables $Variables) -ErrorText ([string]$result.Error)
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values $auditedValues -ErrorText ([string]$result.Error)
         # The error text names the symptom; the button names the cause. It is
         # here rather than on the status screen because this message is where
         # the operator already is when they need it.

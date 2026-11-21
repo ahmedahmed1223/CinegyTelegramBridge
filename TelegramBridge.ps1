@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.114.0'
+$script:BridgeVersion = '8.115.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -905,6 +905,7 @@ $script:LastUserProfilesFlush = [datetime]::MinValue
 # ============================================================================
 
 $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
+$script:TemplatePresetRevisionKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 
 
 

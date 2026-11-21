@@ -2415,12 +2415,9 @@ function Invoke-CallbackQuery {
         }
         'pa:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
-            $presetParts = $data -split ':'
-            $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
-            $template = Get-TemplateByIndex -Index $templateIndex
-            $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
-            if (-not $chosenPreset) { break }
-            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.pickAction' $($chosenPreset.Name)) -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $templateIndex -PresetIndex $presetIndex)
+            $choice = Get-PresetCallbackChoice -Data $data -ChatId $chatId -UserId $userId
+            if (-not $choice) { break }
+            Send-TelegramMessage -ChatId $chatId -Text (T 'cb.pickAction' $choice.Preset.Name) -ReplyMarkup (Get-PresetActionKeyboard -TemplateIndex $choice.TemplateIndex -PresetIndex $choice.PresetIndex -Stamp $choice.Stamp)
             break
         }
         'pac:*' {
@@ -2431,43 +2428,42 @@ function Invoke-CallbackQuery {
         }
         'pae:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
-            $presetParts = $data -split ':'
-            Start-PresetAdminEditValues -TemplateIndex ([int]$presetParts[1]) -PresetIndex ([int]$presetParts[2]) -ChatId $chatId -UserId $userId
+            $choice = Get-PresetCallbackChoice -Data $data -ChatId $chatId -UserId $userId
+            if ($choice) { Start-PresetAdminEditValues -TemplateIndex $choice.TemplateIndex -PresetIndex $choice.PresetIndex -ChatId $chatId -UserId $userId }
             break
         }
         'par:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
-            $presetParts = $data -split ':'
-            $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
-            $template = Get-TemplateByIndex -Index $templateIndex
-            $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
-            if (-not $chosenPreset) { break }
+            $choice = Get-PresetCallbackChoice -Data $data -ChatId $chatId -UserId $userId
+            if (-not $choice) { break }
+            $template = $choice.Template
+            $chosenPreset = $choice.Preset
             Set-PendingState -ChatId $chatId -State @{
-                Mode = 'preset_admin_name'; Action = 'rename'; TemplateIndex = $templateIndex
-                TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
+                Mode = 'preset_admin_name'; Action = 'rename'; TemplateIndex = $choice.TemplateIndex
+                TemplateKey = [string]$template.Key; PresetIndex = $choice.PresetIndex; UserId = $userId
                 Fields = @($template.Fields); Values = @(); Name = [string]$chosenPreset.Name; Index = 0
+                PresetRevision = Get-JsonProp $template 'PresetRevision'
             }
             Send-TelegramMessage -ChatId $chatId -Text (T 'cb.sendNewNameFor' $($chosenPreset.Name)) -ReplyMarkup (Get-CancelKeyboard)
             break
         }
         'pad:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
-            $presetParts = $data -split ':'
-            $templateIndex = [int]$presetParts[1]; $presetIndex = [int]$presetParts[2]
-            $template = Get-TemplateByIndex -Index $templateIndex
-            $chosenPreset = Get-TemplatePreset -Template $template -Index $presetIndex
-            if (-not $chosenPreset) { break }
+            $choice = Get-PresetCallbackChoice -Data $data -ChatId $chatId -UserId $userId
+            if (-not $choice) { break }
+            $template = $choice.Template
+            $chosenPreset = $choice.Preset
             Show-PresetAdminReview -ChatId $chatId -State @{
-                Mode = 'preset_admin_review'; Action = 'delete'; TemplateIndex = $templateIndex
-                TemplateKey = [string]$template.Key; PresetIndex = $presetIndex; UserId = $userId
+                Mode = 'preset_admin_review'; Action = 'delete'; TemplateIndex = $choice.TemplateIndex
+                TemplateKey = [string]$template.Key; PresetIndex = $choice.PresetIndex; UserId = $userId
                 Fields = @($template.Fields); Values = @($chosenPreset.Values)
-                Name = [string]$chosenPreset.Name; Index = 0
+                Name = [string]$chosenPreset.Name; Index = 0; PresetRevision = Get-JsonProp $template 'PresetRevision'
             }
             break
         }
-        'presetadmin:confirm' {
+        'presetadmin:confirm:*' {
             if (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
-                Confirm-PresetAdminChange -ChatId $chatId -UserId $userId
+                Confirm-PresetAdminChange -ChatId $chatId -UserId $userId -Nonce (Get-CallbackArg $data 'presetadmin:confirm:')
             }
             break
         }
@@ -2633,8 +2629,8 @@ function Invoke-CallbackQuery {
             break
         }
         'preset:*' {
-            $parts = $data -split ':'
-            Invoke-PresetShow -TemplateIndex ([int]$parts[1]) -PresetIndex ([int]$parts[2]) -ChatId $chatId -UserId $userId
+            $choice = Get-PresetCallbackChoice -Data $data -ChatId $chatId -UserId $userId
+            if ($choice) { Invoke-PresetShow -TemplateIndex $choice.TemplateIndex -PresetIndex $choice.PresetIndex -ChatId $chatId -UserId $userId }
             break
         }
         'remsnooze:*' {

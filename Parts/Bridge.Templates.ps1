@@ -59,6 +59,23 @@ function Get-TemplateBackupFiles {
             Sort-Object LastWriteTimeUtc, Name -Descending)
 }
 
+function Get-TemplatePresetRevision {
+    param([string]$TemplateKey, $Entry)
+    if (-not $Entry) { return '' }
+    # Keep the web revision opaque even if a preset contains a short secret.
+    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject @($TemplateKey, $Entry) -Depth 24 -Compress))
+    return [Convert]::ToHexString([Security.Cryptography.HMACSHA256]::HashData($script:TemplatePresetRevisionKey, $bytes))
+}
+
+function Get-TemplatePresetRegistryRevision {
+    param([string]$TemplateKey)
+    try {
+        $doc = Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        return Get-TemplatePresetRevision -TemplateKey $TemplateKey -Entry (Get-JsonProp $doc $TemplateKey)
+    }
+    catch { return '' }
+}
+
 function Save-TemplatePresetChange {
     <# Mutates only the presets array of one template. A timestamped backup is
        taken first and the final JSON replaces the original atomically. #>
@@ -67,12 +84,16 @@ function Save-TemplatePresetChange {
         [Parameter(Mandatory)][ValidateSet('create', 'rename', 'edit', 'delete')][string]$Action,
         [int]$PresetIndex = -1,
         [string]$Name = '',
-        [object[]]$Values = @()
+        [object[]]$Values = @(),
+        [string]$ExpectedRevision = ''
     )
     $path = Get-TemplateRegistryFilePath
     try {
         $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $template = Get-JsonProp $raw $TemplateKey
+        if ($ExpectedRevision -and $ExpectedRevision -cne (Get-TemplatePresetRevision -TemplateKey $TemplateKey -Entry $template)) {
+            return [pscustomobject]@{ Success = $false; Stale = $true; Error = (T 'flow.reviewExpired'); BackupPath = '' }
+        }
         if (-not $template) { throw "Template '$TemplateKey' was not found." }
         $presets = @(Get-JsonProp $template 'presets' | Where-Object { $null -ne $_ })
 
@@ -273,7 +294,7 @@ function Get-TemplateStoreParsed {
             if (-not $p) { continue }
             $presets += , @{
                 Name   = [string](Get-JsonProp $p 'name')
-                Values = @(Get-JsonProp $p 'values' | Where-Object { $null -ne $_ })
+                Values = @(Get-JsonProp $p 'values')
             }
         }
 
@@ -372,6 +393,7 @@ function Get-TemplateStoreParsed {
             Category    = [string](Get-JsonProp $entry 'category')
             Order       = $order
             Presets     = $presets
+            PresetRevision = Get-TemplatePresetRevision -TemplateKey $key -Entry $entry
         }
         $layerKey = [string]$layer
         if (-not $layerTemplates.ContainsKey($layerKey)) { $layerTemplates[$layerKey] = @() }
@@ -501,6 +523,44 @@ function Get-TemplatePreset {
     $presets = @($Template.Presets)
     if ($Index -lt 0 -or $Index -ge $presets.Count) { return $null }
     return $presets[$Index]
+}
+
+function Get-TemplatePresetValues {
+    param($Template, $Preset)
+    $values = @{}
+    $stored = @(Get-JsonProp $Preset 'Values')
+    for ($index = 0; $index -lt $Template.Fields.Count -and $index -lt $stored.Count; $index++) {
+        if ($null -ne $stored[$index]) { $values[[string]$Template.Fields[$index]] = [string]$stored[$index] }
+    }
+    return $values
+}
+
+function Test-TemplateFieldSensitive {
+    param($Template, [int]$Index, [string]$Name)
+    $flags = @(Get-JsonProp $Template 'FieldSensitive')
+    return ($Index -lt $flags.Count -and [bool]$flags[$Index]) -or ($Name -and (Test-SensitiveFieldName -FieldName $Name))
+}
+
+function Get-TemplatePresetButtonStamp {
+    param($Template)
+    $revision = [string](Get-JsonProp $Template 'PresetRevision')
+    # A short revision fits Telegram's 64-byte callback limit alongside both indices.
+    if ($revision.Length -ge 16) { return $revision.Substring(0, 16) }
+    return ''
+}
+
+function Read-TemplatePresetButton {
+    param([string]$Data)
+    $parts = $Data -split ':'
+    $templateIndex = 0
+    $presetIndex = 0
+    if ($parts.Count -ne 4 -or -not [int]::TryParse($parts[1], [ref]$templateIndex) -or
+        -not [int]::TryParse($parts[2], [ref]$presetIndex) -or -not $parts[3]) { return $null }
+    $template = Get-TemplateByIndex -Index $templateIndex
+    if ($parts[3] -cne (Get-TemplatePresetButtonStamp -Template $template)) { return $null }
+    $preset = Get-TemplatePreset -Template $template -Index $presetIndex
+    if (-not $preset) { return $null }
+    return @{ Template = $template; Preset = $preset; TemplateIndex = $templateIndex; PresetIndex = $presetIndex; Stamp = $parts[3] }
 }
 
 function Get-TemplateIndex {

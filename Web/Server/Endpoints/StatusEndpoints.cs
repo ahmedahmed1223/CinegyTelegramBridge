@@ -23,7 +23,7 @@ public sealed record BridgeStatus(string Version, long StartedAt, long Published
 
 public sealed record StatusEnvelope(bool Online, BridgeStatus? Status);
 public sealed record LivePlayback(string? Url);
-public sealed record RelayState(string State, string Revision, bool Enabled, bool Configured, bool CanStart, bool CanStop, string Outcome);
+public sealed record RelayState(string State, string Revision, bool Enabled, bool Configured, bool CanStart, bool CanStop, bool CanEditDestination, string Outcome);
 public sealed record RelayRequest(string Action, string? Revision = null);
 
 public static class StatusEndpoints
@@ -40,6 +40,43 @@ public static class StatusEndpoints
         // Server-sent events: one "status" event per change, the same
         // envelope as GET /api/status. EventSource reconnects by itself.
         api.MapGet("/stream", Stream).Produces(StatusCodes.Status200OK, contentType: "text/event-stream");
+
+        api.MapGet("/programme", (IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<ProgrammeNowNext>(bridge, http, null, "air.programme"))
+            .Produces<ProgrammeNowNext>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+
+        api.MapGet("/layer-comparison", (IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerComparisonTargets>(bridge, http, null))
+            .Produces<LayerComparisonTargets>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
+        api.MapGet("/layer-comparison/{layer:int}", (int layer, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerComparison>(bridge, http, layer))
+            .Produces<LayerComparison>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+        api.MapPost("/layer-comparison/{layer:int}/adopt/review", (int layer, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerAdoptionReview>(bridge, http, layer, "air.layer-adoption.review"))
+            .Produces<LayerAdoptionReview>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+        api.MapPost("/layer-comparison/{layer:int}/adopt/confirm", (int layer, LayerAdoptionConfirmCommand request, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerAdoptionResult>(bridge, http, layer, "air.layer-adoption.confirm", request.Review))
+            .Produces<LayerAdoptionResult>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+        api.MapPost("/layer-comparison/{layer:int}/forget/review", (int layer, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerForgetReview>(bridge, http, layer, "air.layer-forget.review"))
+            .Produces<LayerForgetReview>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+        api.MapPost("/layer-comparison/{layer:int}/forget/confirm", (int layer, LayerForgetConfirmCommand request, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerForgetResult>(bridge, http, layer, "air.layer-forget.confirm", request.Review))
+            .Produces<LayerForgetResult>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+
+        api.MapPost("/layer-comparison/{layer:int}/replace/review", (int layer, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerReplacementReview>(bridge, http, layer, "air.layer-replacement.review"))
+            .Produces<LayerReplacementReview>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
+        api.MapPost("/layer-comparison/{layer:int}/replace/confirm", (int layer, LayerReplacementConfirmCommand request, IBridgeChannel bridge, HttpContext http) =>
+                ReadLayerComparison<LayerReplacementResult>(bridge, http, layer, "air.layer-replacement.confirm", request.Review))
+            .Produces<LayerReplacementResult>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
 
         app.MapGet("/api/live", (HttpContext http, WebOptions options) =>
             {
@@ -61,6 +98,15 @@ public static class StatusEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ErrorResponse>(StatusCodes.Status409Conflict)
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        relay.MapPost("/destination/review", ReviewRelayDestination)
+            .Produces<RelayDestinationReview>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        relay.MapPost("/destination/confirm", ConfirmRelayDestination)
+            .Produces<RelayState>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
         var captures = app.MapGroup("/api/live/captures").WithTags("Status").RequireAuthorization();
         captures.MapPost("", (CaptureCreateRequest request, IBridgeChannel bridge, HttpContext http) =>
@@ -85,6 +131,26 @@ public static class StatusEndpoints
             .Produces<ErrorResponse>(403)
             .Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(503);
+    }
+
+    private static async Task<IResult> ReadLayerComparison<T>(IBridgeChannel bridge, HttpContext http, int? layer,
+        string operation = "air.layer-comparison", string? review = null)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync(operation, new { actor = http.User.UserId(), layer, review }, http.RequestAborted);
+        if (reply.Ok)
+            return TypedResults.Ok(reply.Data.Deserialize<T>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "layer_comparison_missing" => ApiErrors.Of(404, reply.Error),
+            "layer_comparison_busy" => ApiErrors.Of(429, reply.Error),
+            "layer_adoption_stale" or "layer_adoption_unavailable" or
+                "layer_forget_stale" or "layer_forget_unavailable" or
+                "layer_replacement_stale" or "layer_replacement_unavailable" => ApiErrors.Of(409, reply.Error),
+            "bridge_busy" or "layer_adoption_save_failed" or "layer_forget_save_failed" or "layer_replacement_save_failed" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable(),
+        };
     }
 
     private static IResult CaptureError(string? code) => code switch
@@ -147,6 +213,32 @@ public static class StatusEndpoints
             "relay_invalid" => ApiErrors.Of(400, reply.Error),
             "relay_stale" or "relay_unavailable" => ApiErrors.Of(409, reply.Error),
             "relay_start_failed" or "relay_stop_failed" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
+            _ => ApiErrors.BridgeUnavailable()
+        };
+    }
+
+    private static Task<IResult> ReviewRelayDestination(RelayDestinationReviewRequest request, IBridgeChannel bridge, HttpContext http) =>
+        SendRelayDestination<RelayDestinationReview>("relay.destination.review", request.Destination, request.Revision, null, bridge, http);
+
+    private static Task<IResult> ConfirmRelayDestination(RelayDestinationConfirmRequest request, IBridgeChannel bridge, HttpContext http) =>
+        SendRelayDestination<RelayState>("relay.destination.confirm", request.Destination, request.Revision, request.Review, bridge, http);
+
+    private static async Task<IResult> SendRelayDestination<T>(string op, string? destination, string? revision, string? review,
+        IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (destination is not { Length: > 0 and <= 4096 } || revision is not { Length: 64 } ||
+            (op.EndsWith(".confirm", StringComparison.Ordinal) && review is not { Length: 32 }))
+            return ApiErrors.Of(400, "relay_invalid");
+
+        var reply = await bridge.SendAsync(op, new { actor = http.User.UserId(), destination, revision, review }, http.RequestAborted);
+        if (reply.Ok) return TypedResults.Ok(reply.Data.Deserialize<T>(JsonDefaults.Options));
+        return reply.Error switch
+        {
+            "forbidden" => ApiErrors.Of(403, reply.Error),
+            "relay_invalid" => ApiErrors.Of(400, reply.Error),
+            "relay_stale" or "relay_unavailable" => ApiErrors.Of(409, reply.Error),
+            "relay_config_failed" or "bridge_timeout" or "bridge_outcome_unknown" => ApiErrors.Of(503, reply.Error),
             _ => ApiErrors.BridgeUnavailable()
         };
     }

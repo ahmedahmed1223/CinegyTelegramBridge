@@ -33,11 +33,38 @@ New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 . (Join-Path $root 'TelegramBridge.ps1') -LoadOnly -ConfigPath 'config.example.json' -RuntimePath $runtime
 Copy-Item -LiteralPath (Join-Path $root 'TelegramBridge.ps1') -Destination $runtime
 
+$fixtureProgrammeTime = [datetimeoffset]::Now
+function Get-AirVideoStatus {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The fixture accepts the video reader signature without using the network.')]
+    param([string]$AirServerAddress, [int]$AirChannelNumber, [int]$TimeoutSec)
+    return @{ Success = $true; ActiveId = 'dev-current-programme'; CuedId = 'dev-cued-programme'; License = 'Licensed' }
+}
+
+function Get-AirTelemetryStatus {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The fixture accepts the health reader signature without using the network.')]
+    param([string]$AirServerAddress, [int]$AirChannelNumber, [int]$TimeoutSec, [int]$FrameLossTolerance,
+        [double]$FrameLossTolerancePercent, [double]$ReadErrorRateTolerance)
+    return @{
+        Success = $true; Healthy = $true; SampleCount = 60; OutputCount = 1500; DroppedCount = 2
+        NoInputSignal = 0; AverageReadTime = 1.75; MaxReadErrorRate = 0.0
+    }
+}
+
+function Get-AirMaterialSchedule {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The fixture accepts the rundown reader signature without using the network.')]
+    param([string]$AirServerAddress, [int]$AirChannelNumber, [int]$TimeoutSec)
+    return @{ Success = $true; Items = @(
+            @{ Id = 'dev-current-programme'; Name = 'النشرة المسائية'; ScheduledAt = $fixtureProgrammeTime.AddMinutes(-5); Duration = [timespan]::FromMinutes(25) }
+            @{ Id = 'dev-cued-programme'; Name = 'نافذة على الأحداث'; ScheduledAt = $fixtureProgrammeTime.AddMinutes(20); Duration = [timespan]::FromMinutes(30) }
+        ) }
+}
+
 $fixtureRegistry = Join-Path $runtime 'templates.json'
 $fixtureTicker = Join-Path $runtime 'ticker.txt'
 Set-JsonProp $config 'TemplateRegistryPath' $fixtureRegistry
 Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
 Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
+Set-JsonProp $config.Settings 'EnableEngineHealth' $true
 Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $true
 $fixtureScenes = Join-Path $runtime 'scene-library'
 $fixtureStudio = Join-Path $fixtureScenes 'studio'

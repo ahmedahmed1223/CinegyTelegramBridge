@@ -3,36 +3,68 @@
 $script:WebAdminSettingReviews = @{}
 $script:WebAdminSettingsImportReviews = @{}
 
-function Get-WebAdminPresentationSettingSchema {
+function Get-WebAdminEditableSettingSchema {
     param([AllowEmptyString()][string]$Name)
-    # Stage only presentation controls. A typed Boolean by itself does not
-    # make a setting safe to expose: some Booleans grant air or admin powers.
-    $allowed = @('OneHandMode', 'EnablePersistentMenuButton')
-    if ($PSBoundParameters.ContainsKey('Name')) {
-        if ($Name -cnotin $allowed) { return }
-        $allowed = @($Name)
-    }
 
-    foreach ($id in $allowed) {
-        if ($script:ProtectedSettings -contains $id) { continue }
-        $matchesForId = @($script:SettingSchema | Where-Object Name -ceq $id)
-        if ($matchesForId.Count -ne 1) { continue }
-        $setting = $matchesForId[0]
-        if ($setting.ValueType -ceq 'Boolean' -and $setting.Default -is [bool] -and
-            -not ($setting.Protected -or $setting.Sensitive -or $setting.RequiresConfirmation -or $setting.RequiresRestart)) {
-            $setting
-        }
+    # This allowlist controls the editor and the portable partial snapshot.
+    # Numeric and Boolean type alone is insufficient for an editorial setting.
+    $categories = [ordered]@{
+        NotifyAdminsOnAccessRequest = 'access'
+        AskRequesterName = 'access'
+        MaxPendingApprovals = 'access'
+        PendingStateTimeoutMinutes = 'air'
+        OneHandMode = 'presentation'
+        EnablePersistentMenuButton = 'presentation'
+        NewsMaxItems = 'newsroom'
+        NewsDraftTimeoutMinutes = 'newsroom'
+        UrgentBoardIntervalSeconds = 'urgent'
+        UrgentBoardRepeats = 'urgent'
+        UrgentBoardTotalSeconds = 'urgent'
+        UrgentBoardMaxItems = 'urgent'
+        UrgentBoardMaxTextLength = 'urgent'
+        UrgentBoardNotifyOnFinish = 'urgent'
+        MojazRowFrames = 'bulletin'
+        MojazIntroExtraFrames = 'bulletin'
+        MojazLastRowFrames = 'bulletin'
+        MojazNotifyOnFinish = 'bulletin'
+        TemplateReminderFollowUpMinutes = 'reminders'
+        SchedulePreNotifyMinutes = 'reminders'
+        MojazScheduleNoticeSeconds = 'reminders'
+    }
+    $ids = $categories.Keys
+    if ($PSBoundParameters.ContainsKey('Name')) {
+        if ($Name -cnotin $ids) { return }
+        $ids = @($Name)
+    }
+    $nativeSettings = @{}
+    foreach ($metadata in $script:SettingSchema) { $nativeSettings[$metadata.Name] = $metadata }
+    foreach ($id in $ids) {
+        $metadata = $nativeSettings[$id]
+        if (-not $metadata -or $metadata.Name -cne $id -or $script:ProtectedSettings -contains $id -or
+            ($metadata.Default -isnot [bool] -and $metadata.Default -isnot [int]) -or
+            ($metadata.Protected -or $metadata.Sensitive -or $metadata.RequiresConfirmation -or $metadata.RequiresRestart)) { continue }
+        @{ Metadata = $metadata; Category = $categories[$id] }
     }
 }
 
-function Get-WebAdminPresentationSettingView {
-    foreach ($setting in @(Get-WebAdminPresentationSettingSchema)) {
-        $current = Get-Setting -Name $setting.Name
+function Get-WebAdminEditableSettingView {
+    param([AllowEmptyString()][string]$Name)
+    foreach ($entry in @(Get-WebAdminEditableSettingSchema @PSBoundParameters)) {
+        $metadata = $entry.Metadata
+        $current = $null
+        try { $current = ConvertTo-ImportedSettingValue -Name $metadata.Name -Value (Get-Setting -Name $metadata.Name) }
+        catch { $current = $null }
+        $isBoolean = $metadata.Default -is [bool]
+        $bounds = if (-not $isBoolean) { Get-SettingBounds -Name $metadata.Name }
         [ordered]@{
-            id = [string]$setting.Name; category = 'presentation'; kind = 'boolean'
-            label = [string]$setting.Label; description = [string]$setting.Description; unit = [string]$setting.Unit
+            id = $metadata.Name; category = $entry.Category
+            kind = if ($isBoolean) { 'boolean' } else { 'integer' }
+            label = $metadata.Label; description = $metadata.Description; unit = $metadata.Unit
             enabled = if ($current -is [bool]) { $current }
-            value = $null; minimum = $null; maximum = $null; protected = $false
+            value = if ($current -is [int]) { $current }
+            minimum = if ($bounds) { $bounds.Minimum }
+            maximum = if ($bounds) { $bounds.Maximum }
+            protected = $false; editable = $null -ne $current
         }
     }
 }
@@ -48,13 +80,7 @@ function Get-WebAdminSettingActor {
 }
 
 function Get-WebAdminEditableSettingId {
-    # Protected controls and changes with side effects stay in their existing
-    # screens. This list governs both editing and the portable Web snapshot.
-    $ids = @('NotifyAdminsOnAccessRequest', 'AskRequesterName', 'MaxPendingApprovals', 'PendingStateTimeoutMinutes')
-    $ids += @(Get-WebAdminPresentationSettingSchema | ForEach-Object { $_.Name })
-    foreach ($id in $ids) {
-        if ($script:ProtectedSettings -notcontains $id) { $id }
-    }
+    Get-WebAdminEditableSettingSchema | ForEach-Object { $_.Metadata.Name }
 }
 
 function Get-WebAdminSettingsExport {
@@ -80,13 +106,17 @@ function Get-WebAdminEditableSetting {
     $actor = Get-WebAdminSettingActor -Arguments $Arguments
     if (-not $actor) { return @{ error = 'forbidden' } }
     $id = [string](Get-JsonProp $Arguments 'id')
-    if ($id -cnotin @(Get-WebAdminEditableSettingId)) { return @{ error = 'setting_not_editable' } }
-    $setting = Get-WebAdminSettingView | Where-Object { $_.id -ceq $id } | Select-Object -First 1
-    if (-not $setting) { return @{ error = 'setting_not_editable' } }
+    $setting = Get-WebAdminEditableSettingView -Name $id
+    if (-not $setting -or -not $setting.editable) { return @{ error = 'setting_not_editable' } }
     return @{
         actor = $actor; setting = $setting
         fingerprint = ConvertTo-Json -InputObject @($id, $setting.kind, $setting.enabled, $setting.value, $setting.minimum, $setting.maximum) -Compress
     }
+}
+
+function Test-WebAdminSettingTimingBusy {
+    param([string]$Name)
+    return $Name -cin @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds') -and (Test-UrgentBoardTimingBusy)
 }
 
 function New-WebAdminSettingReview {
@@ -94,19 +124,22 @@ function New-WebAdminSettingReview {
     $candidate = Get-WebAdminEditableSetting -Arguments $Arguments
     if ($candidate.ContainsKey('error')) { return @{ ok = $false; error = $candidate.error } }
     $setting = $candidate.setting
+    if (Test-WebAdminSettingTimingBusy -Name $setting.id) { return @{ ok = $false; error = 'urgent_timing_active' } }
     $enabled = Get-JsonProp $Arguments 'enabled'
     $number = Get-JsonProp $Arguments 'value'
-    $desired = $null
-    if ($setting.kind -ceq 'boolean' -and $enabled -is [bool] -and $null -eq $number -and
-        -not [object]::Equals($enabled, $setting.enabled)) {
-        $desired = $enabled
+    if ($setting.kind -ceq 'boolean') {
+        if ($null -ne $number -or $enabled -isnot [bool]) { return @{ ok = $false; error = 'setting_invalid' } }
+        $current = $setting.enabled
+        $requested = $enabled
     }
-    elseif ($setting.kind -ceq 'integer' -and $null -eq $enabled -and ($number -is [int] -or $number -is [long]) -and
-        $null -ne $setting.minimum -and $null -ne $setting.maximum -and
-        $number -ge $setting.minimum -and $number -le $setting.maximum -and $number -ne $setting.value) {
-        $desired = [int]$number
+    else {
+        if ($null -ne $enabled -or ($number -isnot [int] -and $number -isnot [long])) { return @{ ok = $false; error = 'setting_invalid' } }
+        $current = $setting.value
+        $requested = $number
     }
-    if ($null -eq $desired) { return @{ ok = $false; error = 'setting_invalid' } }
+    try { $desired = ConvertTo-ImportedSettingValue -Name $setting.id -Value $requested }
+    catch { return @{ ok = $false; error = 'setting_invalid' } }
+    if ([object]::Equals($current, $desired)) { return @{ ok = $false; error = 'setting_invalid' } }
 
     $token = New-WebAirReview -Actor $candidate.actor -Fingerprint $candidate.fingerprint -Reviews $script:WebAdminSettingReviews
     $script:WebAdminSettingReviews[$candidate.actor].Desired = $desired
@@ -115,6 +148,16 @@ function New-WebAdminSettingReview {
             value = if ($desired -is [int]) { $desired }
             review = $token
         } }
+}
+
+function Get-WebAdminSettingWriteDeadline {
+    param([System.Collections.IDictionary]$Review, [long]$Deadline)
+
+    $remaining = ($Review.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
+    if ($remaining -le 0) { return 0L }
+    $reviewDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($remaining * [Diagnostics.Stopwatch]::Frequency)
+    if ($Deadline -gt 0) { return [math]::Min($Deadline, $reviewDeadline) }
+    return $reviewDeadline
 }
 
 function Complete-WebAdminSettingReview {
@@ -128,24 +171,22 @@ function Complete-WebAdminSettingReview {
     if (-not $review -or $review.Fingerprint -cne $candidate.fingerprint) { return @{ ok = $false; error = 'setting_stale' } }
 
     $id = $candidate.setting.id
-    $settings = Get-JsonProp $config 'Settings'
-    # Initialization supplies the settings object. Preserve the exact stored
-    # value (or absence) if the shared writer cannot persist this change.
-    if ($null -eq $settings) { return @{ ok = $false; error = 'setting_save_failed' } }
-    $hadValue = if ($settings -is [System.Collections.IDictionary]) { $settings.Contains($id) }
-    else { $settings.PSObject.Properties.Match($id).Count -gt 0 }
-    $previous = Get-JsonProp $settings $id
-    Set-Setting -Name $id -Value $review.Desired
-    if ($script:LastConfigSaveFailed) {
-        if ($hadValue) { Set-JsonProp -Object $settings -Name $id -Value $previous }
-        else { Remove-JsonProp -Object $settings -Name $id }
+    if (Test-WebAdminSettingTimingBusy -Name $id) { return @{ ok = $false; error = 'urgent_timing_active' } }
+    $before = if ($candidate.setting.kind -ceq 'boolean') { $candidate.setting.enabled } else { $candidate.setting.value }
+    $writeDeadline = Get-WebAdminSettingWriteDeadline -Review $review -Deadline $Deadline
+    if ($writeDeadline -le 0) { return @{ ok = $false; error = 'setting_stale' } }
+    $change = @{ Name = $id; From = $before; To = $review.Desired }
+    $expected = @{}
+    $expected[$id] = $before
+    if (-not (Set-ImportedSettings -Changes @($change) -Deadline $writeDeadline -ReviewedExpected $expected)) {
+        if ($script:LastConfigSaveConflict) { return @{ ok = $false; error = 'setting_stale' } }
         return @{ ok = $false; error = 'setting_save_failed' }
     }
 
     $actor = $candidate.actor
     Write-BridgeLog "User $actor set $id from the web"
     Add-AuditEntry (T 'kb.settingAudit' $id $review.Desired (Format-UserAuditActor -UserId $actor)) | Out-Null
-    $saved = Get-WebAdminSettingView | Where-Object { $_.id -ceq $id } | Select-Object -First 1
+    $saved = Get-WebAdminEditableSettingView -Name $id
     return @{ ok = $true; data = @{ setting = $saved } }
 }
 
@@ -172,12 +213,27 @@ function Get-WebAdminSettingsImportPlan {
         $before[$id] = $current
         $after[$id] = $target
         if (-not [object]::Equals($current, $target)) {
+            if (Test-WebAdminSettingTimingBusy -Name $id) { return @{ error = 'urgent_timing_active' } }
             $changes.Add(@{ Name = $id; From = $current; To = $target })
         }
     }
     return @{
         before = $before; after = $after; changes = $changes.ToArray()
         fingerprint = ConvertTo-Json -InputObject @($before, $after) -Compress
+    }
+}
+
+function Get-WebAdminSettingsImportChanges {
+    param([System.Collections.IDictionary]$Plan)
+
+    foreach ($change in $Plan.changes) {
+        @{
+            id = $change.Name; kind = if ($change.To -is [bool]) { 'boolean' } else { 'integer' }
+            beforeEnabled = if ($change.From -is [bool]) { $change.From }
+            afterEnabled = if ($change.To -is [bool]) { $change.To }
+            beforeValue = if ($change.From -is [int]) { $change.From }
+            afterValue = if ($change.To -is [int]) { $change.To }
+        }
     }
 }
 
@@ -189,15 +245,7 @@ function New-WebAdminSettingsImportReview {
     if ($requested -isnot [System.Collections.IDictionary]) { return @{ ok = $false; error = 'settings_import_invalid' } }
     $plan = Get-WebAdminSettingsImportPlan -Requested $requested
     if ($plan.ContainsKey('error')) { return @{ ok = $false; error = $plan.error } }
-    $changes = @(foreach ($change in $plan.changes) {
-        @{
-            id = $change.Name; kind = if ($change.To -is [bool]) { 'boolean' } else { 'integer' }
-            beforeEnabled = if ($change.From -is [bool]) { $change.From }
-            afterEnabled = if ($change.To -is [bool]) { $change.To }
-            beforeValue = if ($change.From -is [int]) { $change.From }
-            afterValue = if ($change.To -is [int]) { $change.To }
-        }
-    })
+    $changes = @(Get-WebAdminSettingsImportChanges -Plan $plan)
     $token = $null
     # An unchanged file also invalidates an older review in this browser actor slot.
     $script:WebAdminSettingsImportReviews.Remove($actor)
@@ -216,15 +264,20 @@ function Complete-WebAdminSettingsImportReview {
         return @{ ok = $false; error = 'bridge_busy' }
     }
     $approved = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebAdminSettingsImportReviews
+    return Save-WebAdminSettingsImportPlan -Actor $actor -Approved $approved -Deadline $Deadline
+}
+
+function Save-WebAdminSettingsImportPlan {
+    param([long]$Actor, [System.Collections.IDictionary]$Approved, [long]$Deadline, [System.Collections.IDictionary]$Version)
+
     $stale = @{ ok = $false; error = 'setting_stale' }
-    if (-not $approved) { return $stale }
+    if (-not $Approved) { return $stale }
     $plan = Get-WebAdminSettingsImportPlan -Requested $approved.Desired
+    if ($plan.ContainsKey('error') -and $plan.error -ceq 'urgent_timing_active') { return @{ ok = $false; error = $plan.error } }
     if ($plan.ContainsKey('error') -or $approved.Fingerprint -cne $plan.fingerprint -or -not $plan.changes.Count) { return $stale }
-    $remaining = ($approved.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
-    if ($remaining -le 0) { return $stale }
-    $writeDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($remaining * [Diagnostics.Stopwatch]::Frequency)
-    if ($Deadline -gt 0) { $writeDeadline = [math]::Min($Deadline, $writeDeadline) }
-    if (-not (Set-ImportedSettings -Changes $plan.changes -Deadline $writeDeadline -ReviewedExpected $plan.before)) {
+    $writeDeadline = Get-WebAdminSettingWriteDeadline -Review $approved -Deadline $Deadline
+    if ($writeDeadline -le 0) { return $stale }
+    if (-not (Set-ImportedSettings -Changes $plan.changes -Deadline $writeDeadline -ReviewedExpected $plan.before -ReviewedVersion $Version)) {
         if ($script:LastConfigSaveConflict) { return $stale }
         return @{ ok = $false; error = 'setting_save_failed' }
     }

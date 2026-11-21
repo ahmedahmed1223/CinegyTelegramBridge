@@ -7,6 +7,7 @@ import { RequireAdmin, RequireSession } from '../layout/guards'
 import { Shell } from '../layout/Shell'
 import { AccountsPage } from '../pages/accounts/AccountsPage'
 import { AnnouncementsPage } from '../pages/admin/AnnouncementsPage'
+import { OperatorHelpPage } from '../pages/help/OperatorHelpPage'
 import { ShiftNoticesPage } from '../pages/notices/ShiftNoticesPage'
 import { TemplateReportPage } from '../pages/history/TemplateReportPage'
 import { TickerReportPage } from '../pages/history/TickerReportPage'
@@ -49,6 +50,7 @@ const router = createBrowserRouter([
       { path: 'newsroom', element: <NewsroomPage /> },
       { path: 'sessions', element: <SessionsPage /> },
       { path: 'notices', element: <ShiftNoticesPage /> },
+      { path: 'help', element: <OperatorHelpPage /> },
       { path: 'admin/announcements', element: <RequireAdmin><AnnouncementsPage /></RequireAdmin> },
       { path: 'reports/work-summary', element: <WorkSummaryPage /> },
       { path: 'reports/handover', element: <HandoverReportsPage view="handover" /> },

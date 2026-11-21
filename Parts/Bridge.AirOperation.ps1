@@ -373,7 +373,7 @@ function Test-MaintenanceWindowActive {
 }
 
 function Test-MaintenanceControl {
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$EmergencyOverride, [switch]$Quiet)
     $manual = [bool](Get-Setting 'MaintenanceMode')
     $scheduled = Test-MaintenanceWindowActive
     if (-not $manual -and -not $scheduled) { return $true }
@@ -381,6 +381,7 @@ function Test-MaintenanceControl {
     # being patched is no reason an administrator cannot pull a graphic that
     # is wrongly on air.
     if ($EmergencyOverride -and (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $true }
+    if ($Quiet) { return $false }
     $reason = if ($scheduled -and -not $manual) {
         (T 'air.maintenanceWindow' $([string](Get-Setting 'MaintenanceWindowStart')) $([string](Get-Setting 'MaintenanceWindowEnd')))
     }

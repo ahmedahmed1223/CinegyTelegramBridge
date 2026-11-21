@@ -95,6 +95,7 @@ function Add-BridgeTextInterp9 {
     $catalogue['core.tripledLetter'] = @{ ar = 'حرف مكرّر ثلاث مرات: «{0}»'; en = 'a letter three times over: "{0}"' }
     $catalogue['core.unseenWord'] = @{ ar = 'كلمة لم تكتبها المحطة من قبل: {0} — تأكّد من هجائها'; en = 'a word the station has never written before: {0} — check its spelling' }
     $catalogue['core.newestRowsOnly'] = @{ ar = '⚠️ عُرض أحدث {0} صفًّا فقط؛ {1} صفًّا أقدم غير معروضة.'; en = '⚠️ Only the newest {0} rows are shown; {1} older rows are not.' }
+    $catalogue['core.firstRowsOnly'] = @{ ar = '⚠️ عُرض أول {0} صفًّا، وبقي {1} صفًّا.'; en = '⚠️ Showing the first {0} rows. {1} more rows are hidden.' }
     $catalogue['core.secondsFew'] = @{ ar = '{0} ثوانٍ'; en = '{0} seconds' }
     $catalogue['core.seconds'] = @{ ar = '{0} ثانية'; en = '{0} seconds' }
     $catalogue['core.and'] = @{ ar = ' و{0}'; en = ' and {0}' }

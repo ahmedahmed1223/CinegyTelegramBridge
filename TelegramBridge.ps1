@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.127.0'
+$script:BridgeVersion = '8.139.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -126,6 +126,8 @@ foreach ($part in @(
         'Bridge.Commands'
         'Bridge.Callbacks'
         'Bridge.Tick'
+        'Bridge.TemplateReminderActions'
+        'Bridge.WebPersonalAirReminders'
         'Bridge.Reports'
         'Bridge.Weekly'
         'Bridge.Announcements'
@@ -135,12 +137,16 @@ foreach ($part in @(
         'Bridge.WebRerun'
         'Bridge.WebTelegramAccess'
         'Bridge.WebAdminOverview'
+        'Bridge.WebManagedRestart'
         'Bridge.WebAdminSettings'
+        'Bridge.WebAdminSettingsRecovery'
         'Bridge.WebRollback'
         'Bridge.WebAirText'
         'Bridge.WebShiftHistory'
         'Bridge.WebOperationReference'
+        'Bridge.WebRelayDestination'
         'Bridge.WebShiftNotices'
+        'Bridge.WebOperatorHelp'
         'Bridge.WebTelegramRoster'
         'Bridge.WebTelegramUnblock'
         'Bridge.WebAccessHistory'
@@ -155,17 +161,22 @@ foreach ($part in @(
         'Bridge.WebTelegramDeliveryQuarantine'
         'Bridge.WebAnnouncements'
         'Bridge.WebRuntimeFileDiagnostics'
+        'Bridge.WebDiagnosticBundle'
+        'Bridge.WebOperationMetrics'
         'Bridge.WebScheduleExecution'
         'Bridge.WebSceneReplacement'
         'Bridge.WebWorkSummary'
         'Bridge.WebBulletinReport'
         'Bridge.WebTickerReport'
         'Bridge.WebTemplateReport'
+        'Bridge.ShiftHandoverAcknowledgement'
         'Bridge.WebHandoverReports'
         'Bridge.WebBulletinManagement'
         'Bridge.WebBulletinAfterUrgent'
         'Bridge.WebBulletinSceneImages'
         'Bridge.WebAirEmergency'
+        'Bridge.HideAllLayerScope'
+        'Bridge.WebHideAllLayerScope'
         'Bridge.WebAirTimer'
         'Bridge.WebLayerRemoval'
         'Bridge.WebTemplateBackups'
@@ -182,6 +193,7 @@ foreach ($part in @(
 if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) {
     $ConfigPath = Join-Path $scriptRoot ($ConfigPath -replace '^\.[\\/]+', '')
 }
+$script:ConfigPath = $ConfigPath
 
 # Everything needed to start this bridge again, captured while it is still
 # unambiguous. Get-BridgeRelaunchCommand rebuilds the command line from these
@@ -2074,6 +2086,7 @@ $script:SettingSchema = @(New-BridgeSettingSchema `
 # Everything above is declarations only; everything below has side effects.
 if ($LoadOnly) { return }
 
+Initialize-ManagedRestartChannel
 $script:InstanceMutex = $null
 if (-not $AllowMultipleInstances) {
     # Two bridges polling the same bot token make Telegram return 409 Conflict
@@ -2142,6 +2155,7 @@ if (-not $AllowMultipleInstances) {
                 exit 1
             }
         }
+        if ($acquired) { $script:ManagedRestartOwnsMutex = $true }
     }
     catch {
         $message = "Single-instance check unavailable ($($_.Exception.Message))"
@@ -2229,9 +2243,11 @@ $backoffSeconds = 1
 
 try {
     while ($true) {
+        $managedRestartPollSucceeded = $false
         try {
             $updates = @(Get-TelegramUpdates -Offset $offset -TimeoutSeconds (Get-EffectivePollTimeout))
             Set-TelegramConnectionState -Connected:$true
+            $managedRestartPollSucceeded = $true
             $backoffSeconds = 1
             $script:PollTimeoutStreak = 0
 
@@ -2435,6 +2451,8 @@ try {
         # is the claim the manager's hang watchdog actually needs. Stamping at
         # the top would keep reporting health while the tick itself was stuck.
         Write-BridgeLivenessStamp
+        if ($managedRestartPollSucceeded -and $RequireSingleInstance) { Send-ManagedReplacementReady }
+        Complete-ManagedRestartAtPollBoundary
 
         # Leaving the loop rather than exiting in place, so the finally block
         # below still stops the relay, saves counters and releases the mutex.
@@ -2473,11 +2491,16 @@ finally {
         }
         catch { Write-BridgeLog "Could not stop live relay during shutdown: $(Protect-SensitiveText $_.Exception.Message)" 'WARN' }
     }
+    $managedRestartReleased = $false
     if ($script:InstanceMutex) {
-        try { $script:InstanceMutex.ReleaseMutex() }
+        try {
+            $script:InstanceMutex.ReleaseMutex()
+            $managedRestartReleased = $true
+        }
         catch { Write-BridgeLog "Could not release instance mutex: $($_.Exception.Message)" "DEBUG" }
         $script:InstanceMutex.Dispose()
     }
+    if ($managedRestartReleased) { Send-ManagedRestartCleanup }
 
     # Last, and only after the mutex is gone: the replacement takes the same
     # single-instance mutex, so starting it any earlier means it finds the

@@ -31,6 +31,18 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.139.0'; Items = @('Choose TIFF pictures for web bulletin rows and preview them after saving.') },
+                @{ Version = '8.138.0'; Items = @('See how many rows were omitted from the usage digest tables.') },
+                @{ Version = '8.137.0'; Items = @('Review recording a replacement external scene from layer comparison.') },
+                @{ Version = '8.136.0'; Items = @('Check frame counts, input loss and license state from Web administration.') },
+                @{ Version = '8.135.0'; Items = @('Read the current and cued programme and copy the air summary from the Web dashboard.', 'Acknowledge the displayed handover period from the Bot or Web report.') },
+                @{ Version = '8.134.0'; Items = @('Preview and recover supported Web settings from a local backup or defaults.', 'Review and follow a supervised bridge restart in Web administration.') },
+                @{ Version = '8.133.0'; Items = @('Open the last Telegram interaction from Web access administration.', 'Check whether the test layer has a consistent Cinegy status reading.') },
+                @{ Version = '8.132.0'; Items = @('Review and remove a stale local layer record from Web layer comparison.') },
+                @{ Version = '8.131.0'; Items = @('Check operating metrics and Telegram delivery pressure in Web administration.') },
+                @{ Version = '8.130.0'; Items = @('Open the operator guide and recent updates in the Web workspace.', 'Review editorial timing and open the usage summary in Web administration.') },
+                @{ Version = '8.129.0'; Items = @('Download the runtime diagnostic report and check test-layer or restart readiness in Administration.', 'Review registering a confirmed external scene from layer comparison.', 'Acknowledge or snooze personal template reminders from any signed-in page.') },
+                @{ Version = '8.128.0'; Items = @('Compare a layer with the engine or review the Hide All layer scope.', 'Review the relay destination while stopped and respond to personal follow-up reminders from Live.') },
                 @{ Version = '8.127.0'; Items = @('Review and rename a broadcast layer in Web Administration.', 'Review a template schedule hold or resume. Look up a recorded air operation by its reference from Shift History.') },
                 @{ Version = '8.126.0'; Items = @('Download the template registry or editable Web settings and review changes before importing.', 'Open your shared template favorites and review the maximum air time for a future show.') },
                 @{ Version = '8.125.0'; Items = @('Check shift readiness and Telegram notification coverage in Administration.', 'Open the weekly and handover reports from Shift History, review resuming Telegram delivery, or set a reminder in the template editor.') },
@@ -368,6 +380,18 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.139.0'; Items = @('اختر صور TIFF لصفوف الموجز في الويب، وعاينها بعد الحفظ.') },
+                @{ Version = '8.138.0'; Items = @('اعرف عدد الصفوف المتبقية في جدولي ملخص الاستخدام.') },
+                @{ Version = '8.137.0'; Items = @('راجع تسجيل مشهد خارجي بديل من مقارنة الطبقات.') },
+                @{ Version = '8.136.0'; Items = @('اقرأ عيّنة صحة المحرّك وإشارة الدخل وحالة الترخيص من إدارة الويب.') },
+                @{ Version = '8.135.0'; Items = @('اعرض المادة الجارية والتالية المجهّزة، وانسخ ملخّص الحالة من لوحة الهواء في الويب.', 'سجّل إقرار تسليم الفترة المعروضة من تقرير المناوبة في البوت أو الويب.') },
+                @{ Version = '8.134.0'; Items = @('راجع استعادة الإعدادات المدعومة من نسخة محلية أو من القيم الافتراضية.', 'راجع إعادة تشغيل الجسر تحت إشراف برنامج التحكم وتابع النتيجة من الويب.') },
+                @{ Version = '8.133.0'; Items = @('ابحث عن آخر تفاعل مسجّل من شاشة وصول مستخدمي Telegram في الويب.', 'راجع نتيجة جاهزية طبقة الاختبار بعد مطابقة قراءتي Cinegy.') },
+                @{ Version = '8.132.0'; Items = @('راجع السجل المحلي القديم للطبقة وأزله من شاشة مقارنة الطبقات في الويب.') },
+                @{ Version = '8.131.0'; Items = @('تابع أرقام التشغيل والقيود على تسليم إشعارات Telegram من إدارة الويب.') },
+                @{ Version = '8.130.0'; Items = @('افتح دليل المشغّل وما الجديد من مساحة الويب.', 'راجع توقيت المحتوى وملخّص الاستخدام من إدارة الويب.') },
+                @{ Version = '8.129.0'; Items = @('نزّل تقرير التشخيص وتحقّق من جاهزية طبقة الاختبار أو إعادة التشغيل من الإدارة.', 'راجع تسجيل المشهد الخارجي المؤكّد من مقارنة الطبقات.', 'أكّد تذكيرات القوالب الشخصية أو أجّلها من أي صفحة بعد تسجيل الدخول.') },
+                @{ Version = '8.128.0'; Items = @('قارن حالة طبقة مع المحرك، أو راجع الطبقات التي يشملها الإخفاء الشامل.', 'راجع وجهة الترحيل عند توقفه، وأكّد تذكيرات المتابعة الشخصية أو أجّلها من صفحة البث.') },
                 @{ Version = '8.127.0'; Items = @('راجع اسم الطبقة وعدّله من إدارة الويب.', 'راجع إيقاف جدولة القوالب أو استئنافها، وابحث بمرجع العملية في سجل المناوبة.') },
                 @{ Version = '8.126.0'; Items = @('نزّل سجل القوالب أو إعدادات الويب القابلة للتحرير، وراجع التغييرات قبل الاستيراد.', 'افتح مفضلة القوالب المشتركة وراجع أقصى مدة لعرض القالب في التشغيلات الجديدة.') },
                 @{ Version = '8.125.0'; Items = @('تحقّق من جاهزية المناوبة وتغطية إشعارات Telegram في الإدارة.', 'افتح تقريري الأسبوع وتسليم المناوبة من سجل العمليات، أو راجع إعادة الإرسال عبر Telegram، أو اضبط التذكير من محرّر القالب.') },

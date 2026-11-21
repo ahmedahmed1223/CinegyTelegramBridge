@@ -5,6 +5,18 @@ BeforeAll {
 }
 
 Describe 'Cinegy layer reconciliation policy' {
+    It 'copies a stored object record when the engine reports a different active identity' {
+        $stored = [pscustomobject]@{ Key = 'headline'; ActiveId = 'prior'; UserId = 10; Source = 'bridge' }
+        $status = [ordered]@{ Success = $true; IsOnAir = $true; ActiveId = 'current' }
+
+        $decision = Resolve-BridgeCinegyLayerState -Layer 7 -TrackedRecord $stored -Status $status
+
+        $decision.Action | Should -Be 'update'
+        $decision.Record.Key | Should -Be 'headline'
+        $decision.Record.ActiveId | Should -Be 'current'
+        $stored.ActiveId | Should -Be 'prior'
+    }
+
     It 'recognizes a confirmed hidden layer supplied as an ordered status' {
         $tracked = @{ Key = 'headline'; ActiveId = 'old'; UserId = 10 }
         $status = [ordered]@{ Success = $true; IsOnAir = $false; ActiveId = ''; ActiveName = '' }

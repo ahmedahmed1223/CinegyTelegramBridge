@@ -88,7 +88,7 @@ function ConvertTo-ImportedSettingValue {
 
 function Set-ImportedSettings {
     param([Parameter(Mandatory)][object[]]$Changes, [long]$Deadline = 0,
-        [System.Collections.IDictionary]$ReviewedExpected)
+        [System.Collections.IDictionary]$ReviewedExpected, [System.Collections.IDictionary]$ReviewedVersion)
     if ($PSBoundParameters.ContainsKey('ReviewedExpected')) {
         $original = Get-JsonProp $config 'Settings'
         $snapshot = [ordered]@{}
@@ -104,7 +104,9 @@ function Set-ImportedSettings {
             $snapshot[[string]$change.Name] = $change.To
         }
         $updated = [pscustomobject]$snapshot
-        Save-Config -Deadline $Deadline -ReviewedPatch $patch -ReviewedExpected $ReviewedExpected
+        $reviewPath = @{}
+        if ($ReviewedVersion) { $reviewPath.Path = $script:ConfigPath }
+        Save-Config @reviewPath -Deadline $Deadline -ReviewedPatch $patch -ReviewedExpected $ReviewedExpected -ReviewedVersion $ReviewedVersion
         if ($script:LastConfigSaveFailed) { return $false }
         Set-JsonProp -Object $config -Name 'Settings' -Value $updated
         return $true

@@ -748,7 +748,7 @@ function Get-UserActivityStatus {
     param([AllowEmptyString()][string]$LastActivityAt = '', [datetime]$Now = (Get-Date), [ValidateRange(1, 1440)][int]$ActiveWithinMinutes = 5)
     $last = [datetime]::MinValue
     if ([string]::IsNullOrWhiteSpace($LastActivityAt) -or -not [datetime]::TryParse($LastActivityAt, [ref]$last)) {
-        return [pscustomobject]@{ State = 'unknown'; Label = (T 'usr.activityUnknown'); AgeMinutes = $null }
+        return [pscustomobject]@{ State = 'unknown'; Label = (T 'usr.activityUnknown'); AgeMinutes = $null; LastActivityAt = $null }
     }
     $ageMinutes = [math]::Max(0, [int][math]::Floor(($Now - $last).TotalMinutes))
     # Through the formatter, not "$ageMinutes د". An account last seen on
@@ -757,9 +757,9 @@ function Get-UserActivityStatus {
     # whether someone still needs access.
     $ago = Format-DurationMinutes -Minutes $ageMinutes
     if ($ageMinutes -lt $ActiveWithinMinutes) {
-        return [pscustomobject]@{ State = 'recent'; Label = (T 'usr.activeRecently' $ago); AgeMinutes = $ageMinutes }
+        return [pscustomobject]@{ State = 'recent'; Label = (T 'usr.activeRecently' $ago); AgeMinutes = $ageMinutes; LastActivityAt = $last }
     }
-    return [pscustomobject]@{ State = 'idle'; Label = (T 'usr.idle' $ago); AgeMinutes = $ageMinutes }
+    return [pscustomobject]@{ State = 'idle'; Label = (T 'usr.idle' $ago); AgeMinutes = $ageMinutes; LastActivityAt = $last }
 }
 
 function Get-UserActivitySummaryText {

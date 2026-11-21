@@ -291,14 +291,20 @@ function Get-TitlerLayerStatus {
         [Parameter(Mandatory)][int]$AirChannelNumber,
         [Parameter(Mandatory)][int]$Layer,
         [string]$Device = '',
-        [int]$TimeoutSec = 10
+        [int]$TimeoutSec = 10,
+        [switch]$RequireConsistentIdentity
     )
 
     $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/$((Resolve-AirGfxDevice -Device $Device -Layer $Layer).StatusPath)/status"
     $statusReceived = $false
+    $requestArguments = @{ Method = 'Get'; TimeoutSec = $TimeoutSec; UseBasicParsing = $true }
+    if ($RequireConsistentIdentity) { $requestArguments.MaximumRedirection = 0 }
     try {
-        $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
+        $response = Invoke-WebRequest -Uri $uri @requestArguments
         $statusReceived = $true
+        if ($RequireConsistentIdentity -and [int]$response.StatusCode -ne 200) {
+            throw 'Cinegy did not return a successful direct status response.'
+        }
         $xml = [xml]$response.Content
         if ($xml.DocumentElement.Name -cne 'Status') { throw "Cinegy status did not contain a Status element." }
         $activeNode = $xml.SelectSingleNode('/Status/Active')
@@ -306,6 +312,10 @@ function Get-TitlerLayerStatus {
         $outputNode = $xml.SelectSingleNode('/Status/Output')
         $clientNode = $xml.SelectSingleNode('/Status/Client')
         $activeId = if ($activeNode) { [string]$activeNode.GetAttribute('Id') } else { '' }
+        $statusId = [guid]::Empty
+        if ($RequireConsistentIdentity -and -not [guid]::TryParse($activeId, [ref]$statusId)) {
+            throw 'Cinegy status did not return an explicit active identity.'
+        }
         $licenseState = if ($licenseNode) { [string]$licenseNode.GetAttribute('State') } else { '' }
         $outputState = if ($outputNode) { [string]$outputNode.GetAttribute('State') } else { '' }
         $clientConnected = $false
@@ -320,6 +330,7 @@ function Get-TitlerLayerStatus {
         $normalizedId = $activeId.Trim().Trim('{', '}')
         $hasActiveItem = -not [string]::IsNullOrWhiteSpace($normalizedId) -and
             $normalizedId -ne '00000000-0000-0000-0000-000000000000'
+        if ($RequireConsistentIdentity) { $hasActiveItem = $statusId -ne [guid]::Empty }
         $isOnAir = $false
         # Why the layer is off air, kept because the log could not say.
         # 'no-active-item' never reaches /status/active at all, and
@@ -336,11 +347,22 @@ function Get-TitlerLayerStatus {
 
         if ($hasActiveItem) {
             $activeUri = "$uri/active"
-            $activeResponse = Invoke-WebRequest -Uri $activeUri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
+            $activeResponse = Invoke-WebRequest -Uri $activeUri @requestArguments
+            if ($RequireConsistentIdentity -and [int]$activeResponse.StatusCode -ne 200) {
+                throw 'Cinegy did not return a successful direct active-item response.'
+            }
             $activeItemXml = [string]$activeResponse.Content
             $activeXml = [xml]$activeItemXml
             $itemNode = $activeXml.SelectSingleNode('/Item')
             if (-not $itemNode) { throw "Cinegy active status did not contain an Item element." }
+            # These are separate GETs; a replacement between them can otherwise
+            # combine one event ID with a different item's occupied/empty state.
+            if ($RequireConsistentIdentity) {
+                $detailId = [guid]::Empty
+                if (-not [guid]::TryParse($itemNode.GetAttribute('Id'), [ref]$detailId) -or $detailId -ne $statusId) {
+                    throw 'Cinegy status and active item identities disagree.'
+                }
+            }
             $isEmpty = [string]$itemNode.GetAttribute('IsEmpty')
             $isOnAir = $isEmpty -notmatch '^(?i:y|yes|true|1)$'
             $offAirReason = if ($isOnAir) { '' } else { 'empty-item' }

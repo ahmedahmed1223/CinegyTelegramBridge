@@ -1,5 +1,44 @@
 #requires -Version 7
 
+function Get-WebTelegramPresence {
+    param([System.Collections.IDictionary]$Arguments, [datetime]$Now = (Get-Date))
+
+    if (-not (Get-WebTelegramAccessAdministrator -Arguments $Arguments)) { return @{ ok = $false; error = 'forbidden' } }
+    $page = 0
+    $requestedPage = Get-JsonProp $Arguments 'page'
+    $query = [string](Get-JsonProp $Arguments 'q')
+    if (($null -ne $requestedPage -and -not [int]::TryParse([string]$requestedPage, [ref]$page)) -or
+        $page -lt 0 -or $query.Length -gt 80) { return @{ ok = $false; error = 'bad_request' } }
+    $query = $query.Trim()
+    $recentMinutes = [math]::Min(1440, (Get-SettingInt 'UserActivityRecentMinutes' 1))
+
+    # This reflects Telegram interactions recorded by the bridge, including
+    # historical activity for suspended roster members. Browser identities
+    # have their own session view and do not supply Telegram presence.
+    $visible = @(foreach ($user in @(Get-AuthorizedUsers)) {
+        if (Test-WebOnlyUserId -UserId $user.UserId) { continue }
+        $name = if ([string]$user.Alias -ceq [string]$user.UserId) { '' }
+        else { Format-WebShiftHistoryField -Text ([string]$user.Alias) -MaximumLength 80 }
+        if ($query -and $name.IndexOf($query, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+
+        $activity = Get-UserActivityStatus -LastActivityAt ([string]$user.LastActivityAt) -Now $Now -ActiveWithinMinutes $recentMinutes
+        $stamp = ConvertTo-AirStatusWidgetEpoch $activity.LastActivityAt
+        [ordered]@{
+            name = $name; role = [string]$user.Role; disabled = [bool]$user.Disabled; state = [string]$activity.State
+            lastSeenAt = if ($stamp -gt 0) { $stamp } else { $null }
+        }
+    })
+    $ordered = @($visible | Sort-Object -Stable -Property @{ Expression = { $_.lastSeenAt }; Descending = $true },
+        @{ Expression = { $_.name } })
+    $pageSize = 15
+    $window = Get-BridgePageWindow -ItemCount $ordered.Count -Page $page -PageSize $pageSize
+    return @{ ok = $true; data = @{
+        page = $window.Page; pageSize = $pageSize; pageCount = $window.PageCount; total = $ordered.Count
+        recentMinutes = $recentMinutes; capturedAt = ConvertTo-AirStatusWidgetEpoch $Now
+        items = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) { $ordered[$index] })
+    } }
+}
+
 function Get-WebTelegramOperatorActivity {
     param([System.Collections.IDictionary]$Arguments, [datetime]$Now = (Get-Date))
     if (-not (Get-WebTelegramAccessAdministrator -Arguments $Arguments)) { return @{ ok = $false; error = 'forbidden' } }

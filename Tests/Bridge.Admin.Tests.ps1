@@ -990,6 +990,91 @@ Describe 'Usage digest' {
     }
 }
 
+Describe 'Web editorial settings review' {
+    It 'projects an editable catalogue from Bot metadata, effective bounds and reviewed-only authority' {
+        $ids = @(Get-WebAdminEditableSettingId)
+        $ids.Count | Should -Be 21
+        foreach ($name in @('NewsMaxItems', 'NewsDraftTimeoutMinutes', 'UrgentBoardTotalSeconds', 'MojazRowFrames',
+                'TemplateReminderFollowUpMinutes', 'SchedulePreNotifyMinutes', 'MojazScheduleNoticeSeconds')) {
+            $setting = Get-WebAdminEditableSettingView -Name $name
+            $bounds = Get-SettingBounds -Name $name
+            $source = $script:SettingSchema | Where-Object Name -CEQ $name
+            $setting.editable | Should -BeTrue
+            $setting.kind | Should -Be 'integer'
+            $setting.minimum | Should -Be $bounds.Minimum
+            $setting.maximum | Should -Be $bounds.Maximum
+            $setting.unit | Should -BeExactly $source.Unit
+        }
+        (Get-WebAdminEditableSettingView -Name 'MojazNotifyOnFinish').kind | Should -Be 'boolean'
+        @(Get-WebAdminSettingView | ForEach-Object { $_.id } | Group-Object | Where-Object Count -gt 1).Count | Should -Be 0
+        (Get-WebAdminSettingView | Where-Object id -eq 'EnableUrgentBoard').editable | Should -BeFalse
+        foreach ($denied in @('BotToken', 'TemplateBasePath', 'AllowRemoteRestart', 'EnableLiveRelay', 'EnableUrgentBoard', 'mojazRowFrames')) {
+            $ids | Where-Object { $_ -ceq $denied } | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'reviews reminders and editorial controls with native limits and fails closed on mixed invalid imports' {
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $true }
+        Mock Get-Setting { 5 } -ParameterFilter { $Name -eq 'TemplateReminderFollowUpMinutes' }
+        Mock Get-Setting { 9 } -ParameterFilter { $Name -eq 'UrgentBoardIntervalSeconds' }
+        $reminder = New-WebAdminSettingReview -Arguments @{ actor = 6100; id = 'TemplateReminderFollowUpMinutes'; value = 0L }
+        $reminder.ok | Should -BeTrue
+        $reminder.data.value | Should -Be 0
+        $reminder.data.setting.unit | Should -BeExactly 'دقيقة'
+        $plan = Get-WebAdminSettingsImportPlan -Requested @{ TemplateReminderFollowUpMinutes = 0L; UrgentBoardIntervalSeconds = 3600L }
+        $plan.changes.Count | Should -Be 2
+        $plan.after.UrgentBoardIntervalSeconds | Should -Be 3600
+        (Get-WebAdminSettingsImportPlan -Requested @{ UrgentBoardIntervalSeconds = 3601L }).error | Should -Be 'settings_import_invalid'
+        (Get-WebAdminSettingsImportPlan -Requested @{ TemplateReminderFollowUpMinutes = 0L; BotToken = $true }).error | Should -Be 'settings_import_invalid'
+        (Get-WebAdminSettingsImportPlan -Requested @{ TemplateReminderFollowUpMinutes = '5' }).error | Should -Be 'settings_import_invalid'
+        (New-WebAdminSettingReview -Arguments @{ actor = 6100; id = 'TemplateReminderFollowUpMinutes'; enabled = $true; value = 0L }).error | Should -Be 'setting_invalid'
+        (New-WebAdminSettingReview -Arguments @{ actor = 6100; id = 'UrgentBoardIntervalSeconds'; value = 3601L }).error | Should -Be 'setting_invalid'
+    }
+
+    It 'reuses the active board guard during review and confirm while allowing unrelated partial edits' {
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $true }
+        Mock Test-UrgentBoardTimingBusy { $false }
+        Mock Get-Setting { 8 } -ParameterFilter { $Name -eq 'UrgentBoardIntervalSeconds' }
+        Mock Get-Setting { 5 } -ParameterFilter { $Name -eq 'TemplateReminderFollowUpMinutes' }
+        Mock Save-Config { throw 'This fixture must not persist settings' }
+        $review = New-WebAdminSettingReview -Arguments @{ actor = 6302; id = 'UrgentBoardIntervalSeconds'; value = 12 }
+        $batch = New-WebAdminSettingsImportReview -Arguments @{ actor = 6302; settings = @{ UrgentBoardIntervalSeconds = 12 } }
+        Mock Test-UrgentBoardTimingBusy { $true }
+        (Complete-WebAdminSettingReview -Arguments @{ actor = 6302; id = 'UrgentBoardIntervalSeconds'; review = $review.data.review }).error | Should -Be 'urgent_timing_active'
+        (Complete-WebAdminSettingsImportReview -Arguments @{ actor = 6302; review = $batch.data.review }).error | Should -Be 'urgent_timing_active'
+        (New-WebAdminSettingReview -Arguments @{ actor = 6302; id = 'UrgentBoardIntervalSeconds'; value = 12 }).error | Should -Be 'urgent_timing_active'
+        $unrelated = Get-WebAdminSettingsImportPlan -Requested @{ UrgentBoardIntervalSeconds = 8; TemplateReminderFollowUpMinutes = 0 }
+        @($unrelated.changes.Name) | Should -Be @('TemplateReminderFollowUpMinutes')
+        Should -Invoke Save-Config -Times 0 -Exactly
+    }
+
+    It 'changes only reviewed editorial keys in a synthetic configuration and refuses a stale value' {
+        $path = Join-Path $TestDrive 'editorial-reviewed-config.json'
+        $fixture = @{
+            BotToken = 'fixture-only'
+            OperatorFixture = 'disk-owned'
+            Settings = @{ UrgentBoardIntervalSeconds = 9; TemplateReminderFollowUpMinutes = 5; Unreviewed = $true }
+        }
+        $fixture | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path
+        Mock Protect-BridgePathAcl {}
+        Mock Protect-BridgeConfigurationAcl {}
+        Mock Get-Setting { 9 } -ParameterFilter { $Name -eq 'UrgentBoardIntervalSeconds' }
+        Mock Get-Setting { 5 } -ParameterFilter { $Name -eq 'TemplateReminderFollowUpMinutes' }
+        $plan = Get-WebAdminSettingsImportPlan -Requested @{ UrgentBoardIntervalSeconds = 12; TemplateReminderFollowUpMinutes = 0 }
+        Save-Config -Path $path -ReviewedPatch $plan.after -ReviewedExpected $plan.before
+        $script:LastConfigSaveFailed | Should -BeFalse
+        $disk = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $disk.Settings.UrgentBoardIntervalSeconds | Should -Be 12
+        $disk.Settings.TemplateReminderFollowUpMinutes | Should -Be 0
+        $disk.Settings.Unreviewed | Should -BeTrue
+        $disk.OperatorFixture | Should -Be 'disk-owned'
+        Save-Config -Path $path -ReviewedPatch $plan.after -ReviewedExpected $plan.before
+        $script:LastConfigSaveConflict | Should -BeTrue
+    }
+}
+
 Describe 'Administrator restart' {
     BeforeEach {
         $script:RestartRequested = $false
@@ -1003,6 +1088,56 @@ Describe 'Administrator restart' {
         Mock Get-BridgeSupervisor { [pscustomobject]@{ Name = 'nssm.exe'; Supervised = $true } }
     }
     AfterAll { $script:RestartRequested = $false }
+
+    It 'checks Web restart readiness without changing restart intent or exposing process details' {
+        Mock Test-Authorized { $UserId -in 100, 300 }
+        Mock Test-Admin { $UserId -in 100, 200 }
+        Mock Get-BridgeSupervisor { @{ Name = 'synthetic-supervisor.exe'; Supervised = $true } }
+        Mock Get-BridgeRelaunchCommand { throw 'An available supervisor takes precedence' }
+        Mock Start-Process { throw 'The readiness check does not start a process' }
+        Mock Stop-Process { throw 'The readiness check does not stop a process' }
+        $previous = $script:RestartSelfRelaunch
+        $script:OnAir[4] = @{ Key = 'fixture-scene-name'; UserId = 44 }
+        try {
+            foreach ($actor in 0, 200, 300) {
+                (Get-WebRestartReadiness -Arguments @{ actor = $actor }).error | Should -Be 'forbidden'
+            }
+            Should -Invoke Get-BridgeSupervisor -Times 0 -Exactly
+            $probe = Get-WebRestartReadiness -Arguments @{ actor = 100 } -Now ([datetimeoffset]'2026-11-21T18:00:00Z')
+            $probe.data.state | Should -Be 'supervisor-reported'
+            $probe.data.activeScenes | Should -Be 1
+            $probe.data.checkedAt | Should -Be ([datetimeoffset]'2026-11-21T18:00:00Z').ToUnixTimeMilliseconds()
+            $probe | ConvertTo-Json -Depth 5 | Should -Not -Match 'synthetic-supervisor|fixture-scene-name'
+            $script:RestartRequested | Should -BeFalse
+            $script:RestartSelfRelaunch | Should -Be $previous
+            Should -Invoke Get-BridgeRelaunchCommand -Times 0 -Exactly
+            Should -Invoke Start-Process -Times 0 -Exactly
+            Should -Invoke Stop-Process -Times 0 -Exactly
+            Should -Invoke Send-TelegramMessage -Times 0 -Exactly
+        }
+        finally { $script:RestartSelfRelaunch = $previous }
+    }
+
+    It 'reports disabled and pending Web restart states without querying a supervisor' {
+        Mock Test-Authorized { $true }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+        (Get-WebRestartReadiness -Arguments @{ actor = 100 }).data.state | Should -Be 'disabled'
+        $script:RestartRequested = $true
+        (Get-WebRestartReadiness -Arguments @{ actor = 100 }).data.state | Should -Be 'already-requested'
+        Should -Invoke Get-BridgeSupervisor -Times 0 -Exactly
+    }
+
+    It 'labels a reconstructable Web relaunch command without returning it' {
+        Mock Test-Authorized { $true }
+        Mock Get-BridgeSupervisor { @{ Name = 'pwsh.exe'; Supervised = $false } }
+        Mock Get-BridgeRelaunchCommand { $null }
+        (Get-WebRestartReadiness -Arguments @{ actor = 100 }).data.state | Should -Be 'unavailable'
+        Mock Get-BridgeRelaunchCommand { @{ FilePath = 'C:/private/exec.exe'; Arguments = @('fixture-secret') } }
+        $probe = Get-WebRestartReadiness -Arguments @{ actor = 100 }
+        $probe.data.state | Should -Be 'relaunch-command-available'
+        $probe | ConvertTo-Json -Depth 5 | Should -Not -Match 'private|fixture-secret|pwsh'
+        $script:RestartRequested | Should -BeFalse
+    }
 
     It 'only identifies processes running this exact bridge script' {
         $scriptPath = [IO.Path]::GetFullPath($script:BridgeLaunch.ScriptPath)

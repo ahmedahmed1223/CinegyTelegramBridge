@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -170,7 +170,15 @@ public sealed class MainForm : Form
     private Process? _bridgeProcess;
     private bool _stoppingIntentionally;
     private Process? _settingsStopProcess;
-    private bool _restartAfterExit;
+    private readonly ManagedBridgeReplacement _managedReplacement = new();
+    private BridgeChildIdentity? _ownedBridgeChild;
+    private BridgeLaunchPlan? _ownedBridgeLaunch;
+    private BridgeLaunchPlan? _retryLaunch;
+    private Process? _localRestartAfterExit;
+    private ManagedRestartPipe? _managedRestartPipe;
+    private ManagedRestartLedger? _managedRestartLedger;
+    private string? _managedRestartJournalPath;
+    private string? _managedRestartPairing;
     private bool _exiting;
 
     // Start-with-Windows launches the manager with --autostart: it comes up
@@ -566,7 +574,9 @@ public sealed class MainForm : Form
         _restartTimer.Tick += (_, _) =>
         {
             _restartTimer.Stop();
-            if (_autoRestartCheck.Checked) StartBridge();
+            var retry = _retryLaunch;
+            _retryLaunch = null;
+            if (_autoRestartCheck.Checked) StartBridge(replacement: retry);
         };
 
         _autoClearTimer = new System.Windows.Forms.Timer { Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds };
@@ -585,7 +595,7 @@ public sealed class MainForm : Form
             if (!ConfirmSafetyOff(_autoRestartCheck,
                     "إن توقّف الجسر فلن يُعاد تشغيله تلقائيًا، وستبقى الرسومات بلا تحكّم حتى ينتبه أحد.\n\nإيقاف إعادة التشغيل التلقائي؟")) return;
             _settings.AutoRestart = _autoRestartCheck.Checked;
-            if (!_autoRestartCheck.Checked) _restartTimer.Stop();
+            if (!_autoRestartCheck.Checked) CancelBridgeRetry();
             SaveManagerSettings();
             LogEvent($"إعادة التشغيل التلقائي: {(_autoRestartCheck.Checked ? "مفعّلة" : "معطّلة")}.");
         };
@@ -830,6 +840,8 @@ public sealed class MainForm : Form
         StartTailingBridgeLog();
         LogEvent($"استلام جسر يعمل بالفعل (المعرّف {pid}).");
         _adoptedBridge = true;
+        _ownedBridgeChild = null;
+        _ownedBridgeLaunch = null;
         SetStatus(running: true);
         return true;
     }
@@ -1242,8 +1254,9 @@ public sealed class MainForm : Form
 
     // ---- process supervision ---------------------------------------------
 
-    private void StartBridge(bool manual = false)
+    private void StartBridge(bool manual = false, BridgeLaunchPlan? replacement = null, bool webReplacement = false)
     {
+        UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
         // Disable immediately, before anything else: a burst of clicks queued
         // faster than the UI thread can react would otherwise each run this
         // method in turn (once per queued click), each one restarting what
@@ -1253,43 +1266,70 @@ public sealed class MainForm : Form
         // on every exit path once the outcome (running or not) is known.
         SetButtonsBusy();
 
+        if (_managedReplacement.IsPending || _localRestartAfterExit is not null) return;
         if (_bridgeProcess is { HasExited: false }) { SetStatus(running: true); return; }
-        if (!EnsureBridgeScriptResolved()) { SetStatus(running: false); return; }
-        // A deliberate click always gets a fresh chance, even after the
-        // crash-loop breaker gave up on automatic restarts.
+        var launch = replacement;
+        if (launch is null)
+        {
+            if (!EnsureBridgeScriptResolved()) { SetStatus(running: false); return; }
+            var pwsh = ResolvePwsh();
+            if (pwsh is null)
+            {
+                Ask("لم يتم العثور على pwsh.exe (PowerShell 7).\nثبّته من https://aka.ms/powershell-release ثم أعد المحاولة.",
+                    "PowerShell 7 غير موجود", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetStatus(running: false);
+                return;
+            }
+            launch = new BridgeLaunchPlan(pwsh, _settings.BridgeScriptPath!, BridgeRoot, ConfigPath);
+        }
+        CancelBridgeRetry();
         if (manual) _consecutiveQuickFailures = 0;
 
-        var pwsh = ResolvePwsh();
-        if (pwsh is null)
+        var journalPath = Path.Combine(launch.Root, "logs", "managed-restart");
+        var manualRecovery = false;
+        if (_managedRestartLedger is null || !string.Equals(_managedRestartJournalPath, journalPath, StringComparison.OrdinalIgnoreCase))
         {
-            Ask("لم يتم العثور على pwsh.exe (PowerShell 7).\nثبّته من https://aka.ms/powershell-release ثم أعد المحاولة.",
-                "PowerShell 7 غير موجود", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            SetStatus(running: false);
-            return;
+            try
+            {
+                var previous = RestartJournalStorage.Read(journalPath);
+                _managedRestartLedger = new ManagedRestartLedger(record => RestartJournalStorage.Publish(journalPath, record), previous);
+                _managedRestartJournalPath = journalPath;
+                UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                LogEvent("تعذّرت قراءة حالة إعادة تشغيل الويب. تحقّق من حالة الجسر في المدير.");
+                if (!manual) { SetStatus(running: false); return; }
+                manualRecovery = true;
+                _managedRestartLedger = new ManagedRestartLedger(record => RestartJournalStorage.Publish(journalPath, record));
+                _managedRestartJournalPath = journalPath;
+            }
         }
 
-        var scriptPath = _settings.BridgeScriptPath!;
-        var psi = new ProcessStartInfo
+        if (_managedRestartLedger?.IsStalled == true ||
+            (!webReplacement && ManagedRestartLedger.NeedsManualRecovery(_managedRestartLedger?.Current)))
         {
-            FileName = pwsh,
-            WorkingDirectory = BridgeRoot,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            // pwsh writes Arabic (Write-Host, log lines) as UTF-8; decode it as
-            // such explicitly rather than falling back to the console codepage.
-            StandardOutputEncoding = System.Text.Encoding.UTF8,
-            StandardErrorEncoding = System.Text.Encoding.UTF8,
-        };
-        psi.ArgumentList.Add("-NoProfile");
-        psi.ArgumentList.Add("-File");
-        psi.ArgumentList.Add(scriptPath);
-        psi.ArgumentList.Add("-ConfigPath");
-        psi.ArgumentList.Add(ConfigPath);
-        // -StopExisting: this process has no attached console, so a Read-Host
-        // prompt from "another instance is already running" would hang forever.
-        psi.ArgumentList.Add("-StopExisting");
+            if (!manual)
+            {
+                LogEvent("توقفت محاولة إعادة تشغيل الويب قبل التحقّق من الجسر. ابدأ محاولة محلية من المدير.");
+                SetStatus(running: false);
+                return;
+            }
+            manualRecovery = true;
+        }
+        if (manualRecovery) launch = launch with { Strict = true };
+
+        var psi = launch.CreateStartInfo();
+        _managedRestartPipe ??= CreateManagedRestartPipe();
+        _managedRestartPairing = System.Security.Cryptography.RandomNumberGenerator.GetHexString(64);
+        psi.Environment["CGB_MANAGED_RESTART_PIPE"] = _managedRestartPipe.Name;
+        psi.Environment["CGB_MANAGED_RESTART_PAIRING"] = _managedRestartPairing;
+        psi.Environment.Remove("CGB_MANAGED_RESTART_REQUEST");
+        if (webReplacement && _managedRestartLedger?.Current is { } request && launch.Strict)
+            psi.Environment["CGB_MANAGED_RESTART_REQUEST"] = request.Id;
+        else if (_managedRestartLedger?.Current is { State: "reserved" or "reviewed" or "received" })
+            _managedRestartLedger.Fail();
+        var scriptPath = launch.ScriptPath;
 
         _stoppingIntentionally = false;
         ResetHealthPills();
@@ -1315,11 +1355,22 @@ public sealed class MainForm : Form
             catch (InvalidOperationException) { }
         };
 
+        var started = false;
+        var replacementStreamsFailed = false;
+        BridgeChildIdentity? replacementIdentity = null;
         try
         {
-            process.Start();
+            started = process.Start();
+            if (!started) throw new InvalidOperationException("PowerShell did not create a new process.");
+            // Capture the exact launched process before attaching output. A stream
+            // error must never discard the user's ability to stop that child locally.
+            if (webReplacement) replacementIdentity = ReadBridgeChildIdentity(process);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+        }
+        catch (Exception) when (webReplacement && started)
+        {
+            replacementStreamsFailed = true;
         }
         catch (Exception ex)
         {
@@ -1335,7 +1386,8 @@ public sealed class MainForm : Form
             // A failed launch never "started" at all - treat it as an
             // instant (0-second) run so it counts as a quick failure below.
             _lastStartAt = DateTime.UtcNow;
-            ScheduleRetryOrGiveUp();
+            if (webReplacement) StallUnverifiedManagedRestart();
+            else if (!manualRecovery) ScheduleRetryOrGiveUp(launch.Strict ? launch : null);
             return;
         }
 
@@ -1344,6 +1396,18 @@ public sealed class MainForm : Form
         // bridge restarts a lot.
         _bridgeProcess?.Dispose();
         _bridgeProcess = process;
+        _ownedBridgeChild = webReplacement ? replacementIdentity : ReadBridgeChildIdentity(process);
+        _ownedBridgeLaunch = launch;
+        if (webReplacement)
+        {
+            var registrationTime = DateTimeOffset.UtcNow;
+            UpdateManagedRestartDeadline(registrationTime);
+            if (replacementStreamsFailed || _ownedBridgeChild is null ||
+                _managedRestartLedger?.TryRegisterReplacement(_ownedBridgeChild, registrationTime) != true)
+                StallUnverifiedManagedRestart();
+        }
+        if (manualRecovery && _managedRestartLedger?.CompleteManualRecovery() != true)
+            LogEvent("بدأ التشغيل المحلي الآمن، لكن تعذّر حفظ إغلاق محاولة الويب السابقة.");
         _lastStartAt = DateTime.UtcNow;
         _lastLivenessSeen = null;
         // A stopped bridge's version is last run's; the next start announces
@@ -1352,8 +1416,78 @@ public sealed class MainForm : Form
         _diskBridgeVersion = null;
         _watchdogInactiveLogged = false;
         _adoptedBridge = false;
-        SetStatus(running: true);
-        LogEvent("تم بدء تشغيل الجسر بنجاح.");
+        if (replacementStreamsFailed)
+        {
+            SetStatus(running: !process.HasExited);
+            LogEvent("بدأت عملية الجسر الجديدة وتعذّر ربط سجلّها بالمدير. تحقّق منها محليًا.");
+        }
+        else
+        {
+            SetStatus(running: true);
+            LogEvent("تم بدء تشغيل الجسر بنجاح.");
+        }
+    }
+
+    private ManagedRestartPipe CreateManagedRestartPipe()
+    {
+        var pipe = new ManagedRestartPipe(DispatchManagedRestartAsync);
+        pipe.Start();
+        return pipe;
+    }
+
+    private Task<RestartWireReply> DispatchManagedRestartAsync(uint pid, RestartWireRequest request, CancellationToken token)
+    {
+        var result = new TaskCompletionSource<RestartWireReply>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            BeginInvoke(() =>
+            {
+                if (token.IsCancellationRequested) return;
+                try { result.TrySetResult(HandleManagedRestart(pid, request)); }
+                catch { result.TrySetResult(new RestartWireReply(false, "restart_unavailable")); }
+            });
+        }
+        catch (InvalidOperationException) { return Task.FromResult(new RestartWireReply(false, "restart_unavailable")); }
+        return result.Task.WaitAsync(token);
+    }
+
+    private RestartWireReply HandleManagedRestart(uint pid, RestartWireRequest request)
+    {
+        var now = DateTimeOffset.UtcNow;
+        UpdateManagedRestartDeadline(now);
+        if (_exiting || _settingsStopProcess is not null || _stoppingIntentionally ||
+            _managedRestartLedger is not { } ledger || _ownedBridgeChild is not { } owned ||
+            pid != owned.ProcessId || _bridgeProcess is not { HasExited: false } child ||
+            !owned.Matches(ReadBridgeChildIdentity(child)) || !ManagedRestartLedger.SameHash(request.Pairing, _managedRestartPairing))
+            return new RestartWireReply(false, "restart_forbidden");
+
+        if (request.Action != "grant" || ledger.HasGrantedExit || ledger.IsStalled)
+        {
+            var current = ledger.Request(request, owned, now);
+            if (request.Action is ("cancel" or "relay-active") && current.Ok && _managedReplacement.IsPending)
+            {
+                _managedReplacement.Cancel();
+                SetStatus(running: true);
+            }
+            return current;
+        }
+        if (!_managedReplacement.TryReserve(owned, ReadBridgeChildIdentity(child), _ownedBridgeLaunch))
+            return new RestartWireReply(false, "restart_busy");
+        var reply = ledger.Request(request, owned, now);
+        if (reply.Ok)
+        {
+            CancelBridgeRetry();
+            SetButtonsBusy();
+        }
+        else _managedReplacement.Cancel();
+        return reply;
+    }
+
+    private static BridgeChildIdentity? ReadBridgeChildIdentity(Process process)
+    {
+        try { return new BridgeChildIdentity(process, process.Id, process.StartTime.ToUniversalTime().Ticks); }
+        catch (InvalidOperationException) { return null; }
+        catch (System.ComponentModel.Win32Exception) { return null; }
     }
 
     private void OnBridgeExited(Process exitedProcess)
@@ -1363,20 +1497,36 @@ public sealed class MainForm : Form
         // would null out tracking of the process that is actually running now.
         if (!ReferenceEquals(exitedProcess, _bridgeProcess) || ReferenceEquals(exitedProcess, _settingsStopProcess)) return;
 
+        var now = DateTimeOffset.UtcNow;
+        UpdateManagedRestartDeadline(now);
         var exitCode = -1;
         try { exitCode = exitedProcess.ExitCode; } catch { /* process handle already gone */ }
         AppendLine($"--- توقف الجسر (رمز الخروج {exitCode}) ---");
         LogEvent($"توقف الجسر - رمز الخروج {exitCode}.");
+        var exitedChild = ReferenceEquals(_ownedBridgeChild?.Handle, exitedProcess) ? _ownedBridgeChild : null;
+        var managedLaunch = _managedReplacement.Take(exitedChild);
+        var localRestart = ReferenceEquals(_localRestartAfterExit, exitedProcess);
+        var strictRetry = _ownedBridgeLaunch is { Strict: true } ? _ownedBridgeLaunch : null;
         _bridgeProcess = null;
+        _ownedBridgeChild = null;
+        _ownedBridgeLaunch = null;
+        _localRestartAfterExit = null;
         exitedProcess.Dispose();
         SetStatus(running: false);
 
-        if (_exiting) return;
-        if (_restartAfterExit)
+        if (_exiting || _managedRestartLedger?.IsStalled == true) return;
+        if (_managedRestartLedger is { HasCommittedExit: true } ledger)
         {
-            _restartAfterExit = false;
+            if (managedLaunch is not null && exitedChild is not null && ledger.TryClaimReplacement(exitedChild, now))
+                StartBridge(replacement: managedLaunch, webReplacement: true);
+            else
+                StallUnverifiedManagedRestart();
+            return;
+        }
+        if (managedLaunch is not null || localRestart)
+        {
             _stoppingIntentionally = false;
-            StartBridge();
+            StartBridge(replacement: managedLaunch);
             return;
         }
         if (_stoppingIntentionally)
@@ -1386,14 +1536,14 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (ShouldNotifyUnexpectedExit(_stoppingIntentionally, _restartAfterExit, _autoRestartCheck.Checked, _exiting))
+        if (ShouldNotifyUnexpectedExit(_stoppingIntentionally, localRestart, _autoRestartCheck.Checked, _exiting))
         {
             _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
                 "توقف الجسر وإعادة التشغيل التلقائي معطّلة - لن يعود وحده. افتح النافذة وشغّله يدويًا.",
                 ToolTipIcon.Warning);
         }
 
-        ScheduleRetryOrGiveUp();
+        ScheduleRetryOrGiveUp(strictRetry);
     }
 
     /// <summary>
@@ -1405,8 +1555,21 @@ public sealed class MainForm : Form
     internal static bool ShouldNotifyUnexpectedExit(bool stoppingIntentionally, bool restartAfterExit, bool autoRestart, bool exiting) =>
         !stoppingIntentionally && !restartAfterExit && !autoRestart && !exiting;
 
-    private void ScheduleRetryOrGiveUp()
+    private void CancelBridgeRetry()
     {
+        _restartTimer.Stop();
+        _retryLaunch = null;
+    }
+
+    private void CancelBridgeReplacement()
+    {
+        _managedReplacement.Cancel();
+        _localRestartAfterExit = null;
+    }
+
+    private void ScheduleRetryOrGiveUp(BridgeLaunchPlan? retry = null)
+    {
+        if (_managedRestartLedger?.IsStalled == true) return;
         _consecutiveQuickFailures = DateTime.UtcNow - _lastStartAt < QuickFailThreshold
             ? _consecutiveQuickFailures + 1
             : 0;
@@ -1427,6 +1590,7 @@ public sealed class MainForm : Form
         AppendLine("--- إعادة التشغيل خلال 3 ثوانٍ... ---");
         LogEvent($"سيُعاد التشغيل خلال 3 ثوانٍ (محاولة رقم {_consecutiveQuickFailures}).");
         SetHeader("إعادة التشغيل…", Theme.Pending, "خلال 3 ثوانٍ.");
+        _retryLaunch = retry;
         _restartTimer.Start();
     }
 
@@ -1528,7 +1692,9 @@ public sealed class MainForm : Form
 
     private void CheckLiveness()
     {
-        if (!_watchdogCheck.Checked || _exiting) return;
+        UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
+        if (!_watchdogCheck.Checked || _exiting || _managedReplacement.IsPending || _localRestartAfterExit is not null ||
+            _settingsStopProcess is not null || _managedRestartLedger?.BlocksAutomation == true) return;
         if (_bridgeProcess is not { HasExited: false }) return;
 
         var stamp = ReadLivenessStamp();
@@ -1608,7 +1774,14 @@ public sealed class MainForm : Form
 
     private void StopBridge(bool manual)
     {
-        _restartAfterExit = false;
+        UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
+        if (!manual && _managedRestartLedger?.IsStalled == true) return;
+        if (_managedRestartLedger is { HasCommittedExit: true } ledger)
+        {
+            if (!manual || !ledger.Fail()) return;
+        }
+        CancelBridgeRetry();
+        CancelBridgeReplacement();
         SetButtonsBusy(); // see the comment in StartBridge - same rapid-click concern
         if (_bridgeProcess is not { HasExited: false } process) { SetStatus(running: false); return; }
         if (manual) LogEvent("طلب المستخدم إيقاف الجسر يدويًا.");
@@ -1627,25 +1800,44 @@ public sealed class MainForm : Form
             AppendLine($"--- تعذّر إيقاف الجسر: {ex.Message} ---");
             LogEvent($"فشل إيقاف الجسر: {ex.Message}");
             _stoppingIntentionally = false;
-            _restartAfterExit = false;
             SetStatus(running: true);
         }
     }
 
     private void RestartBridge(string reason)
     {
+        UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
+        if (_managedReplacement.IsPending || _localRestartAfterExit is not null || _settingsStopProcess is not null ||
+            _managedRestartLedger?.BlocksAutomation == true) return;
         LogEvent(reason);
         _consecutiveQuickFailures = 0; // a deliberate restart always gets a fresh chance
         if (_bridgeProcess is { HasExited: false } process)
         {
-            _restartAfterExit = true;
+            var current = ReadBridgeChildIdentity(process);
+            if (!_managedReplacement.TryReserve(_ownedBridgeChild, current, _ownedBridgeLaunch))
+            {
+                if (_ownedBridgeLaunch is { Strict: true })
+                {
+                    LogEvent("تعذّر التحقق من عملية الجسر الحالية لإعادة تشغيلها بأمان.");
+                    return;
+                }
+                _localRestartAfterExit = process;
+            }
+            CancelBridgeRetry();
+            SetButtonsBusy();
             _stoppingIntentionally = true;
-            try { process.Kill(entireProcessTree: true); } catch { /* already exiting */ }
-            // OnBridgeExited starts the replacement after the old process and
-            // its ffmpeg children are actually gone, without freezing the UI.
+            try { process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) when (process.HasExited) { /* The exact exit callback will consume the reservation. */ }
+            catch (Exception ex)
+            {
+                CancelBridgeReplacement();
+                _stoppingIntentionally = false;
+                LogEvent($"تعذّر إيقاف الجسر لإعادة تشغيله: {ex.Message}");
+                SetStatus(running: true);
+            }
             return;
         }
-        StartBridge();
+        StartBridge(replacement: _retryLaunch);
     }
 
     private static string? ResolvePwsh()
@@ -1741,7 +1933,7 @@ public sealed class MainForm : Form
         _startButton.Visible = !running;
         _stopButton.Enabled = running;
         _stopButton.Visible = running;
-        _restartButton.Enabled = running;
+        _restartButton.Enabled = running && _managedRestartLedger?.IsStalled != true;
         _trayIcon.Text = running ? "مدير جسر تيليجرام - يعمل" : "مدير جسر تيليجرام - متوقف";
         UpdateStatusBar();
     }
@@ -1795,8 +1987,33 @@ public sealed class MainForm : Form
     internal static string ArabicCountWord(int n, string one, string two, string few, string many) =>
         n == 1 ? one : n == 2 ? two : n is >= 3 and <= 10 ? few : many;
 
+    private void UpdateManagedRestartDeadline(DateTimeOffset now)
+    {
+        if (_managedRestartLedger?.ExpireHandshake(now) != true) return;
+        NotifyManagedRestartStall("انتهت مهلة إعادة تشغيل الويب. يلزم التدخل المحلي في المدير.");
+    }
+
+    private void StallUnverifiedManagedRestart()
+    {
+        if (_managedRestartLedger?.StallHandshake(DateTimeOffset.UtcNow) != true) return;
+        NotifyManagedRestartStall("تعذّر التحقّق من اكتمال إعادة تشغيل الويب. يلزم التدخل المحلي في المدير.");
+    }
+
+    private void NotifyManagedRestartStall(string message)
+    {
+        CancelBridgeRetry();
+        CancelBridgeReplacement();
+        var running = _bridgeProcess is { HasExited: false };
+        SetStatus(running);
+        LogEvent(message);
+        if (!_exiting)
+            _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+                "تحقّق من حالة الجسر وأوقفه أو شغّله محليًا من المدير عند الحاجة.", ToolTipIcon.Warning);
+    }
+
     private void UpdateStatusBar()
     {
+        UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
         var filtering = _errorsOnlyCheck.Checked || !string.IsNullOrWhiteSpace(_filterBox.Text);
         var trimmedFilter = _filterBox.Text.Trim();
         _lineCountLabel.Text = filtering
@@ -2244,8 +2461,10 @@ public sealed class MainForm : Form
 
     private async Task<bool> StopForSettingsSave()
     {
-        _restartTimer.Stop();
-        _restartAfterExit = false;
+        UpdateManagedRestartDeadline(DateTimeOffset.UtcNow);
+        if (_managedRestartLedger?.BlocksAutomation == true) return false;
+        CancelBridgeRetry();
+        CancelBridgeReplacement();
         _stoppingIntentionally = true;
         if (_bridgeProcess is not { } process) return true;
         // Defer the Exited callback's disposal until the async wait releases
@@ -2418,6 +2637,7 @@ public sealed class MainForm : Form
             // All seven, not the one. The other six were created with new
             // rather than added to the form's components container, so nothing
             // disposed them: their native timer handles outlived the window.
+            _managedRestartPipe?.Dispose();
             foreach (var timer in new[] { _filterTimer, _restartTimer, _autoClearTimer, _drainTimer, _watchdogTimer, _clockTimer, _startupTimer })
             {
                 timer.Stop();

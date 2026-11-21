@@ -2375,12 +2375,30 @@ Describe 'The usage summary as tables' {
         $script:CancelReasons = @{}
     }
 
-    It 'stays inside what the bridge will send' {
+    It 'keeps the leading ranked templates and reports rows omitted from growing tables' {
         $script:UsageCounts = @{}
-        1..40 | ForEach-Object { $script:UsageCounts["قالب رقم $_"] = $_ }
-        $json = (@{ blocks = @(Get-UsageDigestBlocks); is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
-        Test-RichPayloadSize -Length $json.Length | Should -BeTrue
-        $script:UsageCounts = @{}
+        $script:CancelReasons = @{}
+        try {
+            foreach ($index in 1..80) {
+                $script:UsageCounts["قالب رقم $index"] = $index
+                $script:CancelReasons[('recorded_reason_{0:D2}' -f $index)] = 1
+            }
+            $blocks = @(Get-UsageDigestBlocks -TopCount 80)
+            $tables = @($blocks | Where-Object { $_.type -eq 'table' })
+            @($tables[0].cells).Count | Should -Be 41
+            $tables[0].cells[1][1].text | Should -Be 'قالب رقم 80'
+            $tables[0].cells[40][1].text | Should -Be 'قالب رقم 41'
+            @($tables[2].cells).Count | Should -Be 41
+            $trimNote = Get-RichTableTrimNote -Hidden 40 -Shown 40 -KeepFirst
+            $trimNote | Should -Not -BeNullOrEmpty
+            @($blocks | Where-Object { $_.type -eq 'paragraph' -and $_.text -eq $trimNote }) | Should -HaveCount 2
+            $json = (@{ blocks = $blocks; is_rtl = $true } | ConvertTo-Json -Depth 12 -Compress)
+            Test-RichPayloadSize -Length $json.Length | Should -BeTrue
+        }
+        finally {
+            $script:UsageCounts = @{}
+            $script:CancelReasons = @{}
+        }
     }
 }
 

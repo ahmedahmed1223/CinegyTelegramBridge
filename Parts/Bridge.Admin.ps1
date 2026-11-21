@@ -85,54 +85,56 @@ function Get-OnAirTableBlocks {
     return @(@{ type = 'table'; cells = $cells; is_striped = $true; is_compact = $true; is_bordered = $true })
 }
 
-function Get-AirMaterialNowNext {
-    <#
-        What the channel is playing and what it has cued, as one line.
+function Get-AirProgrammeNowNextData {
+    param([int]$TimeoutSec, [object[]]$CachedItems = @(), [long]$Deadline = 0)
 
-        The bridge has always known what IT put on air and nothing about the
-        programme underneath, so "is this the right moment for the strap" was a
-        question answered by opening Cinegy. Two short reads answer it here.
-
-        Returns '' rather than an error line when the channel cannot be
-        reached: this sits on a status screen that already reports Cinegy
-        health above it, and a second failure notice in the same screen reads
-        as two faults.
-    #>
-    param([int]$TimeoutSec = 0)
-    if ($TimeoutSec -le 0) { $TimeoutSec = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1 }
     $status = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
-    if (-not $status.Success) { return '' }
-    if (-not $status.ActiveId -and -not $status.CuedId) { return '' }
+    $snapshot = @{ StatusAvailable = [bool]$status.Success; ScheduleAvailable = $false; Current = $null; Cued = $null }
+    if (-not $status.Success) { return $snapshot }
 
-    $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
-        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    $activeId = [string]$status.ActiveId
+    $cuedId = [string]$status.CuedId
+    if (-not $activeId -and -not $cuedId) { return $snapshot }
+
     $byId = @{}
-    foreach ($item in @($schedule.Items)) { $byId[[string]$item.Id.Trim('{', '}')] = $item }
-
-    $describe = {
-        param([string]$Id, [switch]$WithRemaining)
-        if (-not $Id) { return '' }
-        if (-not $byId.ContainsKey($Id)) { return (T 'adm.materialNotScheduled') }
-        $item = $byId[$Id]
-        $text = ConvertTo-TelegramHtmlText ([string]$item.Name)
-        if ($WithRemaining -and $item.Duration -gt [timespan]::Zero) {
-            $left = ($item.ScheduledAt + $item.Duration) - [datetimeoffset]::Now
-            # Only while it is plausible: a schedule that has drifted would
-            # otherwise report a programme ending three hours ago.
-            if ($left -gt [timespan]::Zero -and $left -lt $item.Duration) {
-                $text += (T 'adm.remaining' $([int]$left.TotalMinutes))
-            }
-        }
-        return $text
+    foreach ($item in $CachedItems) { $byId[[string]$item.Id.Trim('{', '}')] = $item }
+    $snapshot.ScheduleAvailable = (-not $activeId -or $byId.ContainsKey($activeId)) -and (-not $cuedId -or $byId.ContainsKey($cuedId))
+    if (-not $snapshot.ScheduleAvailable) {
+        if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $snapshot }
+        $schedule = Get-AirMaterialSchedule -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+        $snapshot.ScheduleAvailable = [bool]$schedule.Success
+        $byId.Clear()
+        foreach ($item in @($schedule.Items)) { $byId[[string]$item.Id.Trim('{', '}')] = $item }
     }
 
-    $now = [string](& $describe $status.ActiveId -WithRemaining)
-    $next = [string](& $describe $status.CuedId)
+    if ($activeId) { $snapshot.Current = @{ Item = $byId[$activeId]; Remaining = $null } }
+    if ($cuedId) { $snapshot.Cued = @{ Item = $byId[$cuedId]; Remaining = $null } }
+    if ($snapshot.Current -and $snapshot.Current.Item -and $snapshot.Current.Item.Duration -gt [timespan]::Zero -and
+        $snapshot.Current.Item.ScheduledAt -gt [datetimeoffset]::MinValue) {
+        $current = $snapshot.Current.Item
+        $left = ($current.ScheduledAt + $current.Duration) - [datetimeoffset]::Now
+        # Only report the planned time left if the rundown still places us inside this item.
+        if ($left -gt [timespan]::Zero -and $left -lt $current.Duration) { $snapshot.Current.Remaining = $left }
+    }
+    return $snapshot
+}
+
+function Get-AirMaterialNowNext {
+    param([int]$TimeoutSec = 0)
+    if ($TimeoutSec -le 0) { $TimeoutSec = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1 }
+    $snapshot = Get-AirProgrammeNowNextData -TimeoutSec $TimeoutSec
+    $describe = {
+        param($Programme)
+        if (-not $Programme.Item) { return (T 'adm.materialNotScheduled') }
+        $text = ConvertTo-TelegramHtmlText ([string]$Programme.Item.Name)
+        if ($Programme.Remaining) { $text += (T 'adm.remaining' $([int]$Programme.Remaining.TotalMinutes)) }
+        return $text
+    }
     $parts = @()
-    if ($now) { $parts += (T 'adm.running' $now) }
-    if ($next) { $parts += (T 'adm.nextUp' $next) }
-    if ($parts.Count -eq 0) { return '' }
+    if ($snapshot.Current) { $parts += (T 'adm.running' (& $describe $snapshot.Current)) }
+    if ($snapshot.Cued) { $parts += (T 'adm.nextUp' (& $describe $snapshot.Cued)) }
     return ($parts -join "`n")
 }
 
@@ -410,11 +412,18 @@ function Show-ShiftHandoverScreen {
     }
 
     $lines.Add('')
-    $lines.Add((T 'adm.handoverNote'))
-    $keyboard = @{ inline_keyboard = @(
-            , @((New-Button (T 'adm.handedOver') 'handover:done' -Style success))
-            , @((New-Button (T 'adm.refresh') 'menu:handover'), (New-Button (T 'adm.menu') 'menu'))
-        ) }
+    $handover = (Get-ShiftHandoverView -Actor $UserId).public
+    $rows = @()
+    if ($handover.reference) {
+        $lines.Add((T 'adm.handoverPeriod' $handover.from $handover.through))
+        if ($handover.recent) {
+            $lines.Add((T 'adm.handoverRecent' $handover.recent.from $handover.recent.through $handover.recent.recordedAt))
+        }
+        $lines.Add((T 'adm.handoverNote'))
+        $rows += , @((New-Button (T 'adm.handedOver') "handover:done:$($handover.reference)" -Style success))
+    }
+    $rows += , @((New-Button (T 'adm.refresh') 'menu:handover'), (New-Button (T 'adm.menu') 'menu'))
+    $keyboard = @{ inline_keyboard = $rows }
     Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup $keyboard -ParseMode HTML
 }
 

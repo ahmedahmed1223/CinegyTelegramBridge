@@ -192,8 +192,26 @@ function Invoke-HealthCommand {
     Invoke-FullStatusCommand -ChatId $ChatId -UserId $UserId
 }
 
-function Get-BridgeDiagnosticsSnapshot {
+function Get-BridgeDiagnosticResources {
     $process = Get-Process -Id $PID
+    $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($scriptRoot)).TrimEnd('\', '/')
+    $drive = Get-PSDrive -Name $root.TrimEnd(':') -ErrorAction SilentlyContinue
+    return [ordered]@{
+        ProcessStart = $process.StartTime
+        Uptime = (Get-Date) - $process.StartTime
+        WorkingSetMB = [math]::Round($process.WorkingSet64 / 1MB, 1)
+        PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
+        DiskFreeGB = if ($drive) { [math]::Round([double]$drive.Free / 1GB, 2) } else { $null }
+        AirOperations = [pscustomobject]@{
+            Success = [int]$script:AirOperationCounters.Success
+            Failed = [int]$script:AirOperationCounters.Failed
+            Blocked = [int]$script:AirOperationCounters.Blocked
+        }
+    }
+}
+
+function Get-BridgeDiagnosticsSnapshot {
+    $snapshot = Get-BridgeDiagnosticResources
     $scriptFile = Join-Path $scriptRoot 'TelegramBridge.ps1'
     $buildTime = if (Test-Path -LiteralPath $scriptFile) { (Get-Item -LiteralPath $scriptFile).LastWriteTimeUtc } else { $null }
     $fileSizes = [ordered]@{}
@@ -202,9 +220,6 @@ function Get-BridgeDiagnosticsSnapshot {
         $name = [IO.Path]::GetFileName([string]$path)
         $fileSizes[$name] = if (Test-Path -LiteralPath $path) { [long](Get-Item -LiteralPath $path).Length } else { 0L }
     }
-    $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($scriptRoot)).TrimEnd('\', '/')
-    $driveName = $root.TrimEnd(':')
-    $drive = Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue
     $runtimeStorageBytes = 0L
     foreach ($runtimeFile in @(Get-ChildItem -LiteralPath $script:logDir -File -ErrorAction SilentlyContinue)) {
         $length = Get-JsonProp $runtimeFile 'Length'
@@ -219,23 +234,12 @@ function Get-BridgeDiagnosticsSnapshot {
             }
         }
     }
-    return [pscustomobject]@{
-        BuildTimeUtc  = $buildTime
-        ProcessStart  = $process.StartTime
-        Uptime        = (Get-Date) - $process.StartTime
-        Processor     = if ($env:PROCESSOR_IDENTIFIER) { $env:PROCESSOR_IDENTIFIER } else { [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() }
-        WorkingSetMB  = [math]::Round($process.WorkingSet64 / 1MB, 1)
-        PrivateMemoryMB = [math]::Round($process.PrivateMemorySize64 / 1MB, 1)
-        DiskFreeGB    = if ($drive) { [math]::Round([double]$drive.Free / 1GB, 2) } else { $null }
-        RuntimeStorageBytes = $runtimeStorageBytes
-        BackupStorageBytes = $backupStorageBytes
-        FileSizes     = $fileSizes
-        AirOperations = [pscustomobject]@{
-            Success = [int]$script:AirOperationCounters.Success
-            Failed  = [int]$script:AirOperationCounters.Failed
-            Blocked = [int]$script:AirOperationCounters.Blocked
-        }
-    }
+    $snapshot.BuildTimeUtc = $buildTime
+    $snapshot.Processor = if ($env:PROCESSOR_IDENTIFIER) { $env:PROCESSOR_IDENTIFIER } else { [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString() }
+    $snapshot.RuntimeStorageBytes = $runtimeStorageBytes
+    $snapshot.BackupStorageBytes = $backupStorageBytes
+    $snapshot.FileSizes = $fileSizes
+    return [pscustomobject]$snapshot
 }
 
 function Get-BridgeRuntimeFiles {
@@ -715,6 +719,19 @@ function Get-BridgeHealthCenterText {
     ) -join "`n"
 }
 
+function Get-EngineHealthProbe {
+    param([int]$TimeoutSec, [long]$Deadline = 0)
+
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
+        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    $video = if ($Deadline -eq 0 -or [Diagnostics.Stopwatch]::GetTimestamp() -lt $Deadline) {
+        Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
+            -AirChannelNumber $config.AirChannelNumber -TimeoutSec $TimeoutSec
+    }
+    return @{ Telemetry = $telemetry; Video = $video; ElapsedMs = $stopwatch.ElapsedMilliseconds }
+}
+
 function Show-EngineHealthScreen {
     <#
         F9: one screen answering "is the engine itself well" - verdict first,
@@ -733,10 +750,9 @@ function Show-EngineHealthScreen {
         return
     }
     $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
-    $telemetry = Get-AirTelemetryStatus -AirServerAddress $config.AirServerAddress `
-        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
-    $video = Get-AirVideoStatus -AirServerAddress $config.AirServerAddress `
-        -AirChannelNumber $config.AirChannelNumber -TimeoutSec $timeout
+    $probe = Get-EngineHealthProbe -TimeoutSec $timeout
+    $telemetry = $probe.Telemetry
+    $video = $probe.Video
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'hl.engineHealthTitle'))
     if (-not $telemetry.Success) {
@@ -928,6 +944,15 @@ function Get-BridgeRelaunchCommand {
     }
 }
 
+function Get-BridgeRestartPath {
+    # The preflight infers the restart path from the parent process or launch command.
+    $supervisor = Get-BridgeSupervisor
+    $kind = if ($supervisor.Supervised) { 'supervisor-reported' }
+    elseif (Get-BridgeRelaunchCommand) { 'relaunch-command-available' }
+    else { 'unavailable' }
+    return @{ Kind = $kind; SupervisorName = $supervisor.Name }
+}
+
 function Request-BridgeRestart {
     <# Shows what will happen and who is expected to bring the bridge back,
        then asks. Never restarts on the first tap. #>
@@ -937,17 +962,16 @@ function Request-BridgeRestart {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.restartDisabled') -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
-    $supervisor = Get-BridgeSupervisor
-    # Who brings it back, in order of preference: an external supervisor if
-    # there is one, otherwise the bridge relaunches itself. Only when neither
-    # is possible is the button refused, because exiting then really would be
-    # an outage with no way back in through the bot that just stopped.
-    $relaunch = if ($supervisor.Supervised) { $null } else { Get-BridgeRelaunchCommand }
-    if (-not $supervisor.Supervised -and -not $relaunch) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.noRestartPath' $($supervisor.Name)) -ReplyMarkup (Get-AdminToolsKeyboard)
+    if (Test-WebManagedRestartBusy) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.restartReviewBusy') -ReplyMarkup (Get-AdminToolsKeyboard)
         return $false
     }
-    $who = if ($supervisor.Supervised) { $supervisor.Name } else { (T 'hl.bridgeItself') }
+    $restartPath = Get-BridgeRestartPath
+    if ($restartPath.Kind -eq 'unavailable') {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.noRestartPath' $($restartPath.SupervisorName)) -ReplyMarkup (Get-AdminToolsKeyboard)
+        return $false
+    }
+    $who = if ($restartPath.Kind -eq 'supervisor-reported') { $restartPath.SupervisorName } else { (T 'hl.bridgeItself') }
     $live = if ($script:OnAir.Count -gt 0) { (T 'hlth.restartWithScenes' $($script:OnAir.Count)) } else { '' }
     Send-TelegramMessage -ChatId $ChatId -Text ((T 'hlth.confirmRestart' $who $live)) `
         -ReplyMarkup @{ inline_keyboard = @(, @(
@@ -965,6 +989,10 @@ function Confirm-BridgeRestart {
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Test-Admin -ChatId $ChatId -UserId $UserId)) { return $false }
     if (-not (Get-Setting 'AllowRemoteRestart')) { return $false }
+    if (Test-WebManagedRestartBusy) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'hlth.restartReviewBusy') -ReplyMarkup (Get-AdminToolsKeyboard)
+        return $false
+    }
     Write-BridgeLog "Administrator $UserId requested a restart from Telegram" 'WARN'
     Add-AuditEntry (T 'hlth.restartAudit' $(Format-UserAuditActor -UserId $UserId))
     Send-TelegramMessage -ChatId $ChatId -Text (T 'hl.restarting')

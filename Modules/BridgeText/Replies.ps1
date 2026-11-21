@@ -95,6 +95,8 @@ function Add-BridgeTextReplies {
     $catalogue['reply.noticesOn'] = @{ ar = '🔔 عادت تنبيهات العرض لك.'; en = '🔔 Show notices are back on for you.' }
     $catalogue['reply.pickTemplateShort'] = @{ ar = 'اختر القالب:'; en = 'Choose the template:' }
     $catalogue['reply.pickTemplateField'] = @{ ar = 'اختر القالب لتحديث أحد حقوله:'; en = 'Choose the template whose field to update:' }
+    $catalogue['reply.handoverRefresh'] = @{ ar = 'حدّث شاشة التسليم قبل تأكيد الفترة.'; en = 'Refresh the handover screen before confirming the period.' }
+    $catalogue['reply.handoverUnavailable'] = @{ ar = 'تعذّر حفظ التسليم. حدّث الشاشة ثم حاول مجددًا.'; en = 'The handover could not be recorded. Refresh the screen and try again.' }
     $catalogue['reply.handoverRecorded'] = @{ ar = '✅ سُجِّل التسليم.'; en = '✅ The handover was recorded.' }
     $catalogue['reply.clearExpired'] = @{ ar = 'انتهى أو تغيّر طلب المسح. افتح التشخيص وابدأ من جديد.'; en = 'The clear request expired or changed. Open diagnostics and start again.' }
     $catalogue['reply.logCleared'] = @{ ar = '✅ تم مسح السجل المحدد بأمان.'; en = '✅ The selected log was cleared safely.' }

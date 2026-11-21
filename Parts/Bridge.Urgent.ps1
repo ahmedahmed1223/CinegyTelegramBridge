@@ -1489,6 +1489,10 @@ function Invoke-UrgentSelectedDelete {
     return $true
 }
 
+function Test-UrgentBoardTimingBusy {
+    return [bool]$script:UrgentBoardRun
+}
+
 function Set-UrgentBoardSetting {
     <#
         One of the table's own numbers, through the bridge's single settings
@@ -1497,7 +1501,7 @@ function Set-UrgentBoardSetting {
     #>
     param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][string]$Name, $Value, [switch]$Quiet)
     try {
-        if ($script:UrgentBoardRun) { throw (T 'urgent.timingActive') }
+        if (Test-UrgentBoardTimingBusy) { throw (T 'urgent.timingActive') }
         # Set-Setting checks bounds only when TryParse succeeds. Never persist
         # numeric text it cannot parse: Get-SettingInt would silently read 8.
         if ($Name -in @('UrgentBoardIntervalSeconds', 'UrgentBoardRepeats', 'UrgentBoardTotalSeconds', 'UrgentExitGapSeconds')) {

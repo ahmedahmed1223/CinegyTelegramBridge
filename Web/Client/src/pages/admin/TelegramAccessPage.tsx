@@ -12,6 +12,7 @@ import { formatDateTime } from '../../lib/time'
 import { SuspendedTelegramOperators, TelegramSuspensionButton } from './TelegramSuspension'
 import { TelegramAliasButton } from './TelegramAliasButton'
 import { TelegramOperatorActivityButton } from './TelegramOperatorActivityButton'
+import { TelegramPresenceButton } from './TelegramPresenceButton'
 import { TelegramAccessHistory } from './TelegramAccessHistory'
 import { BlockedTelegramChats } from './BlockedTelegramChats'
 import { TelegramDeliveryQuarantine } from './TelegramDeliveryQuarantine'
@@ -210,7 +211,10 @@ export function TelegramAccessPage({ embedded = false }: { embedded?: boolean })
 
       <Paper withBorder radius="lg" p="md">
         <Stack gap="md">
-          <Title order={2} size="h4">أدوار مستخدمي Telegram</Title>
+          <Group justify="space-between">
+            <Title order={2} size="h4">أدوار مستخدمي Telegram</Title>
+            {session.data?.id != null && <TelegramPresenceButton accountId={session.data.id} />}
+          </Group>
           {roster.isError && <Alert color="red" role="alert">{accessMessage(roster.error.message)}</Alert>}
           {roster.isPending && <Skeleton h={76} />}
           {!roster.isError && users?.length === 0 && <Text size="sm" c="dimmed">لا يوجد مستخدمو Telegram في قائمة الوصول.</Text>}

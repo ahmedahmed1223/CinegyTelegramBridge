@@ -169,6 +169,498 @@ Describe 'Web channel: the pipe' {
     }
     AfterAll { Stop-WebChannel }
 
+    It 'publishes help for the current actor without passing through Bot source text' {
+        Mock Test-Authorized { $UserId -in 7110, 7111, 7112 }
+        Mock Test-Admin { $UserId -in 7111, 7112 }
+        Mock Test-Owner { $UserId -eq 7112 }
+        Mock Get-HelpChapters {
+            @{ Key = 'show'; AdminOnly = $false; Body = @('<script>private-bot-body</script>') }
+            @{ Key = 'settings'; AdminOnly = $true; Body = @('config.json') }
+            @{ Key = 'access'; AdminOnly = $true }
+        }
+        Mock Get-WhatsNewSections { @{ Version = '8.129.0'; Items = @('private-bot-release') } }
+        $operator = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7110,"role":"owner"}}' | ConvertFrom-Json
+        $operator.ok | Should -BeTrue
+        $operator.data.chapters.id | Should -Be @('templates')
+        $operator.data.releases[0].Items.Count | Should -Be 1
+
+        $admin = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7111}}' | ConvertFrom-Json
+        $admin.data.chapters.id | Should -Be @('templates', 'system', 'access')
+        $admin.data.releases[0].Items.Count | Should -Be 2
+
+        $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7112}}'
+        ($raw | ConvertFrom-Json).data.chapters.id | Should -Be @('templates', 'system', 'access', 'roles')
+        $raw | Should -Not -Match 'private-bot-body|private-bot-release|config\.json'
+        $denied = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7113}}' | ConvertFrom-Json
+        $denied.error | Should -Be 'forbidden'
+    }
+
+    It 'publishes only current administrators a typed in-memory operating snapshot' {
+        Mock Test-Authorized { $UserId -in 7130, 7131 }
+        Mock Test-Admin { $UserId -eq 7131 }
+        Mock Get-BridgeOperationMetrics {
+            @{
+                Now = [datetime]'2024-08-10T10:00:00'; StartedAt = [datetime]'2024-08-10T09:30:00'
+                Uptime = [timespan]::FromMinutes(30); State = 'telegram-limiting'
+                AirOperations = @{ Success = 12; Failed = 2; Blocked = 1; Name = 'editorial-private' }
+                TelegramRateLimitHits = 2; TelegramOutboxDropped = 3
+                LastHeartbeatDate = [datetime]'2024-08-09'; OnAirCount = 2
+                RichPayloadPeak = @{ Length = 9000; Percent = 75; Screen = 'private-screen-title' }
+            }
+        }
+        $operator = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.operation-metrics","args":{"actor":7130,"role":"admin"}}' | ConvertFrom-Json
+        $operator.error | Should -Be 'forbidden'
+        $monitoring = $script:RuntimeState.Monitoring
+        $healthBefore = $monitoring.CinegyHealthState
+        try {
+            $monitoring.CinegyHealthState = 'unreachable'
+            $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.operation-metrics","args":{"actor":7131}}'
+        } finally {
+            $monitoring.CinegyHealthState = $healthBefore
+        }
+        $response = $raw | ConvertFrom-Json
+        $response.ok | Should -BeTrue
+        $response.data.uptimeSeconds | Should -Be 1800
+        $response.data.airOperations.success | Should -Be 12
+        $response.data.telegramRateLimitHits | Should -Be 2
+        $response.data.telegramOutboxDropped | Should -Be 3
+        $response.data.cinegyState | Should -Be 'unreachable'
+        $response.data.richPayloadPeakPercent | Should -Be 75
+        $response.data.lastHeartbeatDate | Should -Be '2024-08-09'
+        $raw | Should -Not -Match 'private-screen-title|editorial-private'
+    }
+
+    It 'records a report-bound handover once across the real Web pipe and native Telegram callback' {
+        $priorFile = $script:auditFile
+        $priorTrail = $script:AuditTrail
+        $script:auditFile = Join-Path $TestDrive 'handover-ack-fixture.jsonl'
+        $script:AuditTrail = [System.Collections.Generic.List[string]]::new()
+        $script:handoverFixtureKeyboard = $null
+        $script:handoverFixtureText = ''
+        Mock Test-Authorized { $UserId -in 7031, 7032 }
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserNameFromTelegram {}
+        Mock Send-TelegramMessage {}
+        Mock Get-AirMaterialNowNext { '' }
+        Mock Get-UpcomingScheduleEvents { @() }
+        Mock Send-TelegramPagedText {
+            $script:handoverFixtureKeyboard = $ReplyMarkup
+            $script:handoverFixtureText = $Text
+        }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 6 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        $press = {
+            param([long]$Actor, [string]$Data)
+            Invoke-CallbackQuery -CallbackQuery ([pscustomobject]@{
+                    id = "fixture-$Actor"
+                    data = $Data
+                    from = [pscustomobject]@{ id = $Actor; first_name = 'Private fixture name' }
+                    message = [pscustomobject]@{ message_id = 5; chat = [pscustomobject]@{ id = $Actor; type = 'private' } }
+                })
+        }
+        $ack = 'reports.handover.acknowledge'
+        try {
+            Show-ShiftHandoverScreen -ChatId 7031 -UserId 7031
+            $button = $script:handoverFixtureKeyboard.inline_keyboard[0][0].callback_data
+            $button | Should -Match '^handover:done:'
+            [Text.Encoding]::UTF8.GetByteCount($button) | Should -BeLessOrEqual 64
+            $nativeReference = $button.Substring('handover:done:'.Length)
+            (& $call $ack @{ actor = 7032; reference = $nativeReference }).error | Should -Be 'handover_stale'
+            (& $call $ack @{ actor = 7999; reference = $nativeReference }).error | Should -Be 'forbidden'
+            $received = & $call $ack @{ actor = 7031; reference = $nativeReference; userId = 7032 }
+            $received.ok | Should -BeTrue
+            $received.data.recordedAt | Should -Not -BeNullOrEmpty
+            (& $call $ack @{ actor = 7031; reference = $nativeReference }).data.recordedAt | Should -BeExactly $received.data.recordedAt
+            Show-ShiftHandoverScreen -ChatId 7031 -UserId 7031
+            $script:handoverFixtureText | Should -Match ([regex]::Escape($received.data.recordedAt))
+            & $press 7031 $button
+            & $press 7031 'handover:done'
+            $stored = @(Read-AuditRecords -RequireCompleteRead)
+            $stored.Count | Should -Be 1
+            $stored[0].event | Should -BeExactly 'handover_ack'
+            $stored[0].userId | Should -Be 7031
+
+            $web = & $call 'reports.handover' @{ actor = 7032 }
+            $web.data.acknowledgement.reference | Should -Not -BeNullOrEmpty
+            & $press 7032 "handover:done:$($web.data.acknowledgement.reference)"
+            $same = & $call $ack @{ actor = 7032; reference = $web.data.acknowledgement.reference }
+            $same.ok | Should -BeTrue
+            $readBack = & $call 'reports.handover' @{ actor = 7032 }
+            $readBack.data.acknowledgement.recent.key | Should -BeExactly $same.data.key
+            ($readBack.data.acknowledgement | ConvertTo-Json -Depth 6) | Should -Not -Match 'Private fixture name|userId|chatId'
+            @(Read-AuditRecords -RequireCompleteRead).Count | Should -Be 2
+
+            $stale = (Get-ShiftHandoverView -Actor 7031 -Now ([datetimeoffset]::UtcNow.AddMinutes(-11))).public.reference
+            (& $call $ack @{ actor = 7031; reference = $stale }).error | Should -Be 'handover_stale'
+            Add-Content -LiteralPath $script:auditFile -Value 'null' -Encoding utf8
+            (& $call $ack @{ actor = 7031; reference = $nativeReference }).error | Should -Be 'handover_unavailable'
+            Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableShiftHandover' }
+            (& $call $ack @{ actor = 7031; reference = $nativeReference }).error | Should -Be 'handover_disabled'
+            @(Read-AuditRecords | Where-Object { $_ }).Count | Should -Be 2
+        }
+        finally {
+            $script:auditFile = $priorFile
+            $script:AuditTrail = $priorTrail
+        }
+    }
+
+    It 'reviews backup restore and default reset over the private pipe without exposing or replacing the rest of config' {
+        Mock Test-Authorized { $UserId -in 7710, 7711, 7712 }
+        Mock Test-Admin { $UserId -in 7711, 7712 }
+        Mock Test-UrgentBoardTimingBusy { $script:webRecoveryTimingBusy }
+        Mock Add-AuditEntry {}
+        Mock Protect-BridgePathAcl {}
+        Mock Protect-BridgeConfigurationAcl {}
+        Mock Restore-ConfigBackup { throw 'The Web path must not invoke full restore.' }
+        Mock Reset-SettingsToDefault { throw 'The Web path must not clear all settings.' }
+
+        $previousPath = $script:ConfigPath
+        $previousSettings = Get-JsonProp $config 'Settings'
+        $previousSaveFailed = $script:LastConfigSaveFailed
+        $previousConflict = Get-Variable LastConfigSaveConflict -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $script:ConfigPath = Join-Path $TestDrive 'web-recovery.config.fixture.json'
+        $script:webRecoveryTimingBusy = $false
+        $roomDefault = [bool]$script:DefaultSettings['OneHandMode']
+        $oldRoom = -not $roomDefault
+        $defaultInterval = [int]$script:DefaultSettings['UrgentBoardIntervalSeconds']
+        $oldInterval = $defaultInterval + 1
+        $active = @{
+            BotToken = 'CURRENT_SECRET_01'; AirServerAddress = 'station-current.invalid'; AllowedUserIds = @(7711, 7712)
+            Settings = @{ OneHandMode = $oldRoom; UrgentBoardIntervalSeconds = $defaultInterval; JoinSecret = 'CURRENT_JOIN_SECRET' }
+        }
+        Set-JsonProp -Object $config -Name 'Settings' -Value ([pscustomobject]$active.Settings)
+        $activeText = ConvertTo-Json -InputObject $active -Depth 8 -Compress
+        [IO.File]::WriteAllText($script:ConfigPath, $activeText)
+        $backupRoot = New-Item -ItemType Directory -Path "$script:ConfigPath.backups"
+        $backupName = 'config-20261121-123456-000-a1234567.json'
+        $backupPath = Join-Path $backupRoot.FullName $backupName
+        $archive = @{
+            BotToken = 'BACKUP_SECRET_01'; AirServerAddress = 'station-archive.invalid'; AllowedUserIds = @(99)
+            Settings = @{ OneHandMode = $roomDefault; UrgentBoardIntervalSeconds = $oldInterval; JoinSecret = 'BACKUP_JOIN_SECRET' }
+        }
+        $archiveText = ConvertTo-Json -InputObject $archive -Depth 8 -Compress
+        [IO.File]::WriteAllText($backupPath, $archiveText)
+        [IO.File]::WriteAllText((Join-Path $backupRoot.FullName 'not-bridge-owned.json'), $archiveText)
+
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 6 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        $listOp = 'admin.settings.recovery.backups'
+        $reviewOp = 'admin.settings.recovery.review'
+        $confirmOp = 'admin.settings.recovery.confirm'
+        $reviewRequest = @{ actor = 7711; source = 'backup'; backup = '' }
+        $confirmRequest = @{ actor = 7711; review = '' }
+        try {
+            (& $call $listOp @{ actor = 7710 }).error | Should -Be 'forbidden'
+            (& $call $reviewOp @{ actor = 7710; source = 'defaults' }).error | Should -Be 'forbidden'
+            $list = & $call $listOp @{ actor = 7711 }
+            $list.ok | Should -BeTrue
+            @($list.data.items).Count | Should -Be 1
+            $list.data.items[0].kind | Should -Be 'automatic'
+            $reviewRequest.backup = $list.data.items[0].id
+            $reviewRequest.backup | Should -Match '^[0-9a-f]{64}$'
+            ($list | ConvertTo-Json -Depth 6) | Should -Not -Match 'SECRET|station-|\.json|config-20261121'
+            (& $call $reviewOp @{ actor = 7711; source = 'backup'; backup = $backupPath }).error | Should -Be 'setting_invalid'
+            (& $call $reviewOp @{ actor = 7712; source = 'backup'; backup = $reviewRequest.backup }).error | Should -Be 'setting_stale'
+
+            $draft = & $call $reviewOp $reviewRequest
+            $draft.ok | Should -BeTrue
+            @($draft.data.changes).Count | Should -Be 2
+            ($draft | ConvertTo-Json -Depth 7) | Should -Not -Match 'SECRET|station-|\.json|AllowedUserIds'
+            $confirmRequest.review = $draft.data.review
+            (& $call $confirmOp @{ actor = 7712; review = $confirmRequest.review }).error | Should -Be 'setting_stale'
+            $fileTime = [IO.File]::GetLastWriteTimeUtc($backupPath)
+            [IO.File]::WriteAllText($backupPath, $archiveText.Replace('BACKUP_SECRET_01', 'BACKUP_SECRET_02'))
+            [IO.File]::SetLastWriteTimeUtc($backupPath, $fileTime)
+            (& $call $confirmOp $confirmRequest).error | Should -Be 'setting_stale'
+            [IO.File]::ReadAllText($script:ConfigPath) | Should -BeExactly $activeText
+            (Get-Setting 'OneHandMode') | Should -Be $oldRoom
+
+            $draft = & $call $reviewOp $reviewRequest
+            $draft.ok | Should -BeTrue
+            $confirmRequest.review = $draft.data.review
+            [IO.File]::WriteAllText($script:ConfigPath, $activeText.Replace('CURRENT_SECRET_01', 'CURRENT_SECRET_02'))
+            (& $call $confirmOp $confirmRequest).error | Should -Be 'setting_stale'
+            (Get-Setting 'OneHandMode') | Should -Be $oldRoom
+            ([IO.File]::ReadAllText($script:ConfigPath) | ConvertFrom-Json).BotToken | Should -BeExactly 'CURRENT_SECRET_02'
+
+            $draft = & $call $reviewOp $reviewRequest
+            $confirmRequest.review = $draft.data.review
+            $script:webRecoveryTimingBusy = $true
+            (& $call $confirmOp $confirmRequest).error | Should -Be 'urgent_timing_active'
+            (& $call $reviewOp $reviewRequest).error | Should -Be 'urgent_timing_active'
+            (Get-Setting 'UrgentBoardIntervalSeconds') | Should -Be $defaultInterval
+            $script:webRecoveryTimingBusy = $false
+            $draft = & $call $reviewOp $reviewRequest
+            $confirmRequest.review = $draft.data.review
+            (& $call $confirmOp $confirmRequest).data.applied | Should -Be 2
+            (& $call $confirmOp $confirmRequest).error | Should -Be 'setting_stale'
+            (Get-Setting 'OneHandMode') | Should -Be $roomDefault
+            (Get-Setting 'UrgentBoardIntervalSeconds') | Should -Be $oldInterval
+            $afterRestore = [IO.File]::ReadAllText($script:ConfigPath) | ConvertFrom-Json
+            $afterRestore.BotToken | Should -BeExactly 'CURRENT_SECRET_02'
+            $afterRestore.AirServerAddress | Should -BeExactly 'station-current.invalid'
+            $afterRestore.Settings.JoinSecret | Should -BeExactly 'CURRENT_JOIN_SECRET'
+            $afterRestore.AllowedUserIds | Should -Be @(7711, 7712)
+
+            $previous = (& $call $listOp @{ actor = 7711 }).data.items | Where-Object kind -eq 'previous'
+            $previous.id | Should -Not -BeNullOrEmpty
+            $previousReview = & $call $reviewOp @{ actor = 7711; source = 'backup'; backup = $previous.id }
+            @($previousReview.data.changes).Count | Should -Be 2
+            $reset = & $call $reviewOp @{ actor = 7711; source = 'defaults' }
+            $reset.data.changes.id | Should -Be @('UrgentBoardIntervalSeconds')
+            $confirmRequest.review = $reset.data.review
+            (& $call $confirmOp $confirmRequest).data.applied | Should -Be 1
+            (Get-Setting 'UrgentBoardIntervalSeconds') | Should -Be $defaultInterval
+            ([IO.File]::ReadAllText($script:ConfigPath) | ConvertFrom-Json).Settings.JoinSecret | Should -BeExactly 'CURRENT_JOIN_SECRET'
+
+            for ($copy = 1; $copy -le 21; $copy++) {
+                $historicalName = ('config-20261120-123456-{0:000}-a1234567.json' -f $copy)
+                [IO.File]::WriteAllText((Join-Path $backupRoot.FullName $historicalName), $archiveText)
+            }
+            $bounded = & $call $listOp @{ actor = 7711 }
+            @($bounded.data.items).Count | Should -Be 20
+            $bounded.data.truncated | Should -BeTrue
+            Should -Invoke Restore-ConfigBackup -Times 0 -Exactly
+            Should -Invoke Reset-SettingsToDefault -Times 0 -Exactly
+        }
+        finally {
+            $script:ConfigPath = $previousPath
+            Set-JsonProp -Object $config -Name 'Settings' -Value $previousSettings
+            $script:LastConfigSaveFailed = $previousSaveFailed
+            $script:LastConfigSaveConflict = $previousConflict
+            $script:webRecoveryTimingBusy = $false
+        }
+    }
+
+    It 'delivers a bounded diagnostic bundle over the private pipe to current administrators only' {
+        $beforeLog = $script:logPath
+        $script:logPath = Join-Path $TestDrive 'bundle-runtime.log'
+        '2026-11-21 14:00:00 [WARN] Live relay failed at rtmps://username:secret@example.invalid/ingest?query=private' |
+            Set-Content -LiteralPath $script:logPath
+        Mock Test-Authorized { $UserId -in 7070, 7071 }
+        Mock Test-Admin { $UserId -eq 7071 }
+        Mock Get-BridgeDiagnosticResources {
+            @{
+                Uptime = [timespan]::FromHours(1)
+                WorkingSetMB = 200.0; PrivateMemoryMB = 150.0; DiskFreeGB = 1.0
+                AirOperations = @{ Success = 12; Failed = 1; Blocked = 2 }
+            }
+        }
+        Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'DiskFreeWarningGB' }
+        Mock Get-WebRuntimeFileDiagnostics { @{ ok = $true; data = @{ checkedAt = 1000; parseLimitBytes = 1MB; items = @() } } }
+        try {
+            $denial = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.diagnostics.bundle","args":{"actor":7070}}'
+            ($denial | ConvertFrom-Json).error | Should -Be 'forbidden'
+            $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.diagnostics.bundle","args":{"actor":7071,"path":"C:/untrusted.json"}}'
+            $response = $raw | ConvertFrom-Json
+            $response.ok | Should -BeTrue
+            $response.data.lowDisk | Should -BeTrue
+            $response.data.airOperations.success | Should -Be 12
+            $response.data.timeline.items[0].category | Should -Be 'relay'
+            $raw | Should -Not -Match 'username|secret|query=private|example\.invalid|untrusted|"actor":'
+            Should -Invoke Get-BridgeDiagnosticResources -Times 1 -Exactly
+        }
+        finally { $script:logPath = $beforeLog }
+    }
+
+    It 'exchanges restart wire data with a synthetic supervisor on a private pipe' {
+        $savedChannel = $script:ManagedRestartChannel
+        $savedOwnsMutex = $script:ManagedRestartOwnsMutex
+        $fixtureName = "CinegyTelegramBridge.ManagedRestart.$([guid]::NewGuid().ToString('N'))"
+        $fixtureServer = [IO.Pipes.NamedPipeServerStream]::new($fixtureName, 'InOut', 1, 'Byte', 'Asynchronous')
+        $fixtureThread = [powershell]::Create()
+        $fixtureReady = [Threading.ManualResetEventSlim]::new($false)
+        $script:ManagedRestartChannel = @{ PipeName = $fixtureName; Pairing = 'A' * 64; Replacement = '' }
+        $script:ManagedRestartOwnsMutex = $true
+        try {
+            [void]$fixtureThread.AddScript({
+                    param($server, $ready)
+                    $ready.Set()
+                    $server.WaitForConnection()
+                    $encoding = [Text.UTF8Encoding]::new($false)
+                    $reader = [IO.StreamReader]::new($server, $encoding, $false, 4096, $true)
+                    $writer = [IO.StreamWriter]::new($server, $encoding, 4096, $true)
+                    $request = $reader.ReadLine()
+                    $writer.WriteLine('{"ok":true,"state":"available"}')
+                    $writer.Flush()
+                    $request
+                }).AddArgument($fixtureServer).AddArgument($fixtureReady)
+            $handle = $fixtureThread.BeginInvoke()
+            $fixtureReady.Wait([timespan]::FromSeconds(10)) | Should -BeTrue
+            $response = Invoke-ManagedRestartSupervisor -Action probe
+            $response.ok | Should -BeTrue
+            $response.state | Should -Be 'available'
+            $request = @($fixtureThread.EndInvoke($handle))[0] | ConvertFrom-Json
+            $request.action | Should -Be 'probe'
+            $request.pairing | Should -Be ('A' * 64)
+        }
+        finally {
+            $fixtureServer.Dispose()
+            $fixtureThread.Dispose()
+            $fixtureReady.Dispose()
+            $script:ManagedRestartChannel = $savedChannel
+            $script:ManagedRestartOwnsMutex = $savedOwnsMutex
+        }
+    }
+
+    It 'keeps reviewed Web restart inert until receipt and the stable bridge boundary' {
+        $savedChannel = $script:ManagedRestartChannel
+        $savedOwnsMutex = $script:ManagedRestartOwnsMutex
+        $savedPending = $script:ManagedRestartPending
+        $savedExpiry = $script:ManagedRestartReviewExpiresAt
+        $savedExit = $script:ManagedRestartExit
+        $savedRequested = $script:RestartRequested
+        $savedRelaunch = $script:RestartSelfRelaunch
+        $script:ManagedRestartChannel = @{ Pairing = 'A' * 64; PipeName = 'synthetic'; Replacement = '' }
+        $script:ManagedRestartOwnsMutex = $true
+        $script:RestartRequested = $false
+        $script:ManagedRestartPending = $null
+        Mock Test-Authorized { $UserId -in 6401, 6402 }
+        Mock Test-Admin { $UserId -eq 6402 }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -in 'SchedulePaused', 'MaintenanceMode' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+        Mock Get-RunningRelayProcess { $null }
+        Mock Add-AuditEntry {}
+        Mock Invoke-ManagedRestartSupervisor {
+            $stateForAction = switch ($Action) { reserve { 'reserved' }; confirm { 'reviewed' }; ack { 'received' }; grant { 'granted' } }
+            @{ ok = $true; id = 'a' * 32; state = $stateForAction; receipt = 'b' * 32 }
+        }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'admin.restart.review' @{ actor = 6401; session = 'C' * 64 }).error | Should -Be 'forbidden'
+            $review = & $call 'admin.restart.review' @{ actor = 6402; session = 'C' * 64 }
+            $review.data.state | Should -Be 'reserved'
+            Mock Send-TelegramMessage {}
+            Confirm-BridgeRestart -ChatId 6402 -UserId 6402 | Should -BeFalse
+            $script:RestartRequested | Should -BeFalse
+            $confirm = & $call 'admin.restart.confirm' @{ actor = 6402; session = 'C' * 64; id = $review.data.id }
+            $confirm.data.receipt | Should -Be ('b' * 32)
+            Complete-ManagedRestartAtPollBoundary
+            $script:RestartRequested | Should -BeFalse
+            (& $call 'admin.restart.accept' @{ actor = 6402; session = 'C' * 64; id = $review.data.id; receipt = $confirm.data.receipt }).data.state | Should -Be 'received'
+            $script:RestartRequested | Should -BeFalse
+            Should -Invoke Invoke-ManagedRestartSupervisor -Times 0 -Exactly -ParameterFilter { $Action -eq 'grant' }
+            Complete-ManagedRestartAtPollBoundary
+            $script:RestartRequested | Should -BeTrue
+            $script:RestartSelfRelaunch | Should -BeFalse
+            Should -Invoke Invoke-ManagedRestartSupervisor -Times 1 -Exactly -ParameterFilter { $Action -eq 'grant' }
+        }
+        finally {
+            $script:ManagedRestartChannel = $savedChannel
+            $script:ManagedRestartOwnsMutex = $savedOwnsMutex
+            $script:ManagedRestartPending = $savedPending
+            $script:ManagedRestartReviewExpiresAt = $savedExpiry
+            $script:ManagedRestartExit = $savedExit
+            $script:RestartRequested = $savedRequested
+            $script:RestartSelfRelaunch = $savedRelaunch
+        }
+    }
+
+    It 'blocks every reviewed Web restart mutation while relay is running or intended to run' {
+        $savedChannel = $script:ManagedRestartChannel
+        $savedOwnsMutex = $script:ManagedRestartOwnsMutex
+        $savedPending = $script:ManagedRestartPending
+        $savedExpiry = $script:ManagedRestartReviewExpiresAt
+        $savedRequested = $script:RestartRequested
+        $savedRelay = $script:RelayState
+        $script:ManagedRestartChannel = @{ Pairing = 'A' * 64; PipeName = 'synthetic'; Replacement = '' }
+        $script:ManagedRestartOwnsMutex = $true
+        $script:RestartRequested = $false
+        $script:ManagedRestartPending = $null
+        $script:RelayState = @{ ShouldRun = $true; Process = $null }
+
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $true }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -in 'SchedulePaused', 'MaintenanceMode' }
+        Mock Get-BridgeRestartPath { @{ Kind = 'supervisor-reported' } }
+        Mock Get-RunningRelayProcess { $null }
+        Mock Invoke-ManagedRestartSupervisor {
+            $state = switch ($Action) { ack { 'received' }; 'relay-active' { 'relay-active' }; cancel { 'failed' }; default { 'reserved' } }
+            @{ ok = $true; id = 'a' * 32; state = $state; receipt = '' }
+        }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $argsForRestart = @{ actor = 6402; session = 'C' * 64; id = 'a' * 32; receipt = 'b' * 32 }
+            (& $call 'admin.restart.review' $argsForRestart).error | Should -Be 'restart_relay_active'
+            $readiness = (& $call 'admin.restart.readiness' @{ actor = 6402 }).data
+            $readiness.relayBlocksRestart | Should -BeTrue
+            $readiness.managedRestartAvailable | Should -BeFalse
+            $script:RelayState.ShouldRun = $false
+            Mock Get-RunningRelayProcess { [pscustomobject]@{ HasExited = $false } } -ParameterFilter { $ReadOnly }
+            (& $call 'admin.restart.confirm' $argsForRestart).error | Should -Be 'restart_relay_active'
+            (& $call 'admin.restart.accept' $argsForRestart).error | Should -Be 'restart_relay_active'
+            Should -Invoke Invoke-ManagedRestartSupervisor -Times 0 -Exactly
+            Mock Get-RunningRelayProcess { $null } -ParameterFilter { $ReadOnly }
+            (& $call 'admin.restart.accept' $argsForRestart).data.state | Should -Be 'received'
+            $script:RelayState.ShouldRun = $true
+            Complete-ManagedRestartAtPollBoundary
+            $script:RestartRequested | Should -BeFalse
+            Should -Invoke Invoke-ManagedRestartSupervisor -Times 0 -Exactly -ParameterFilter { $Action -eq 'grant' }
+            Should -Invoke Invoke-ManagedRestartSupervisor -Times 1 -Exactly -ParameterFilter { $Action -eq 'relay-active' }
+            (& $call 'admin.restart.status' $argsForRestart).ok | Should -BeTrue
+            (& $call 'admin.restart.cancel' $argsForRestart).ok | Should -BeTrue
+
+            Mock Send-TelegramMessage {}
+            Mock Invoke-ManagedRestartSupervisor { @{ ok = $true; state = 'stalled' } } -ParameterFilter { $Action -eq 'probe' }
+            $script:RelayState.ShouldRun = $false
+            Confirm-BridgeRestart -ChatId 6402 -UserId 6402 | Should -BeFalse
+            $script:RestartRequested | Should -BeFalse
+            (& $call 'admin.restart.readiness' @{ actor = 6402 }).data.state | Should -Be 'stalled'
+        }
+        finally {
+            $script:ManagedRestartChannel = $savedChannel
+            $script:ManagedRestartOwnsMutex = $savedOwnsMutex
+            $script:ManagedRestartPending = $savedPending
+            $script:ManagedRestartReviewExpiresAt = $savedExpiry
+            $script:RestartRequested = $savedRequested
+            $script:RelayState = $savedRelay
+        }
+    }
+
+    It 'reads restart readiness through the private pipe without arming shutdown' {
+        $previousRestart = $script:RestartRequested
+        $previousRelaunch = $script:RestartSelfRelaunch
+        $script:RestartRequested = $false
+        $script:RestartSelfRelaunch = $false
+        Mock Test-Authorized { $UserId -in 6101, 6102 }
+        Mock Test-Admin { $UserId -eq 6102 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'AllowRemoteRestart' }
+        Mock Get-BridgeSupervisor { @{ Name = 'synthetic-supervisor.exe'; Supervised = $true } }
+        Mock Start-Process { throw 'The fixture must never start a process' }
+        Mock Stop-Process { throw 'The fixture must never stop a process' }
+        try {
+            $denied = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.restart.readiness","args":{"actor":6101}}'
+            ($denied | ConvertFrom-Json).error | Should -Be 'forbidden'
+            Should -Invoke Get-BridgeSupervisor -Times 0 -Exactly
+            $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.restart.readiness","args":{"actor":6102,"path":"C:/untrusted.json"}}'
+            ($raw | ConvertFrom-Json).data.state | Should -Be 'supervisor-reported'
+            $raw | Should -Not -Match 'synthetic-supervisor|untrusted|"actor":'
+            $script:RestartRequested | Should -BeFalse
+            $script:RestartSelfRelaunch | Should -BeFalse
+            Should -Invoke Start-Process -Times 0 -Exactly
+            Should -Invoke Stop-Process -Times 0 -Exactly
+        }
+        finally {
+            $script:RestartRequested = $previousRestart
+            $script:RestartSelfRelaunch = $previousRelaunch
+        }
+    }
+
     It 'shares saved template favorites with the Bot through the named pipe and isolates operators' {
         $previousFavorites = $script:UserFavorites
         $script:UserFavorites = @{ '4321' = @('Caption') }
@@ -316,6 +808,77 @@ Describe 'Web channel: the pipe' {
         finally {
             $script:StreamOutages = $previousOutages
             Publish-WebChannelState -Force
+        }
+    }
+
+    It 'reviews a relay destination on the private pipe without touching the source or running relay' {
+        $relayBefore = $script:RelayState
+        $pidFileBefore = $script:relayPidFile
+        $configPathBefore = $script:ConfigPath
+        $streamBefore = $config.LiveStream
+        $script:RelayState = @{ Process = $null; ShouldRun = $false; VerifyAt = $null; Revision = 0 }
+        $script:relayPidFile = Join-Path $TestDrive 'review-destination.pid'
+        $script:ConfigPath = Join-Path $TestDrive 'review-destination.json'
+        $config.LiveStream = [pscustomobject]@{
+            SourceUrl = 'https://input.example.invalid/live.m3u8'
+            RtmpDestination = 'rtmp://old.example.invalid/live/old-key'
+        }
+        @{ LiveStream = $config.LiveStream; Settings = @{ EnableDpapiSecrets = $false } } |
+            ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $script:ConfigPath
+        Mock Test-Authorized { $UserId -in 7321, 7322, 7323 }
+        Mock Test-Admin { $UserId -in 7321, 7323 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableLiveRelay' }
+        Mock Protect-BridgePathAcl {}
+        Mock Protect-BridgeConfigurationAcl {}
+        Mock Get-RunningRelayProcess { $null }
+        Mock Start-RelayProcess { throw 'The fixture must never launch relay' }
+        Mock Stop-RelayProcess { throw 'The fixture must never stop relay' }
+
+        $request = {
+            param($route, $arguments)
+            $line = @{ op = $route; args = $arguments } | ConvertTo-Json -Compress
+            return (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json)
+        }
+        try {
+            $status = (& $request 'relay.control' @{ actor = 7321; action = 'status' }).data
+            $status.canEditDestination | Should -BeTrue
+            $destination = 'rtmps://user:private-password@new.example.invalid:443/live/new-key?secret=private-query'
+            $proposal = @{ actor = 7322; revision = $status.revision; destination = $destination }
+            (& $request 'relay.destination.review' $proposal).error | Should -Be 'forbidden'
+            $proposal.actor = 7321
+            $review = & $request 'relay.destination.review' $proposal
+            $review.ok | Should -BeTrue
+            $review | ConvertTo-Json -Depth 6 | Should -Not -Match 'new-key|old-key|private-password|private-query|example\.invalid'
+            $proposal.review = $review.data.review
+            $proposal.actor = 7323
+            (& $request 'relay.destination.confirm' $proposal).error | Should -Be 'relay_stale'
+            $proposal.actor = 7321
+            $proposal.destination = 'rtmp://bad.example.invalid/changed'
+            (& $request 'relay.destination.confirm' $proposal).error | Should -Be 'relay_stale'
+            $proposal.destination = $destination
+            $proposal.review = (& $request 'relay.destination.review' $proposal).data.review
+            $script:RelayState.ShouldRun = $true
+            (& $request 'relay.destination.confirm' $proposal).error | Should -Be 'relay_stale'
+            $script:RelayState.ShouldRun = $false
+            $script:RelayState.Revision++
+            $proposal.revision = (& $request 'relay.control' @{ actor = 7321; action = 'status' }).data.revision
+            $proposal.review = (& $request 'relay.destination.review' $proposal).data.review
+            $result = & $request 'relay.destination.confirm' $proposal
+            $result.data.outcome | Should -Be 'destination-saved'
+            $result | ConvertTo-Json -Depth 6 | Should -Not -Match 'new-key|old-key|private-password|private-query|example\.invalid'
+            $persisted = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
+            $persisted.LiveStream.RtmpDestination | Should -Be $destination
+            $persisted.LiveStream.SourceUrl | Should -Be 'https://input.example.invalid/live.m3u8'
+            $config.LiveStream.RtmpDestination | Should -Be $destination
+            (& $request 'relay.destination.confirm' $proposal).error | Should -Be 'relay_stale'
+            Should -Invoke Start-RelayProcess -Times 0 -Exactly
+            Should -Invoke Stop-RelayProcess -Times 0 -Exactly
+        }
+        finally {
+            $config.LiveStream = $streamBefore
+            $script:RelayState = $relayBefore
+            $script:relayPidFile = $pidFileBefore
+            $script:ConfigPath = $configPathBefore
         }
     }
 
@@ -1014,6 +1577,51 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'reviews native editorial timing and imports partial snapshots through the private pipe' {
+        Mock Test-Authorized { $UserId -in 6301, 6302 }
+        Mock Test-Admin { $UserId -eq 6302 }
+        Mock Test-StatusViewer { $UserId -eq 6302 }
+        Mock Save-Config { $script:LastConfigSaveFailed = $false; $script:LastConfigSaveConflict = $false }
+        Mock Add-AuditEntry {}
+        $previousSettings = Get-JsonProp $config 'Settings'
+        $previousSaveFailed = $script:LastConfigSaveFailed
+        $previousConflict = Get-Variable LastConfigSaveConflict -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        Set-JsonProp $config 'Settings' @{ UrgentBoardIntervalSeconds = 8; TemplateReminderFollowUpMinutes = 5; NewsDraftTimeoutMinutes = 120 }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $overview = & $call 'admin.overview' @{ actor = 6302 }
+            ($overview.data.settings | Where-Object id -eq 'TemplateReminderFollowUpMinutes').editable | Should -BeTrue
+            ($overview.data.settings | Where-Object id -eq 'EnableUrgentBoard').editable | Should -BeFalse
+            $review = & $call 'admin.settings.review' @{ actor = 6302; id = 'UrgentBoardIntervalSeconds'; value = 12 }
+            $review.data.setting.unit | Should -BeExactly 'ثانية'
+            (& $call 'admin.settings.confirm' @{ actor = 6301; id = 'UrgentBoardIntervalSeconds'; review = $review.data.review }).error | Should -Be 'forbidden'
+            (& $call 'admin.settings.confirm' @{ actor = 6302; id = 'UrgentBoardIntervalSeconds'; review = $review.data.review }).data.setting.value | Should -Be 12
+            (Get-Setting 'UrgentBoardIntervalSeconds') | Should -Be 12
+            Should -Invoke Save-Config -Times 1 -Exactly -ParameterFilter {
+                $ReviewedExpected.Count -eq 1 -and $ReviewedExpected.UrgentBoardIntervalSeconds -eq 8 -and
+                $ReviewedPatch.Count -eq 1 -and $ReviewedPatch.UrgentBoardIntervalSeconds -eq 12
+            }
+            $partial = & $call 'admin.settings.import.review' @{ actor = 6302; settings = @{ TemplateReminderFollowUpMinutes = 0 } }
+            @($partial.data.changes).Count | Should -Be 1
+            (& $call 'admin.settings.import.confirm' @{ actor = 6302; review = $partial.data.review }).data.applied | Should -Be 1
+            (Get-Setting 'TemplateReminderFollowUpMinutes') | Should -Be 0
+            (Get-Setting 'NewsDraftTimeoutMinutes') | Should -Be 120
+            $export = & $call 'admin.settings.export' @{ actor = 6302 }
+            $export.data.Settings.UrgentBoardIntervalSeconds | Should -Be 12
+            $export.data.Settings.TemplateReminderFollowUpMinutes | Should -Be 0
+            ($export.data.Settings.PSObject.Properties.Name) | Should -Not -Contain 'BotToken'
+        }
+        finally {
+            Set-JsonProp $config 'Settings' $previousSettings
+            $script:LastConfigSaveFailed = $previousSaveFailed
+            $script:LastConfigSaveConflict = $previousConflict
+        }
+    }
+
     It 'protects registry diagnostics and lists opaque backup choices through the named pipe' {
         Mock Test-Authorized { $UserId -in 4321, 4322 }
         Mock Test-Admin { $UserId -eq 4321 }
@@ -1251,6 +1859,716 @@ Describe 'Web channel: the pipe' {
             $script:LastConfigSaveConflict = $previousConflict
             $script:WebScheduleHoldReviews.Clear()
         }
+    }
+
+    It 'enforces current admin access and the opt-in before reading detailed engine health through the named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 9876 }
+        Mock Test-Admin { $UserId -ne 9876 }
+        Mock Get-Setting { $false } -ParameterFilter { $Name -eq 'EnableEngineHealth' }
+        Mock Get-AirTelemetryStatus { throw 'Feature gate must run before the engine probe.' }
+        Mock Get-AirVideoStatus { throw 'Feature gate must run before the video probe.' }
+        $line = '{"op":"admin.engine-health","args":{"actor":VAR}}'
+        $denied = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($line.Replace('VAR', '9876'))
+        ($denied | ConvertFrom-Json).error | Should -Be 'forbidden'
+        $revoked = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($line.Replace('VAR', '1234'))
+        ($revoked | ConvertFrom-Json).error | Should -Be 'forbidden'
+        $disabled = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($line.Replace('VAR', '4321'))
+        $disabledSnapshot = $disabled | ConvertFrom-Json
+        $disabledSnapshot.ok | Should -BeTrue
+        $disabledSnapshot.data.enabled | Should -BeFalse
+        Should -Invoke Get-AirTelemetryStatus -Exactly -Times 0
+        Should -Invoke Get-AirVideoStatus -Exactly -Times 0
+    }
+
+    It 'publishes only safe detailed engine readings through the named pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableEngineHealth' }
+        Mock Get-AirTelemetryStatus {
+            @{
+                Success = $true; Healthy = $true; SampleCount = $script:HealthFixtureSamples
+                OutputCount = 1500; DroppedCount = $script:HealthFixtureDropped; NoInputSignal = 2
+                AverageReadTime = 13.25; MaxReadErrorRate = [double]::NaN
+                Xml = '<raw-private-engine-xml>'; Uri = 'http://fixture-engine-host'; Issues = @('fixture-private-issue')
+            }
+        }
+        Mock Get-AirVideoStatus { @{ Success = $true; License = $script:HealthFixtureLicense; Error = 'fixture-private-video-error' } }
+        Mock Send-AirCommand { throw 'Reading engine health must not issue air commands.' }
+        Mock Get-AirMaterialSchedule { throw 'Programme schedule is a separate status screen.' }
+        $oldProbe = $script:WebLayerComparisonNextProbe
+        $oldBaseline = $script:WebEngineHealthBaseline
+        $oldBotCount = $script:LastEngineDropped
+        $script:WebLayerComparisonNextProbe = 0L
+        $script:WebEngineHealthBaseline = $null
+        $script:LastEngineDropped = 70
+        $script:HealthFixtureDropped = 4
+        $script:HealthFixtureSamples = 60
+        $script:HealthFixtureLicense = 'fixture-private-license-id'
+        $line = '{"op":"admin.engine-health","args":{"actor":4321}}'
+        try {
+            $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+            $reply = $raw | ConvertFrom-Json
+            $reply.ok | Should -BeTrue
+            $reply.data.enabled | Should -BeTrue
+            $reply.data.health | Should -Be 'no_input'
+            $reply.data.license | Should -Be 'warning'
+            $reply.data.checkedAtMs | Should -BeGreaterThan 0
+            $reply.data.elapsedMs | Should -BeGreaterOrEqual 0
+            $reply.data.outputFrames | Should -Be 1500
+            $reply.data.droppedFrames | Should -Be 4
+            $reply.data.droppedSampleIncrease | Should -BeNullOrEmpty
+            $reply.data.meanReadMs | Should -Be 13.25
+            $reply.data.maxReadErrorPercent | Should -BeNullOrEmpty
+            $raw | Should -Not -Match 'fixture-private|fixture-engine-host|raw-private-engine-xml'
+
+            $script:WebLayerComparisonNextProbe | Should -BeGreaterThan 0
+            # Ensure the guard is still closed when a slow test host opens a new pipe.
+            $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + (60L * [Diagnostics.Stopwatch]::Frequency)
+            $busy = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+            ($busy | ConvertFrom-Json).error | Should -Be 'layer_comparison_busy'
+            $script:WebLayerComparisonNextProbe = 0L
+            $script:HealthFixtureDropped = 7
+            $script:HealthFixtureLicense = 'Licensed'
+            $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+            $reply = $raw | ConvertFrom-Json
+            $reply.data.license | Should -Be 'licensed'
+            $reply.data.droppedSampleIncrease | Should -Be 3
+
+            $script:WebLayerComparisonNextProbe = 0L
+            $script:HealthFixtureDropped = 1
+            $reply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line) | ConvertFrom-Json
+            $reply.data.droppedSampleIncrease | Should -BeNullOrEmpty
+
+            $script:WebLayerComparisonNextProbe = 0L
+            $script:HealthFixtureSamples = 0
+            $reply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line) | ConvertFrom-Json
+            $reply.data.health | Should -Be 'no_samples'
+            $reply.data.outputFrames | Should -BeNullOrEmpty
+            $script:LastEngineDropped | Should -Be 70
+            Should -Invoke Get-AirTelemetryStatus -Exactly -Times 4 -ParameterFilter { $TimeoutSec -eq 1 }
+            Should -Invoke Get-AirVideoStatus -Exactly -Times 4 -ParameterFilter { $TimeoutSec -eq 1 }
+            Should -Invoke Get-AirMaterialSchedule -Exactly -Times 0
+            Should -Invoke Send-AirCommand -Exactly -Times 0
+        }
+        finally {
+            $script:WebLayerComparisonNextProbe = $oldProbe
+            $script:WebEngineHealthBaseline = $oldBaseline
+            $script:LastEngineDropped = $oldBotCount
+            Remove-Variable -Name HealthFixtureSamples, HealthFixtureLicense, HealthFixtureDropped -Scope Script
+        }
+    }
+
+    It 'reads the exact current and cued programme on demand through the named pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-AirVideoStatus {
+            @{ Success = $true; ActiveId = 'private-live-id'; CuedId = 'private-cued-id' }
+        }
+        Mock Get-AirMaterialSchedule { throw 'A fresh cache already contains both exact programme identities.' }
+        Mock Send-AirCommand { throw 'Reading programmes must not issue an air command.' }
+        $previousProbe = $script:WebLayerComparisonNextProbe
+        $previousCache = $script:MaterialScheduleCache
+        $previousCacheAt = $script:MaterialScheduleCacheAt
+        $programmeFixtureTime = [datetimeoffset]::Now
+        $script:WebLayerComparisonNextProbe = 0L
+        $script:MaterialScheduleCacheAt = $programmeFixtureTime
+        $script:MaterialScheduleCache = @(
+            @{ Id = '{private-cued-id}'; Name = 'Cued fixture'; ScheduledAt = $programmeFixtureTime.AddMinutes(5); Duration = [timespan]::FromMinutes(15) }
+            @{ Id = 'unrelated'; Name = 'Unrelated later programme'; ScheduledAt = $programmeFixtureTime.AddMinutes(1); Duration = [timespan]::FromMinutes(5) }
+            @{ Id = '{private-live-id}'; Name = 'Live fixture'; ScheduledAt = $programmeFixtureTime.AddMinutes(-2); Duration = [timespan]::FromMinutes(10) }
+        )
+        $call = {
+            param([long]$ProgrammeActor)
+            $line = @{ op = 'air.programme'; args = @{ actor = $ProgrammeActor } } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+        }
+        try {
+            ((& $call 9876) | ConvertFrom-Json).error | Should -Be 'forbidden'
+            Should -Invoke Get-AirVideoStatus -Times 0 -Exactly
+            $wire = & $call 4321
+            $snapshot = $wire | ConvertFrom-Json
+            $snapshot.ok | Should -BeTrue
+            $snapshot.data.statusAvailable | Should -BeTrue
+            $snapshot.data.scheduleAvailable | Should -BeTrue
+            $snapshot.data.current.label | Should -Be 'Live fixture'
+            $snapshot.data.current.remainingSeconds | Should -BeGreaterThan 400
+            $snapshot.data.cued.label | Should -Be 'Cued fixture'
+            $snapshot.data.cued.remainingSeconds | Should -BeNullOrEmpty
+            $wire | Should -Not -Match 'private-live-id|private-cued-id|Unrelated later programme'
+            $script:WebLayerComparisonNextProbe | Should -BeGreaterThan 0
+            $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + 15 * [Diagnostics.Stopwatch]::Frequency
+            ((& $call 4321) | ConvertFrom-Json).error | Should -Be 'layer_comparison_busy'
+            Should -Invoke Get-AirVideoStatus -Times 1 -Exactly -ParameterFilter { $TimeoutSec -eq 1 }
+            Should -Invoke Get-AirMaterialSchedule -Times 0 -Exactly
+            Should -Invoke Send-AirCommand -Times 0 -Exactly
+        }
+        finally {
+            $script:WebLayerComparisonNextProbe = $previousProbe
+            $script:MaterialScheduleCache = $previousCache
+            $script:MaterialScheduleCacheAt = $previousCacheAt
+        }
+    }
+
+    It 'distinguishes missing cued programme data through the named pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-AirVideoStatus {
+            if ($script:FixtureProgrammeOffline) { return @{ Success = $false; Error = 'fixture-engine-address' } }
+            return @{ Success = $true; ActiveId = 'private-live-id'; CuedId = 'private-cued-id' }
+        }
+        Mock Get-AirMaterialSchedule {
+            @{ Success = $true; Items = @(
+                @{ Id = 'private-live-id'; Name = 'X:\fixture-private\programme.mp4'; ScheduledAt = [datetimeoffset]::MinValue; Duration = [timespan]::Zero }
+                @{ Id = 'some-other-item'; Name = 'Unrelated programme'; ScheduledAt = [datetimeoffset]::Now.AddMinutes(2); Duration = [timespan]::FromMinutes(10) }
+            ) }
+        }
+        $previousProbe = $script:WebLayerComparisonNextProbe
+        $previousCacheAt = $script:MaterialScheduleCacheAt
+        $script:MaterialScheduleCacheAt = [datetime]::MinValue
+        $script:WebLayerComparisonNextProbe = 0L
+        $script:FixtureProgrammeOffline = $false
+        $line = '{"op":"air.programme","args":{"actor":4321}}'
+        try {
+            $wire = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+            $snapshot = $wire | ConvertFrom-Json
+            $snapshot.ok | Should -BeTrue
+            $snapshot.data.current.listed | Should -BeTrue
+            $snapshot.data.current.label | Should -BeNullOrEmpty
+            $snapshot.data.current.startsAtMs | Should -BeNullOrEmpty
+            $snapshot.data.cued.listed | Should -BeFalse
+            $snapshot.data.scheduleAvailable | Should -BeTrue
+            $wire | Should -Not -Match 'fixture-private|Unrelated programme'
+            $script:WebLayerComparisonNextProbe = 0L
+            $script:FixtureProgrammeOffline = $true
+            $wire = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+            $outage = $wire | ConvertFrom-Json
+            $outage.ok | Should -BeTrue
+            $outage.data.statusAvailable | Should -BeFalse
+            $outage.data.current | Should -BeNullOrEmpty
+            $outage.data.cued | Should -BeNullOrEmpty
+            $wire | Should -Not -Match 'fixture-engine-address'
+            Should -Invoke Get-AirMaterialSchedule -Times 1 -Exactly -ParameterFilter { $TimeoutSec -eq 1 }
+        }
+        finally {
+            $script:WebLayerComparisonNextProbe = $previousProbe
+            $script:MaterialScheduleCacheAt = $previousCacheAt
+            Remove-Variable -Name FixtureProgrammeOffline -Scope Script
+        }
+    }
+
+    It 'compares an authorized layer through the named pipe without reconciling or exposing raw Cinegy data' {
+        Mock Test-Authorized { $UserId -in 4321, 9876 }
+        Mock Test-LayersScreenAccess { $UserId -eq 4321 }
+        Mock Get-KnownLayers { @(4, 5) }
+        Mock Get-WebLayerNameSafe { "Fixture layer $Layer" }
+        Mock Get-WebLayerStatus {
+            @{
+                Success = $true; IsOnAir = $false; ActiveId = 'fixture-private-active'
+                ActiveXml = '<RawFixture />'; ClientIdentity = 'fixture-private-station'
+            }
+        }
+        Mock Update-OnAirStateFromCinegy { throw 'Comparison must not invoke reconciliation.' }
+        Mock Restore-UrgentBoardLine { throw 'Comparison must not attempt to restore graphics.' }
+        Mock Save-OnAirState { throw 'Comparison must not save on-air state.' }
+        $oldOnAir = $script:OnAir
+        $oldProbe = $script:WebLayerComparisonNextProbe
+        $script:OnAir = @{ 5 = [pscustomobject]@{ Key = 'fixture-record'; ActiveId = 'fixture-private-prior' } }
+        $script:WebLayerComparisonNextProbe = 0L
+        $call = {
+            param([hashtable]$Values)
+            $line = @{ op = 'air.layer-comparison'; args = $Values } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+        }
+        try {
+            ((& $call @{ actor = 9876; layer = 5 }) | ConvertFrom-Json).error | Should -Be 'forbidden'
+            $targets = (& $call @{ actor = 4321 }) | ConvertFrom-Json
+            $targets.ok | Should -BeTrue
+            @($targets.data.layers).Count | Should -Be 2
+            $targets.data.layers.layer | Should -Contain 4
+            $targets.data.layers.layer | Should -Contain 5
+            ((& $call @{ actor = 4321; layer = 82 }) | ConvertFrom-Json).error | Should -Be 'layer_comparison_missing'
+            Should -Invoke Get-WebLayerStatus -Exactly -Times 0
+            $wire = & $call @{ actor = 4321; layer = 5 }
+            $result = $wire | ConvertFrom-Json
+            $result.ok | Should -BeTrue
+            $result.data.disposition | Should -Be 'remove'
+            $result.data.tracked | Should -BeTrue
+            $result.data.engineActive | Should -BeFalse
+            $wire | Should -Not -Match 'fixture-private-|RawFixture'
+            $script:OnAir[5].ActiveId | Should -Be 'fixture-private-prior'
+            Should -Invoke Get-WebLayerStatus -Exactly -Times 1 -ParameterFilter { $Layer -eq 5 -and $TimeoutSec -eq 2 }
+            Should -Invoke Update-OnAirStateFromCinegy -Exactly -Times 0
+            Should -Invoke Restore-UrgentBoardLine -Exactly -Times 0
+            Should -Invoke Save-OnAirState -Exactly -Times 0
+        }
+        finally {
+            $script:OnAir = $oldOnAir
+            $script:WebLayerComparisonNextProbe = $oldProbe
+        }
+    }
+
+    It 'keeps emergency scope review separate from air commands through the named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-KnownLayers { @(4, 5) }
+        Mock Get-LayerName { "Fixture layer $Layer" }
+        Mock Get-Setting { 'all' } -ParameterFilter { $Name -eq 'HideAllLayers' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableHideAll' }
+        Mock Save-HideAllLayerScope { @{ ok = $true } }
+        Mock Invoke-HideLayer { throw 'Scope editing must not issue HIDE.' }
+        $oldReviews = $script:WebHideAllLayerScopeReviews
+        $script:WebHideAllLayerScopeReviews = @{}
+        $call = {
+            param([string]$Operation, [hashtable]$Values)
+            $line = @{ op = $Operation; args = $Values } | ConvertTo-Json -Depth 4 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $scope = & $call 'air.hideAllScope' @{ actor = 4322 }
+            $scope.data.mode | Should -Be 'all'
+            $scope.data.canManage | Should -BeFalse
+            (& $call 'air.hideAllScope.review' @{ actor = 4322; revision = $scope.data.revision; mode = 'none' }).error | Should -Be 'forbidden'
+            $review = & $call 'air.hideAllScope.review' @{ actor = 4321; revision = $scope.data.revision; mode = 'none' }
+            $review.ok | Should -BeTrue
+            Should -Invoke Save-HideAllLayerScope -Exactly -Times 0
+            $confirm = @{ actor = 4321; review = $review.data.review }
+            (& $call 'air.hideAllScope.confirm' $confirm).ok | Should -BeTrue
+            (& $call 'air.hideAllScope.confirm' $confirm).error | Should -Be 'hide_all_scope_stale'
+            Should -Invoke Save-HideAllLayerScope -Exactly -Times 1 -ParameterFilter { $Mode -eq 'none' -and $UserId -eq 4321 }
+            Should -Invoke Invoke-HideLayer -Exactly -Times 0
+        }
+        finally { $script:WebHideAllLayerScopeReviews = $oldReviews }
+    }
+
+    It 'shows and acknowledges only the actors current follow-up reminders through the named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Get-TemplateReminderTargetDecision { @{ ShouldNotify = $true } }
+        Mock Save-TemplateReminderQueue { $true }
+        $oldQueue = $script:TemplateReminderQueue
+        $oldSeed = [datetimeoffset]::Now.AddMinutes(15)
+        $script:TemplateReminderQueue = [System.Collections.Generic.List[hashtable]]::new([hashtable[]]@(
+            @{ ReminderId = 'fixture-own'; UserId = 4321; TemplateKey = 'own-fixture'; Stage = 'followup'; Layer = 4; At = $oldSeed; Minutes = 15 }
+            @{ ReminderId = 'fixture-other'; UserId = 4322; TemplateKey = 'other-fixture'; Stage = 'followup'; Layer = 5; At = $oldSeed; Minutes = 15 }
+            @{ ReminderId = 'fixture-initial'; UserId = 4321; TemplateKey = 'initial-fixture'; Stage = 'initial'; Layer = 4; At = $oldSeed; Minutes = 15 }
+        ))
+        $call = {
+            param([string]$Operation, [hashtable]$Values)
+            $line = @{ op = $Operation; args = $Values } | ConvertTo-Json -Depth 4 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $list = & $call 'air.personalReminders' @{ actor = 4321 }
+            $list.data.items.id | Should -Be 'fixture-own'
+            $list.data.snoozeMinutes | Should -Be 5
+            $command = @{ actor = 4321; id = 'fixture-other'; action = 'acknowledge' }
+            (& $call 'air.personalReminder.act' $command).error | Should -Be 'reminder_stale'
+            $command.id = 'fixture-own'
+            $ack = & $call 'air.personalReminder.act' $command
+            $ack.ok | Should -BeTrue
+            @($ack.data.items).Count | Should -Be 0
+            (& $call 'air.personalReminder.act' $command).error | Should -Be 'reminder_stale'
+            $script:TemplateReminderQueue.ReminderId | Should -Contain 'fixture-other'
+            $script:TemplateReminderQueue.ReminderId | Should -Contain 'fixture-initial'
+            Should -Invoke Save-TemplateReminderQueue -Exactly -Times 1
+        }
+        finally { $script:TemplateReminderQueue = $oldQueue }
+    }
+
+    It 'requires an actor-owned review for local external layer adoption through the named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 4876 }
+        Mock Test-LayersScreenAccess { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-AirRunActive { $false }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Get-KnownLayers { @(4) }
+        Mock Get-Setting { 'Single' } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'PendingStateTimeoutMinutes' }
+        Mock Get-TemplateStore { @{ Map = @{ ExternalFixture = @{ Layer = 4; Key = 'ExternalFixture' } } } }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = "gfx_$Layer" } }
+        Mock Get-OnAirDiscoveryDiskRevision { 'fixture-state-version' }
+        Mock Get-WebLayerStatus {
+            @{ Success = $true; IsOnAir = $true; ActiveName = 'redacted-fixture'; ActiveTemplateName = 'ExternalFixture'
+                ActiveId = '{4bc680c0-044d-42a3-b6e7-201a81df24c2}' }
+        }
+        Mock Get-CinegyStatusStartTicks { 3001L }
+        Mock Save-ReviewedOnAirDiscovery { 'saved' }
+        Mock Update-OnAirStateFromCinegy { throw 'Adoption must not invoke unrestricted reconciliation.' }
+        Mock Publish-WebChannelState {}
+        $old = @{
+            OnAir = $script:OnAir; Scenes = $script:OnAirScenes; Boards = $script:BoardsLive
+            Urgent = $script:UrgentManualLive; Hides = $script:AutoHideQueue; Reminders = $script:TemplateReminderQueue
+            Probe = $script:WebLayerComparisonNextProbe
+        }
+        $script:OnAir = @{}
+        $script:OnAirScenes = [Collections.Generic.List[object]]::new()
+        $script:BoardsLive = @{}
+        $script:UrgentManualLive = @{}
+        $script:AutoHideQueue = @()
+        $script:TemplateReminderQueue = @()
+        $script:WebLayerAdoptionReviews.Clear()
+        $call = {
+            param([string]$Action, [long]$Actor, [string]$Review = '')
+            $script:WebLayerComparisonNextProbe = 0L
+            $line = @{ op = "air.layer-adoption.$Action"; args = @{ actor = $Actor; layer = 4; review = $Review } } |
+                ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $review = & $call review 4321
+            $review.ok | Should -BeTrue
+            $review.data.templateKey | Should -Be 'ExternalFixture'
+            Should -Invoke Save-ReviewedOnAirDiscovery -Exactly -Times 0
+            (& $call confirm 4876 $review.data.review).error | Should -Be 'layer_adoption_stale'
+            (& $call confirm 4321 $review.data.review).data.adopted | Should -BeTrue
+            (& $call confirm 4321 $review.data.review).error | Should -Be 'layer_adoption_stale'
+            Should -Invoke Save-ReviewedOnAirDiscovery -Exactly -Times 1
+            Should -Invoke Update-OnAirStateFromCinegy -Exactly -Times 0
+        }
+        finally {
+            $script:OnAir = $old.OnAir
+            $script:OnAirScenes = $old.Scenes
+            $script:BoardsLive = $old.Boards
+            $script:UrgentManualLive = $old.Urgent
+            $script:AutoHideQueue = $old.Hides
+            $script:TemplateReminderQueue = $old.Reminders
+            $script:WebLayerComparisonNextProbe = $old.Probe
+            $script:WebLayerAdoptionReviews.Clear()
+        }
+    }
+
+    It 'reports test-layer readiness through the named pipe without invoking a self-test or sending commands' {
+        Mock Test-Authorized { $UserId -in 4321, 9876 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-MaintenanceControl { $true } -ParameterFilter { $Quiet }
+        Mock Get-Setting { 'Single' } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Get-SettingInt { 87 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-TemplateStore {
+            @{ Map = @{ PrivateScene = @{ Layer = 4; Path = 'C:\private-scene.cintitle' } }; Order = @('PrivateScene') }
+        }
+        Mock Get-TemplateTestLayerConflict { @() }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = "gfx_$Layer" } }
+        Mock Get-WebLayerStatus {
+            @{ Success = $true; IsOnAir = $false; ActiveId = 'PrivateEventId'; ActiveXml = '<PrivateFixture />' }
+        }
+        Mock Invoke-BridgeSelfTest { throw 'Readiness must not invoke the runner.' }
+        Mock Show-TitlerTemplate { throw 'Readiness must not send SHOW.' }
+        Mock Exit-TitlerScene { throw 'Readiness must not send EXIT.' }
+        Mock Hide-TitlerTemplate { throw 'Readiness must not send HIDE.' }
+        $oldOnAir = $script:OnAir
+        $oldProbe = $script:WebLayerComparisonNextProbe
+        $script:OnAir = @{}
+        $script:WebLayerComparisonNextProbe = 0L
+        try {
+            $denied = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.self-test.readiness","args":{"actor":9876}}' |
+                ConvertFrom-Json
+            $denied.error | Should -Be 'forbidden'
+            Should -Invoke Get-WebLayerStatus -Exactly -Times 0
+            $response = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.self-test.readiness","args":{"actor":4321}}'
+            $result = $response | ConvertFrom-Json
+            $result.ok | Should -BeTrue
+            $result.data.layer | Should -Be 87
+            $result.data.engine | Should -Be 'idle'
+            $result.data.findings | Should -Contain 'dedicated_scene_unavailable'
+            $result.data.findings | Should -Contain 'identity_cleanup_unavailable'
+            $response | Should -Not -Match 'PrivateScene|private-scene|PrivateEventId|PrivateFixture'
+            Should -Invoke Get-WebLayerStatus -Exactly -Times 1 -ParameterFilter { $Layer -eq 87 -and $TimeoutSec -eq 1 -and $RequireConsistentIdentity }
+            Should -Invoke Test-MaintenanceControl -Exactly -Times 1 -ParameterFilter { $Quiet }
+            Should -Invoke Invoke-BridgeSelfTest -Exactly -Times 0
+            Should -Invoke Show-TitlerTemplate -Exactly -Times 0
+            Should -Invoke Exit-TitlerScene -Exactly -Times 0
+            Should -Invoke Hide-TitlerTemplate -Exactly -Times 0
+        }
+        finally {
+            $script:OnAir = $oldOnAir
+            $script:WebLayerComparisonNextProbe = $oldProbe
+        }
+    }
+
+    It 'delivers the administrator usage summary through the named pipe without returning audit values' {
+        Mock Test-Authorized { $UserId -in 4321, 9876 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-ReportRecords {
+            @{ Records = @(@{ UserId = 'private-audit-user'; Values = 'private-audit-values' }); Truncated = $true }
+        }
+        Mock Invoke-ShowTemplateResult { throw 'Usage summary must not execute an air command.' }
+        $oldCounts = $script:UsageCounts
+        $oldLastUse = $script:TemplateLastUsed
+        $oldOutcomes = $script:AirOperationCounters
+        $script:UsageCounts = @{ 'C:\private-fixture-template.cintitle' = 18; Accessible = 12 }
+        $script:TemplateLastUsed = @{ Accessible = [datetime]'2026-01-13T09:00:00Z' }
+        $script:AirOperationCounters = @{ Success = 3; Failed = 2; Blocked = 1 }
+        try {
+            $denied = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.usage-summary","args":{"actor":9876}}' |
+                ConvertFrom-Json
+            $denied.error | Should -Be 'forbidden'
+            Should -Invoke Get-ReportRecords -Exactly -Times 0
+            $response = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"admin.usage-summary","args":{"actor":4321}}'
+            $result = $response | ConvertFrom-Json
+            $result.ok | Should -BeTrue
+            $result.data.successful | Should -Be 3
+            $result.data.failed | Should -Be 2
+            $result.data.blocked | Should -Be 1
+            $result.data.sevenDayOperations | Should -Be 1
+            $result.data.sevenDayTruncated | Should -BeTrue
+            $result.data.templates[0].name | Should -BeNullOrEmpty
+            $result.data.templates[1].name | Should -Be 'Accessible'
+            $result.data.templates[1].lastUsedAt | Should -BeGreaterThan 0
+            $response | Should -Not -Match 'private-audit-|private-fixture-template'
+            Should -Invoke Get-ReportRecords -Exactly -Times 1 -ParameterFilter { $EventName -ceq 'air_control' }
+            Should -Invoke Invoke-ShowTemplateResult -Exactly -Times 0
+        }
+        finally {
+            $script:UsageCounts = $oldCounts
+            $script:TemplateLastUsed = $oldLastUse
+            $script:AirOperationCounters = $oldOutcomes
+        }
+    }
+
+    It 'replaces a stale external layer with a fresh unowned scene through the named pipe and atomic ledger' {
+        Mock Test-Authorized { $UserId -in 4321, 4876 }
+        Mock Test-LayersScreenAccess { $true }
+        Mock Test-TemplateAccess { @{ Allowed = ($Key -ne $script:FixtureReplacementDeniedKey) } }
+        Mock Test-AirRunActive { $false }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Get-KnownLayers { @(4, 5) }
+        Mock Get-Setting { 'Single' } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'PendingStateTimeoutMinutes' }
+        Mock Get-TemplateStore {
+            @{ Map = @{
+                OldFixture = @{ Layer = 4; Key = 'OldFixture'; Path = 'old-fixture.cintitle'; PresetRevision = 'old-v1' }
+                NewFixture = @{ Layer = 4; Key = 'NewFixture'; Path = 'new-fixture.cintitle'; PresetRevision = 'new-v1' }
+            } }
+        }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = "gfx_$Layer" } }
+        Mock Get-UpcomingScheduleEvents { $script:FixtureReplacementSchedule }
+        Mock Get-WebLayerStatus {
+            if (-not $RequireConsistentIdentity) { throw 'Replacement requires a consistent identity read.' }
+            $reportedEvent = '4bc680c0-044d-42a3-b6e7-201a81df24c2'
+            $detailEvent = $script:FixtureReplacementDetail
+            $detailStart = $script:FixtureReplacementStart
+            @{
+                Success = $true; IsOnAir = $true; ActiveId = $reportedEvent
+                ActiveTemplateName = 'NewFixture'; ActiveName = 'private fixture event text'
+                ActiveXml = "<Item Id=`"$detailEvent`" IsEmpty=`"n`" ScheduledAt=`"$detailStart`" Name=`"private fixture event text`" />"
+            }
+        }
+        Mock Update-OnAirStateFromCinegy { throw 'The reviewed writer must not reconcile or restore air.' }
+        Mock Invoke-HideLayer { throw 'Reconciliation must not issue an air command.' }
+        Mock Send-AirCommand { throw 'Reconciliation must not issue an air command.' }
+        Mock Publish-WebChannelState {}
+        $original = @{
+            onAirFile = $script:onAirFile; OnAir = $script:OnAir; Scenes = $script:OnAirScenes; Boards = $script:BoardsLive
+            Urgent = $script:UrgentManualLive; Hides = $script:AutoHideQueue; Reminders = $script:TemplateReminderQueue
+            Shows = $script:LastSuccessfulLayerShows; Rollback = $script:RollbackCandidates; Probe = $script:WebLayerComparisonNextProbe
+            MojazSchedules = $script:MojazSchedules
+        }
+        $script:onAirFile = Join-Path $TestDrive 'external-layer-replacement.json'
+        $script:OnAir = @{}
+        $script:OnAirScenes = [Collections.Generic.List[object]]::new()
+        $script:BoardsLive = @{}
+        $script:UrgentManualLive = @{}
+        $script:AutoHideQueue = @()
+        $script:TemplateReminderQueue = @()
+        $script:LastSuccessfulLayerShows = @{}
+        $script:RollbackCandidates = @{}
+        $script:MojazSchedules = @()
+        $script:FixtureReplacementSchedule = @()
+        $script:FixtureReplacementDeniedKey = ''
+        $script:FixtureReplacementDetail = '4bc680c0-044d-42a3-b6e7-201a81df24c2'
+        $script:FixtureReplacementStart = '2026-11-21T12:00:00Z'
+        $script:WebLayerReplacementReviews.Clear()
+        Set-OnAirLayerRecord -Layer 4 -Record @{
+            Key = 'OldFixture'; Source = 'cinegy'; UserId = 0L; ChatId = 0L
+            ActiveId = 'f691112c-e6a9-4397-9d00-703c977022f3'; At = [datetime]'2026-11-21T11:00:00Z'
+        }
+        Set-OnAirLayerRecord -Layer 5 -Record @{
+            Key = 'PeerFixture'; Source = 'bridge'; UserId = 99L; ChatId = 99L; ActiveIdConfirmed = $true
+            ActiveId = '1b28dae7-6e04-43ba-9531-29e8311398e4'; At = [datetime]'2026-11-21T11:00:00Z'
+        }
+        $script:OnAirScenes[1] | Add-Member -NotePropertyName Extension -NotePropertyValue 'keep-peer-extension'
+        $localId = $script:OnAirScenes[0].SceneId
+        $peer = $script:OnAirScenes[1]
+        $before = ConvertTo-Json -InputObject @{ SchemaVersion = 1; Scenes = @($script:OnAirScenes) } -Depth 6
+        [IO.File]::WriteAllText($script:onAirFile, $before)
+        $call = {
+            param([string]$Action, [long]$Actor = 4321, [string]$Review = '')
+            $script:WebLayerComparisonNextProbe = 0L
+            $line = @{ op = "air.layer-replacement.$Action"; args = @{ actor = $Actor; layer = 4; review = $Review } } |
+                ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call review 9999).error | Should -Be 'forbidden'
+            $script:FixtureReplacementSchedule = @(@{ TemplateKey = 'NewFixture' })
+            (& $call review).error | Should -Be 'layer_replacement_unavailable'
+            $script:FixtureReplacementSchedule = @()
+            $script:FixtureReplacementDeniedKey = 'NewFixture'
+            (& $call review).error | Should -Be 'forbidden'
+            $script:FixtureReplacementDeniedKey = ''
+            $script:FixtureReplacementDetail = 'f691112c-e6a9-4397-9d00-703c977022f3'
+            (& $call review).error | Should -Be 'layer_replacement_unavailable'
+            $script:FixtureReplacementDetail = '4bc680c0-044d-42a3-b6e7-201a81df24c2'
+
+            $review = & $call review
+            $review.ok | Should -BeTrue
+            $review.data.oldTemplateKey | Should -Be 'OldFixture'
+            $review.data.templateKey | Should -Be 'NewFixture'
+            ($review | ConvertTo-Json -Depth 5) | Should -Not -Match 'private fixture|f691112c|4bc680c0'
+            (& $call confirm 4876 $review.data.review).error | Should -Be 'layer_replacement_stale'
+            $script:FixtureReplacementStart = '2026-11-21T12:00:30Z'
+            (& $call confirm 4321 $review.data.review).error | Should -Be 'layer_replacement_stale'
+            [IO.File]::ReadAllText($script:onAirFile) | Should -BeExactly $before
+
+            $review = & $call review
+            [IO.File]::AppendAllText($script:onAirFile, [Environment]::NewLine)
+            (& $call confirm 4321 $review.data.review).error | Should -Be 'layer_replacement_stale'
+            $review = & $call review
+            New-Item -Path "$script:onAirFile.bak" -ItemType Directory | Out-Null
+            (& $call confirm 4321 $review.data.review).error | Should -Be 'layer_replacement_save_failed'
+            [IO.File]::ReadAllText($script:onAirFile) | Should -BeExactly ($before + [Environment]::NewLine)
+            $script:OnAirScenes[0].SceneId | Should -Be $localId
+            Remove-Item -LiteralPath "$script:onAirFile.bak"
+
+            $review = & $call review
+            (& $call confirm 4321 $review.data.review).data.replaced | Should -BeTrue
+            (& $call confirm 4321 $review.data.review).error | Should -Be 'layer_replacement_stale'
+            $newScene = $script:OnAirScenes[0]
+            $newScene.SceneId | Should -Not -Be $localId
+            $newScene.ActiveIdConfirmed | Should -BeFalse
+            $newScene.Source | Should -BeExactly 'cinegy'
+            $newScene.UserId | Should -Be 0
+            $newScene.ChatId | Should -Be 0
+            $script:OnAir[4].Key | Should -BeExactly 'NewFixture'
+            [object]::ReferenceEquals($peer, $script:OnAirScenes[1]) | Should -BeTrue
+            $disk = Get-Content -LiteralPath $script:onAirFile -Raw | ConvertFrom-Json
+            $disk.Scenes[0].SceneId | Should -Be $newScene.SceneId
+            $disk.Scenes[1].Extension | Should -Be 'keep-peer-extension'
+            $disk.Scenes[1].ActiveIdConfirmed | Should -BeTrue
+            Should -Invoke Publish-WebChannelState -Exactly -Times 1
+            Should -Invoke Invoke-HideLayer -Exactly -Times 0
+            Should -Invoke Send-AirCommand -Exactly -Times 0
+        }
+        finally {
+            foreach ($entry in $original.GetEnumerator()) { Set-Variable -Scope Script -Name $entry.Key -Value $entry.Value }
+            Remove-Variable -Scope Script -Name FixtureReplacementSchedule, FixtureReplacementDeniedKey, FixtureReplacementDetail, FixtureReplacementStart
+            $script:WebLayerReplacementReviews.Clear()
+        }
+    }
+
+    It 'reviews forgetting exactly one stale external record through the named pipe without touching air' {
+        Mock Test-Authorized { $UserId -in 4321, 4876 }
+        Mock Test-LayersScreenAccess { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-AirRunActive { $false }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Get-KnownLayers { @(4) }
+        Mock Get-Setting { 'Single' } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-SettingInt { 1 } -ParameterFilter { $Name -eq 'PendingStateTimeoutMinutes' }
+        Mock Get-TemplateStore { @{ Map = @{ ExternalFixture = @{ Layer = 4; Key = 'ExternalFixture' } } } }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = "gfx_$Layer" } }
+        Mock Read-ReviewedOnAirDocument { @{ Revision = 'fixture-state-version'; Scenes = @($script:OnAirScenes) } }
+        Mock Get-WebLayerStatus {
+            @{
+                Success = $true; IsOnAir = $false; OffAirReason = 'empty-item'; ActiveId = '{4bc680c0-044d-42a3-b6e7-201a81df24c2}'
+                ActiveXml = '<Item Id="{4bc680c0-044d-42a3-b6e7-201a81df24c2}" IsEmpty="y" ScheduledAt="2026-11-21T12:00:00Z" />'
+            }
+        }
+        Mock Save-ReviewedOnAirForget { 'saved' }
+        Mock Update-OnAirStateFromCinegy { throw 'Local cleanup must not invoke unrestricted reconciliation.' }
+        Mock Restore-UrgentBoardLine { throw 'Local cleanup must not attempt to restore graphics.' }
+        Mock Invoke-HideLayer { throw 'Local cleanup must not send HIDE.' }
+        Mock Publish-WebChannelState {}
+        $old = @{
+            OnAir = $script:OnAir; Scenes = $script:OnAirScenes; Boards = $script:BoardsLive
+            Urgent = $script:UrgentManualLive; Hides = $script:AutoHideQueue; Reminders = $script:TemplateReminderQueue
+            Shows = $script:LastSuccessfulLayerShows; Rollback = $script:RollbackCandidates; Probe = $script:WebLayerComparisonNextProbe
+        }
+        $script:OnAir = @{}
+        $script:OnAirScenes = [Collections.Generic.List[object]]::new()
+        $script:BoardsLive = @{}
+        $script:UrgentManualLive = @{}
+        $script:AutoHideQueue = @()
+        $script:TemplateReminderQueue = @()
+        $script:LastSuccessfulLayerShows = @{}
+        $script:RollbackCandidates = @{}
+        $script:WebLayerForgetReviews.Clear()
+        Set-OnAirLayerRecord -Layer 4 -Record @{
+            Key = 'ExternalFixture'; Source = 'cinegy'; ActiveId = '{f691112c-e6a9-4397-9d00-703c977022f3}'; At = [datetime]'2026-11-21T11:00:00Z'
+        }
+        $call = {
+            param([string]$Action, [long]$Actor, [string]$Review = '')
+            $script:WebLayerComparisonNextProbe = 0L
+            $line = @{ op = "air.layer-forget.$Action"; args = @{ actor = $Actor; layer = 4; review = $Review } } |
+                ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $review = & $call review 4321
+            $review.ok | Should -BeTrue
+            $review.data.templateKey | Should -Be 'ExternalFixture'
+            Should -Invoke Save-ReviewedOnAirForget -Exactly -Times 0
+            (& $call confirm 4876 $review.data.review).error | Should -Be 'layer_forget_stale'
+            (& $call confirm 4321 $review.data.review).data.forgotten | Should -BeTrue
+            (& $call confirm 4321 $review.data.review).error | Should -Be 'layer_forget_stale'
+            Should -Invoke Save-ReviewedOnAirForget -Exactly -Times 1
+            Should -Invoke Update-OnAirStateFromCinegy -Exactly -Times 0
+            Should -Invoke Restore-UrgentBoardLine -Exactly -Times 0
+            Should -Invoke Invoke-HideLayer -Exactly -Times 0
+        }
+        finally {
+            $script:OnAir = $old.OnAir
+            $script:OnAirScenes = $old.Scenes
+            $script:BoardsLive = $old.Boards
+            $script:UrgentManualLive = $old.Urgent
+            $script:AutoHideQueue = $old.Hides
+            $script:TemplateReminderQueue = $old.Reminders
+            $script:LastSuccessfulLayerShows = $old.Shows
+            $script:RollbackCandidates = $old.Rollback
+            $script:WebLayerComparisonNextProbe = $old.Probe
+            $script:WebLayerForgetReviews.Clear()
+        }
+    }
+
+    It 'lists searchable Telegram presence for administrators through the private named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 4876, 9876 }
+        Mock Test-Admin { $UserId -in 4321, 4876 }
+        Mock Get-AuthorizedUsers {
+            @(
+                @{ UserId = 4876L; Alias = 'Fixture Owner'; Role = 'owner'; Disabled = $false; LastActivityAt = '2026-11-21T12:00:01Z' }
+                @{ UserId = 4321L; Alias = 'Fixture Admin'; Role = 'admin'; Disabled = $false; LastActivityAt = '' }
+                @{
+                    UserId = 9876L; Alias = 'Fixture Operator'; Role = 'operator'; Disabled = $true; LastActivityAt = '2026-11-21T11:00:01Z'
+                    RawMessage = 'private-fixture-payload'; IP = '192.0.2.23'
+                }
+                @{ UserId = 9000000000000011L; Alias = 'Browser-only'; Role = 'operator'; Disabled = $false; LastActivityAt = '2026-11-21T13:00:01Z' }
+            )
+        }
+        Mock Get-WorkReportData { throw 'Presence must not read detailed audit records.' }
+        $call = {
+            param([long]$Actor, [string]$Query = '', [int]$Page = 0)
+            $line = @{ op = 'telegram.access.presence'; args = @{ actor = $Actor; q = $Query; page = $Page } } |
+                ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+        }
+        ((& $call 9876) | ConvertFrom-Json).error | Should -Be 'forbidden'
+        Should -Invoke Get-AuthorizedUsers -Exactly -Times 0
+        $wire = & $call 4321
+        $result = $wire | ConvertFrom-Json
+        $result.ok | Should -BeTrue
+        $result.data.total | Should -Be 3
+        @($result.data.items).Count | Should -Be 3
+        $result.data.items[0].role | Should -Be 'owner'
+        $result.data.items[1].disabled | Should -BeTrue
+        $result.data.items[2].lastSeenAt | Should -BeNullOrEmpty
+        $wire | Should -Not -Match 'private-fixture-payload|192\.0\.2\.23|Browser-only|UserId'
+        $found = (& $call 4876 'fIxTuRe AdMiN' 99) | ConvertFrom-Json
+        $found.ok | Should -BeTrue
+        $found.data.total | Should -Be 1
+        $found.data.page | Should -Be 0
+        $found.data.items[0].role | Should -Be 'admin'
+        Should -Invoke Get-WorkReportData -Exactly -Times 0
     }
 
     It 'rechecks air permissions before loading sensitive scene data through the named pipe' {
@@ -2963,7 +4281,7 @@ Describe 'Web channel: the pipe' {
             $photo.upload = [guid]::NewGuid().ToString('N')
             $inputFile = Join-Path $script:mojazWebUploadDirectory "web-$($photo.upload).image"
             $bitmap = [System.Drawing.Bitmap]::new(3, 3)
-            try { $bitmap.Save($inputFile, [System.Drawing.Imaging.ImageFormat]::Png) }
+            try { $bitmap.Save($inputFile, [System.Drawing.Imaging.ImageFormat]::Tiff) }
             finally { $bitmap.Dispose() }
             $edited = & $send
             $edited.ok | Should -BeTrue
@@ -2976,7 +4294,11 @@ Describe 'Web channel: the pipe' {
             $row.Fields.'studio.title' | Should -Be 'عنوان ثابت'
             $row.Image | Should -BeNullOrEmpty
             $asset = [System.Drawing.Image]::FromFile($row.MediaFields.'studio.main')
-            try { $asset.Width | Should -Be 40; $asset.Height | Should -Be 20 }
+            try {
+                $asset.Width | Should -Be 40
+                $asset.Height | Should -Be 20
+                $asset.RawFormat.Guid | Should -Be ([System.Drawing.Imaging.ImageFormat]::Png.Guid)
+            }
             finally { $asset.Dispose() }
             $previewArgs = @{ actor = 4321; id = $id; rowId = $row.Id; revision = $edited.data.revision; field = 'studio.main' }
             $line = @{ op = 'bulletin.preview'; args = $previewArgs } | ConvertTo-Json -Compress

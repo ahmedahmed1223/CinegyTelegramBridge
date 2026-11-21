@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { RelayDestinationDialog } from './RelayDestinationDialog'
 import classes from './LivePage.module.css'
 
 type RelayState = Schemas['RelayState']
@@ -22,6 +23,7 @@ const labels: Record<string, { title: string; color: string }> = {
 
 export function RelayPanel() {
   const [review, setReview] = useState<Review | null>(null)
+  const [destinationRevision, setDestinationRevision] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const client = useQueryClient()
   const relay = useQuery<RelayState>({
@@ -84,15 +86,25 @@ export function RelayPanel() {
         {data?.state === 'disabled' && <Text size="sm" c="dimmed">فعّل الترحيل من إعدادات الجسر.</Text>}
         {data?.enabled && !data.configured && <Text size="sm" c="dimmed">اضبط مصدر البث ووجهة الترحيل من إعدادات الجسر.</Text>}
         {data?.state === 'unverified' && <Text size="sm" c="dimmed">تحقّق من عملية الترحيل على جهاز الجسر.</Text>}
+        {data?.canEditDestination && (
+          <Button variant="default" onClick={() => { setNotice(''); setDestinationRevision(data.revision) }}>تعديل وجهة الترحيل</Button>
+        )}
         {data?.canStart && (
           <Button onClick={() => open('start')} loading={command.isPending} leftSection={<IconPlayerPlay size={17} />}>بدء الترحيل</Button>
         )}
         {data?.canStop && (
           <Button onClick={() => open('stop')} loading={command.isPending} variant="light" color="red" leftSection={<IconPlayerStop size={17} />}>إيقاف الترحيل</Button>
         )}
-        {notice && data?.canStop && <Text size="sm" role="status">{notice}</Text>}
+        {notice && <Text size="sm" role="status">{notice}</Text>}
         {command.error && <Alert color="red" role="alert">{command.error.message}</Alert>}
       </Stack>
+      {destinationRevision && <RelayDestinationDialog revision={destinationRevision} stale={data?.revision !== destinationRevision}
+        onClose={() => setDestinationRevision(null)} onSaved={(updated) => {
+          client.setQueryData<RelayState>(relayKey, updated)
+          void client.invalidateQueries({ queryKey: relayKey })
+          setNotice('حُفظت وجهة الترحيل.')
+          setDestinationRevision(null)
+        }} />}
       <Modal opened={!!review} onClose={() => { if (!command.isPending) setReview(null) }} centered
         title={stopping ? 'إيقاف الترحيل إلى Telegram' : 'بدء الترحيل إلى Telegram'}
         closeOnEscape={!command.isPending} closeOnClickOutside={!command.isPending} withCloseButton={!command.isPending}>

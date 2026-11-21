@@ -7,6 +7,9 @@ namespace CinegyBridge.Web.Endpoints;
 // change here that the client has not caught up with fails the gate.
 
 public sealed record ErrorResponse(string Error, string? Message = null);
+public sealed record ProgrammeStatusItem(bool Listed, string Label, long? StartsAtMs, double? DurationSeconds, double? RemainingSeconds);
+public sealed record ProgrammeNowNext(long CheckedAtMs, bool StatusAvailable, bool ScheduleAvailable,
+    ProgrammeStatusItem? Current, ProgrammeStatusItem? Cued);
 public sealed record CaptureCreateRequest(string Kind);
 public sealed record TemplatePresetItem(int Index, string Name, Dictionary<string, string> Values, string[] HiddenFields);
 public sealed record TemplatePresetPage(TemplatePresetItem[] Items, TemplateFieldDto[] Fields, int Page, int PageCount, string Revision, bool CanManage);
@@ -36,6 +39,10 @@ public sealed record TemplateDefinitionView(string Key, string Revision, string 
     string Description, string Category, int PresetCount, TemplateDefinitionField[] Fields, int ReminderMinutes);
 public sealed record TemplateDefinitionPreview(string Review, TemplateDefinitionView Before, TemplateDefinitionView? After);
 public sealed record TemplateDefinitionResult(TemplateDefinitionView? Definition, TemplateDefinitionPreview? Preview);
+public sealed record PersonalAirReminderRow(string Id, int Layer, string TemplateLabel, int ElapsedMinutes, DateTimeOffset FollowUpAt,
+    bool ExpiresSilently);
+public sealed record PersonalAirRemindersView(PersonalAirReminderRow[] Items, int SnoozeMinutes);
+public sealed record PersonalAirReminderCommand(string Action);
 public sealed record LayerNameView(int Layer, string Name, bool HasCustomName);
 public sealed record LayerNamesPage(LayerNameView[] Items, int Page, int PageSize, int Total);
 public sealed record LayerNameReviewCommand(string? Name);
@@ -197,6 +204,23 @@ public sealed record TemplateScheduleReviewCommand(string? Key = null, string? T
     string? RecurrenceUntil = null, Dictionary<string, string>? Variables = null, string? Operation = null,
     string? ScheduleId = null, string? Revision = null, string? AnchorMaterialId = null, int? AnchorOffsetSeconds = null);
 public sealed record TemplateScheduleConfirmCommand(string Review);
+public sealed record SelfTestReadinessReport(int? Layer, bool HasRegisteredTemplate, string Engine,
+    long? ObservedAt, IReadOnlyList<string> Findings);
+public sealed record UsageSummaryTemplate(string Name, int Uses, long? LastUsedAt);
+public sealed record AdminUsageSummaryReport(long CapturedAt, long StartedAt, int Successful, int Failed, int Blocked,
+    int SevenDayOperations, double DailyAverage, bool SevenDayTruncated, IReadOnlyList<UsageSummaryTemplate> Templates);
+public sealed record LayerComparisonTarget(int Layer, string Name);
+public sealed record LayerComparisonTargets(IReadOnlyList<LayerComparisonTarget> Layers);
+public sealed record LayerComparison(int Layer, bool Tracked, bool? EngineActive, bool CanReviewForget, string Disposition, long ObservedAt, bool CanReviewReplace = false);
+public sealed record LayerAdoptionReview(string Review, int Layer, string TemplateKey);
+public sealed record LayerAdoptionConfirmCommand(string Review);
+public sealed record LayerAdoptionResult(int Layer, bool Adopted);
+public sealed record LayerForgetReview(string Review, int Layer, string TemplateKey);
+public sealed record LayerForgetConfirmCommand(string Review);
+public sealed record LayerForgetResult(int Layer, bool Forgotten);
+public sealed record LayerReplacementReview(string Review, int Layer, string OldTemplateKey, string TemplateKey);
+public sealed record LayerReplacementConfirmCommand(string Review);
+public sealed record LayerReplacementResult(int Layer, bool Replaced);
 public sealed record ScheduleHoldReviewCommand(bool? Paused);
 public sealed record ScheduleHoldReview(string Review, bool CurrentlyPaused, bool Paused, int PendingAppointments, bool Maintenance);
 public sealed record ScheduleHoldResult(bool Paused, int PendingAppointments, bool Maintenance);
@@ -213,9 +237,14 @@ public sealed record AirRerunResult(AirRerunPlan? Rerun, bool? SceneConfirmed);
 
 public sealed record AccessHistoryDecision(string UserId, string Decision, long DecidedAt, string? DecidedByUserId, long? RequestedAt);
 public sealed record AccessHistoryPage(AccessHistoryDecision[] Items, int Page, int PageSize, int Total, bool Truncated);
+public sealed record RestartReadiness(long CheckedAt, string State, int ActiveScenes, bool ManagedRestartAvailable, bool RelayBlocksRestart);
+public sealed record ManagedRestartReviewCommand(string Id);
+public sealed record ManagedRestartReceiptCommand(string Id, string Receipt);
+public sealed record ManagedRestartResult(string Id, string State, string Receipt, int ActiveScenes);
+
 public sealed record AdminOverviewSetting(
     string Id, string Category, string Kind, string Label, string Description, string Unit,
-    bool? Enabled, int? Value, int? Minimum, int? Maximum, bool Protected);
+    bool? Enabled, int? Value, int? Minimum, int? Maximum, bool Protected, bool Editable);
 public sealed record AdminOverviewServices(
     string TelegramState, int TelegramFailures, string CinegyState, long CinegyLastReadAt, bool CinegyFresh,
     string OutputMonitorState, string RelayState, bool SchedulePaused, int QuarantinedChats);
@@ -241,11 +270,44 @@ public sealed record WebEditableSettingsValues(
     [property: JsonPropertyName("OneHandMode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     bool? OneHandMode = null,
     [property: JsonPropertyName("EnablePersistentMenuButton"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    bool? EnablePersistentMenuButton = null);
+    bool? EnablePersistentMenuButton = null,
+    [property: JsonPropertyName("NewsMaxItems"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? NewsMaxItems = null,
+    [property: JsonPropertyName("NewsDraftTimeoutMinutes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? NewsDraftTimeoutMinutes = null,
+    [property: JsonPropertyName("UrgentBoardIntervalSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? UrgentBoardIntervalSeconds = null,
+    [property: JsonPropertyName("UrgentBoardRepeats"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? UrgentBoardRepeats = null,
+    [property: JsonPropertyName("UrgentBoardTotalSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? UrgentBoardTotalSeconds = null,
+    [property: JsonPropertyName("UrgentBoardMaxItems"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? UrgentBoardMaxItems = null,
+    [property: JsonPropertyName("UrgentBoardMaxTextLength"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? UrgentBoardMaxTextLength = null,
+    [property: JsonPropertyName("UrgentBoardNotifyOnFinish"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? UrgentBoardNotifyOnFinish = null,
+    [property: JsonPropertyName("MojazRowFrames"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MojazRowFrames = null,
+    [property: JsonPropertyName("MojazIntroExtraFrames"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MojazIntroExtraFrames = null,
+    [property: JsonPropertyName("MojazLastRowFrames"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MojazLastRowFrames = null,
+    [property: JsonPropertyName("MojazNotifyOnFinish"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? MojazNotifyOnFinish = null,
+    [property: JsonPropertyName("TemplateReminderFollowUpMinutes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? TemplateReminderFollowUpMinutes = null,
+    [property: JsonPropertyName("SchedulePreNotifyMinutes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? SchedulePreNotifyMinutes = null,
+    [property: JsonPropertyName("MojazScheduleNoticeSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? MojazScheduleNoticeSeconds = null);
 
 public sealed record WebSettingsImportChange(string Id, string Kind, bool? BeforeEnabled, bool? AfterEnabled, int? BeforeValue, int? AfterValue);
 public sealed record WebSettingsImportPreview(WebSettingsImportChange[] Changes, string? Review);
 public sealed record WebSettingsImportResult(int Applied);
+public sealed record WebSettingsBackup(string Id, long SavedAt, string Kind);
+public sealed record WebSettingsBackupList(WebSettingsBackup[] Items, bool Truncated);
+public sealed record WebSettingsRecoveryReviewCommand(string Source, string? Backup = null);
 
 public sealed record WebEditableSettingsExport(
     [property: JsonPropertyName("Kind")] string Kind,
@@ -261,6 +323,16 @@ public sealed record EmergencyHideTarget(int Layer, string Name);
 public sealed record EmergencyHidePreview(string Review, EmergencyHideTarget[] Targets, int[] BlockedLayers);
 public sealed record EmergencyHideReceipt(int Layer, string Status);
 public sealed record EmergencyHideResult(EmergencyHidePreview? Preview, EmergencyHideReceipt[]? Results);
+public sealed record HideAllScopeLayer(int Id, string Name);
+public sealed record HideAllLayerScopeView(string Mode, int[] SelectedLayers, HideAllScopeLayer[] KnownLayers, string Revision,
+    bool Enabled, bool CanManage);
+public sealed record HideAllScopeReviewCommand(string Revision, string Mode)
+{
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.Strict)]
+    public int[]? Layers { get; init; }
+}
+public sealed record HideAllScopePreview(HideAllLayerScopeView Current, string Mode, int[] SelectedLayers, string Review, DateTimeOffset ExpiresAt);
+public sealed record HideAllScopeConfirmCommand(string Review);
 public sealed record AirLayerRemovalCommand(string Action, string Operation, string? Review = null);
 public sealed record AirLayerRemovalPreview(string Review, int Layer, string Operation, string TemplateKey, long ExpiresAt);
 public sealed record AirLayerRemovalResult(AirLayerRemovalPreview? Preview, bool? Sent);
@@ -305,6 +377,20 @@ public sealed record BulletinSceneImagePage(string Selection, int Page, int Page
 public sealed record BulletinSceneImageApply(string Id, string RowId, int Revision, string Selection, int Slot);
 public sealed record RuntimeFileDiagnostic(string Kind, string State, double SizeKilobytes, long ModifiedAt, bool HasBackup);
 public sealed record RuntimeFileDiagnostics(long CheckedAt, int ParseLimitBytes, RuntimeFileDiagnostic[] Items);
+public sealed record EngineHealthReading(
+    bool Enabled, long? CheckedAtMs, long? ElapsedMs, string? Health, string? License, int? SampleCount,
+    long? OutputFrames, long? DroppedFrames, long? DroppedSampleIncrease, long? InputLossFrames,
+    double? MeanReadMs, double? MaxReadErrorPercent);
+public sealed record OperationMetrics(long CheckedAt, long StartedAt, long UptimeSeconds, string State,
+    DiagnosticAirOperations AirOperations, int TelegramRateLimitHits, int TelegramOutboxDropped, string TelegramState,
+    string CinegyState, string? LastHeartbeatDate, int OnAirCount, int? RichPayloadPeakPercent);
+
+public sealed record DiagnosticAirOperations(int Success, int Failed, int Blocked);
+public sealed record DiagnosticTimelineEvent(long AtMs, string Severity, string Category, string Action, string Outcome);
+public sealed record DiagnosticTimeline(string State, bool Truncated, int ByteLimit, int LineLimit, DiagnosticTimelineEvent[] Items);
+public sealed record RuntimeDiagnosticBundle(int SchemaVersion, long GeneratedAtMs, string BridgeVersion, string PowershellVersion,
+    long UptimeSeconds, double WorkingSetMB, double PrivateMemoryMB, double? DiskFreeGB, bool LowDisk,
+    DiagnosticAirOperations AirOperations, RuntimeFileDiagnostics RuntimeFiles, DiagnosticTimeline Timeline);
 public sealed record ShiftReadinessReport(long CheckedAt, bool Ready, int OnAirLayers, int PendingOperations,
     string TickerDraft, int QuarantinedChats, int PinnedFaults, bool QuietHours, string[] ProtectionFindings);
 public sealed record AdminNotificationCoverage(long CheckedAt, int Matched, int WithoutPersonalChat, int WithoutAdminRights);
@@ -314,6 +400,10 @@ public sealed record ScheduleExecutionPage(ScheduleExecutionItem[] Items, int Pa
     string StationTimeZone);
 public sealed record ShiftHistoryItem(string Reference, string Event, long AtMs, string StationTime, string Action,
     string Target, string Result, int Layer, long DurationMs, string OperatorId, string OperatorName);
+public sealed record RelayDestinationReviewRequest(string Revision, string Destination);
+public sealed record RelayDestinationConfirmRequest(string Revision, string Destination, string Review);
+public sealed record RelayDestinationReview(string Review);
+
 public sealed record OperationReferenceItem(long AtMs, string StationTime, string Action, string Result, int Layer, long DurationMs);
 public sealed record OperationReferenceLookup(string Status, int ReadLimit, bool Truncated, OperationReferenceItem[] Items);
 public sealed record ShiftHistoryOption(string Value, string Label, int Count);
@@ -367,6 +457,8 @@ public sealed record TickerReportExport(string Html, int Days, int Publishes, bo
 
 public sealed record TelegramOperatorActivityTotals(int Operations, int Successful, int Blocked, int Failed, int Shows, bool Truncated);
 public sealed record TelegramOperatorActivity(long UserId, string State, int? AgeMinutes, int RecentMinutes, TelegramOperatorActivityTotals Today);
+public sealed record TelegramPresenceItem(string Name, string Role, bool Disabled, string State, long? LastSeenAt);
+public sealed record TelegramPresencePage(int Page, int PageSize, int PageCount, int Total, int RecentMinutes, long CapturedAt, IReadOnlyList<TelegramPresenceItem> Items);
 public sealed record TelegramDeliveryQuarantineRow(long ChatId, DateTimeOffset? Since, int Strikes, bool CanReset);
 public sealed record TelegramDeliveryQuarantinePage(TelegramDeliveryQuarantineRow[] Items, int Page, int PageSize, int Total);
 public sealed record TelegramDeliveryQuarantineReview(TelegramDeliveryQuarantineRow Target, string Review, DateTimeOffset ExpiresAt);
@@ -389,7 +481,14 @@ public sealed record HandoverShow(string Name, int Count, string Last, string Op
 public sealed record HandoverFailure(string When, string Action, string Name);
 public sealed record ShiftHandoverReport(int Hours, bool Truncated, string Connection, int ActiveCount, HandoverActiveLayer[] Active,
     int ShowCount, int HiddenGroups, HandoverShow[] Shows, int RemovalCount, string LastRemoval, int FailureCount, int BlockedCount,
-    int NotableCount, HandoverFailure[] RecentFailures);
+    int NotableCount, HandoverFailure[] RecentFailures, HandoverAcknowledgementView? Acknowledgement = null);
+public sealed record HandoverAcknowledgement(string Key, string From, string Through, string RecordedAt);
+public sealed record HandoverAcknowledgementView(string? Reference, string From, string Through, HandoverAcknowledgement? Recent);
+public sealed record HandoverAcknowledgementCommand(string Reference);
+
+public sealed record OperatorHelpChapter(string Id, string Title, string Detail);
+public sealed record OperatorHelpRelease(string Version, string[] Items);
+public sealed record OperatorHelp(OperatorHelpChapter[] Chapters, OperatorHelpRelease[] Releases);
 
 public sealed record TelegramAliasTarget(long Id, string Name, string Alias);
 public sealed record TelegramAliasReviewCommand(string? Alias);

@@ -853,7 +853,7 @@ public sealed class SettingsForm : Form
         finally { if (File.Exists(tempPath)) File.Delete(tempPath); }
     }
 
-    private static void ProtectConfigAcl(string path)
+    internal static void ProtectConfigAcl(string path)
     {
         var sids = new List<IdentityReference>();
         using (var identity = WindowsIdentity.GetCurrent())

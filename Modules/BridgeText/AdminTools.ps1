@@ -103,6 +103,7 @@ function Add-BridgeTextAdminTools {
     $catalogue['hlth.layersOnAir'] = @{ ar = '🟠 طبقات على الهواء'; en = '🟠 Layers on air' }
     $catalogue['hlth.allWell'] = @{ ar = '🟢 كل شيء سليم'; en = '🟢 All is well' }
     $catalogue['hlth.sync'] = @{ ar = '<b>🔄 التزامن</b>'; en = '<b>🔄 The sync</b>' }
+    $catalogue['hlth.restartReviewBusy'] = @{ ar = 'هناك مراجعة لإعادة التشغيل في واجهة الويب. انتظر انتهاءها أو ألغها هناك.'; en = 'A restart review is open in the Web interface. Wait for it to finish or cancel it there.' }
     $catalogue['hlth.restartDisabled'] = @{ ar = "⛔ إعادة التشغيل من البوت معطّلة.`nفعّل AllowRemoteRestart من الإعدادات، وتأكد أولًا أن الجسر يعمل كخدمة أو كمهمة مجدولة تعيد تشغيله."; en = "⛔ Restarting from the bot is turned off.`nTurn AllowRemoteRestart on in the settings, and make sure first that the bridge runs as a service or as a scheduled task that brings it back." }
     $catalogue['adm.noActiveScenes'] = @{ ar = "📺 المشاهد النشطة`n• لا توجد مشاهد على الهواء حسب آخر فحص."; en = "📺 The active scenes`n• No scene is on air as of the last check." }
     $catalogue['adm.none'] = @{ ar = 'لا توجد'; en = 'none' }

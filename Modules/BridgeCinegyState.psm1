@@ -9,10 +9,17 @@ function Get-CinegyStateProperty {
 }
 
 function Copy-CinegyTrackedRecord {
-    param([hashtable]$Record)
-    if(-not $Record){return $null}
-    $copy=@{}
-    foreach($key in $Record.Keys){$copy[$key]=$Record[$key]}
+    param($Record)
+    if (-not $Record) { return $null }
+    $copy = @{}
+    if ($Record -is [System.Collections.IDictionary]) {
+        foreach ($key in $Record.Keys) { $copy[$key] = $Record[$key] }
+    }
+    else {
+        # The ledger can also supply scene records as objects. Copy their
+        # fields before updating identity so the observation stays read-only.
+        foreach ($property in $Record.PSObject.Properties) { $copy[$property.Name] = $property.Value }
+    }
     return $copy
 }
 
@@ -45,7 +52,7 @@ function Resolve-BridgeCinegyLayerState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][int]$Layer,
-        [hashtable]$TrackedRecord,
+        $TrackedRecord,
         [Parameter(Mandatory)]$Status,
         [switch]$DiscoverExternal,
         [datetime]$Now=(Get-Date)

@@ -1196,6 +1196,15 @@ function Update-RelayWatchdog {
     }
 }
 
+function Test-RelayDestinationUrl {
+    param([string]$Value)
+    if ($Value.Length -gt 4096 -or $Value -match '[\x00-\x1f\x7f]') { return $false }
+    $trimmed = $Value.Trim()
+    if ($trimmed -notmatch '\Artmps?://' -or $trimmed -match '[\s\\]') { return $false }
+    $uri = $null
+    return [uri]::TryCreate($trimmed, [UriKind]::Absolute, [ref]$uri) -and -not [string]::IsNullOrWhiteSpace($uri.Host)
+}
+
 function Start-StreamUrlPrompt {
     param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
     if ($UserId -eq 0) { $UserId = $ChatId }
@@ -1217,7 +1226,7 @@ function Complete-StreamUrl {
     # non-rtmp value (file://, concat:, a pipe) would redirect the relay's
     # output away from the network. Admin-only already, but the allowlist
     # costs nothing and closes it outright rather than trusting intent.
-    if ($trimmed -notmatch '^rtmps?://') {
+    if (-not (Test-RelayDestinationUrl -Value $Value)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'media.rtmpPrefix') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $state.UserId)
         return
     }

@@ -30,6 +30,7 @@ function Add-BridgeTextFlow {
     $catalogue['cmd.noNameYet'] = @{ ar = 'لا يوجد اسم حاليًا.'; en = 'There is no name at present.' }
     $catalogue['cmd.nameEmpty'] = @{ ar = '❌ الاسم فارغ. استخدم زر «مسح الاسم» إن أردت حذفه.'; en = '❌ The name is empty. Use the "clear the name" button if you want it gone.' }
     $catalogue['cmd.layerNotInTemplates'] = @{ ar = 'هذه الطبقة لم تعد ضمن القوالب المعرّفة.'; en = 'That layer is no longer among the defined templates.' }
+    $catalogue['cmd.hideAllScopeNotSaved'] = @{ ar = 'تعذّر حفظ نطاق إخفاء الكل.'; en = 'The hide-all scope could not be saved.' }
     $catalogue['cmd.mustBeWholeNumber'] = @{ ar = '❌ القيمة يجب أن تكون رقمًا صحيحًا. لم يتغيّر شيء.'; en = '❌ The value must be a whole number. Nothing changed.' }
     $catalogue['cmd.notNegative'] = @{ ar = '❌ القيمة لا يمكن أن تكون سالبة.'; en = '❌ The value cannot be negative.' }
     $catalogue['cmd.valueEmpty'] = @{ ar = '❌ القيمة فارغة، لم يتغيّر شيء.'; en = '❌ The value is empty; nothing changed.' }

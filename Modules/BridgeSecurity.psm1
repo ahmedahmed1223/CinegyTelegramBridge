@@ -103,7 +103,7 @@ function Read-BridgeSecretStore {
 
 function Write-BridgeSecretStore {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][hashtable]$Secrets)
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][hashtable]$Secrets, [long]$Deadline)
     $encrypted = [ordered]@{}
     foreach ($name in @($Secrets.Keys | Sort-Object)) {
         if ($name -notmatch '^[A-Za-z][A-Za-z0-9_.-]{0,63}$') { throw "Invalid secret name '$name'." }
@@ -125,8 +125,9 @@ function Write-BridgeSecretStore {
     $temporary = "$Path.tmp"
     try {
         [IO.File]::WriteAllText($temporary, ($document | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+        Protect-BridgePathAcl -Path $temporary
+        if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { throw 'The protected configuration write expired.' }
         Move-Item -LiteralPath $temporary -Destination $Path -Force -ErrorAction Stop
-        Protect-BridgePathAcl -Path $Path
     }
     finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }

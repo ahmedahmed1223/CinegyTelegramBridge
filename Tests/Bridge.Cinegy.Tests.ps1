@@ -143,6 +143,74 @@ InModuleScope CinegyAirTitler {
 }
 
 Describe 'Get-TitlerLayerStatus' {
+    It 'requires a stable item id across exact status paths for an explicit strict probe' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            if ($Uri -like '*/status/active') {
+                return @{ StatusCode = 200; Content = '<Item Id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" IsEmpty="n"/>' }
+            }
+            return @{ StatusCode = 200; Content = '<Status><Active Id="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}"/></Status>' }
+        }
+        $result = Get-TitlerLayerStatus -AirServerAddress 'fixture.invalid' -AirChannelNumber 2 -Layer 8 -TimeoutSec 1 -RequireConsistentIdentity
+        $result.Success | Should -BeTrue
+        $result.IsOnAir | Should -BeTrue
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'http://fixture.invalid:5523/gfx_8/status' -and $Method -eq 'Get' -and $TimeoutSec -eq 1 -and $MaximumRedirection -eq 0
+        }
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'http://fixture.invalid:5523/gfx_8/status/active' -and $Method -eq 'Get' -and $TimeoutSec -eq 1 -and $MaximumRedirection -eq 0
+        }
+    }
+
+    It 'withholds strict status for a mismatched, missing or malformed active-item id' -TestCases @(
+        @{ Detail = '<Item Id="BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB" IsEmpty="y"/>' }
+        @{ Detail = '<Item IsEmpty="y"/>' }
+        @{ Detail = '<Item Id="incomplete" IsEmpty="y"/>' }
+    ) {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler -ParameterFilter { $Uri -like '*/status/active' } {
+            @{ StatusCode = 200; Content = $Detail }
+        }
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler -ParameterFilter { $Uri -notlike '*/status/active' } {
+            @{ StatusCode = 200; Content = '<Status><Active Id="{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}"/></Status>' }
+        }
+        $result = Get-TitlerLayerStatus -AirServerAddress 'fixture.invalid' -AirChannelNumber 0 -Layer 8 -RequireConsistentIdentity
+        $result.Success | Should -BeFalse
+        $result.IsOnAir | Should -BeNullOrEmpty
+        $result.ActiveId | Should -BeNullOrEmpty
+        $result.Error | Should -Be 'Cinegy status and active item identities disagree.'
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 2 -Exactly
+    }
+
+    It 'withholds strict status from a redirect response containing otherwise valid status XML' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            @{ StatusCode = 302; Content = '<Status><Active Id="{00000000-0000-0000-0000-000000000000}"/></Status>' }
+        }
+        $result = Get-TitlerLayerStatus -AirServerAddress 'fixture.invalid' -AirChannelNumber 0 -Layer 8 -RequireConsistentIdentity
+        $result.Success | Should -BeFalse
+        $result.IsOnAir | Should -BeNullOrEmpty
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly -ParameterFilter { $MaximumRedirection -eq 0 }
+    }
+
+    It 'recognizes an explicit zero status id without a second request' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            @{ StatusCode = 200; Content = '<Status><Active Id="{00000000-0000-0000-0000-000000000000}"/></Status>' }
+        }
+        $result = Get-TitlerLayerStatus -AirServerAddress 'fixture.invalid' -AirChannelNumber 0 -Layer 8 -RequireConsistentIdentity
+        $result.Success | Should -BeTrue
+        $result.IsOnAir | Should -BeFalse
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 1 -Exactly -ParameterFilter { $Uri -like '*/status' }
+    }
+
+    It 'withholds strict status if the primary status lacks an explicit identity' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler { @{ StatusCode = 200; Content = '<Status/>' } }
+        $unknown = Get-TitlerLayerStatus -AirServerAddress 'fixture.invalid' -AirChannelNumber 0 -Layer 8 -RequireConsistentIdentity
+        $unknown.Success | Should -BeFalse
+        $unknown.IsOnAir | Should -BeNullOrEmpty
+        $legacy = Get-TitlerLayerStatus -AirServerAddress 'fixture.invalid' -AirChannelNumber 0 -Layer 8
+        $legacy.Success | Should -BeTrue
+        $legacy.IsOnAir | Should -BeFalse
+        Should -Invoke Invoke-WebRequest -ModuleName CinegyAirTitler -Times 2 -Exactly -ParameterFilter { $Uri -like '*/status' }
+    }
+
     It 'extracts the external template filename from the Cinegy item description' {
         Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
             if ($Uri -like '*/status/active') {

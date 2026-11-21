@@ -37,7 +37,8 @@ function Get-WebShiftHandoverReport {
     if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
         -not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     $hours = Get-SettingInt 'MissedEventsHours' 1
-    $window = Get-MissedEventsWindow -Hours $hours
+    $handover = Get-ShiftHandoverView -Actor $actor
+    $window = Get-MissedEventsWindow -Hours $hours -Through $handover.period.through.UtcDateTime
     $records = @($window.Records)
     $air = @($records | Where-Object { $_.Action -in 'SHOW', 'HIDE', 'EXIT' })
     $shows = @($air | Where-Object { $_.Action -eq 'SHOW' -and $_.Target })
@@ -50,6 +51,7 @@ function Get-WebShiftHandoverReport {
     $lastRemoval = $removals | Select-Object -Last 1
     return @{ ok = $true; data = [ordered]@{
             hours = $hours; truncated = [bool]$window.Truncated
+            acknowledgement = $handover.public
             connection = Get-OperatorConnectionSummary
             activeCount = $layerNumbers.Count
             active = @(foreach ($layer in @($layerNumbers | Select-Object -First 20)) {

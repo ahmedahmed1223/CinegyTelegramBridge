@@ -6,6 +6,9 @@ namespace CinegyBridge.Web.Endpoints;
 
 public static class AdminSettingsEndpoints
 {
+    private static readonly Dictionary<string, Type> EditableSettingTypes = typeof(WebEditableSettingsValues)
+        .GetProperties().ToDictionary(property => property.Name, property => property.PropertyType, StringComparer.Ordinal);
+
     public static void MapAdminSettingsEndpoints(this IEndpointRouteBuilder app)
     {
         var settings = app.MapGroup("/api/admin/settings").WithTags("Administration")
@@ -14,11 +17,20 @@ public static class AdminSettingsEndpoints
             .Produces<WebEditableSettingsExport>()
             .Produces<ErrorResponse>(403)
             .Produces<ErrorResponse>(503);
+        settings.MapGet("/recovery/backups", ListBackups)
+            .Produces<WebSettingsBackupList>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(503);
+        settings.MapPost("/recovery/review", ReviewRecovery)
+            .Produces<WebSettingsImportPreview>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        settings.MapPost("/recovery/confirm", ConfirmRecovery)
+            .Produces<WebSettingsImportResult>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
         settings.MapPost("/import/review", ReviewImport)
             .Accepts<WebEditableSettingsExport>("application/json")
             .Produces<WebSettingsImportPreview>()
             .Produces<ErrorResponse>(400)
             .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(409)
             .Produces<ErrorResponse>(413)
             .Produces<ErrorResponse>(503);
         settings.MapPost("/import/confirm", ConfirmImport)
@@ -30,6 +42,7 @@ public static class AdminSettingsEndpoints
             .Produces<AdminSettingPreview>()
             .Produces<ErrorResponse>(400)
             .Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(409)
             .Produces<ErrorResponse>(503);
         settings.MapPost("/{id}/confirm", Confirm)
             .Produces<AdminSettingResult>()
@@ -41,6 +54,17 @@ public static class AdminSettingsEndpoints
 
     private static Task<IResult> Export(HttpContext http, IBridgeChannel bridge) =>
         Send<WebEditableSettingsExport>(http, bridge, "admin.settings.export", new { actor = http.User.UserId() });
+
+    private static Task<IResult> ListBackups(HttpContext http, IBridgeChannel bridge) =>
+        Send<WebSettingsBackupList>(http, bridge, "admin.settings.recovery.backups", new { actor = http.User.UserId() });
+
+    private static Task<IResult> ReviewRecovery(WebSettingsRecoveryReviewCommand request, HttpContext http, IBridgeChannel bridge) =>
+        Send<WebSettingsImportPreview>(http, bridge, "admin.settings.recovery.review",
+            new { actor = http.User.UserId(), request.Source, request.Backup });
+
+    private static Task<IResult> ConfirmRecovery(AdminSettingConfirmCommand request, HttpContext http, IBridgeChannel bridge) =>
+        Send<WebSettingsImportResult>(http, bridge, "admin.settings.recovery.confirm",
+            new { actor = http.User.UserId(), request.Review });
 
     private static async Task<IResult> ReviewImport(HttpContext http, IBridgeChannel bridge)
     {
@@ -95,13 +119,11 @@ public static class AdminSettingsEndpoints
                 case "Settings" when field.Value.ValueKind == JsonValueKind.Object:
                     foreach (var setting in field.Value.EnumerateObject())
                     {
-                        object? value = setting.Name switch
+                        if (!EditableSettingTypes.TryGetValue(setting.Name, out var type)) return false;
+                        object? value = setting.Value.ValueKind switch
                         {
-                            nameof(WebEditableSettingsValues.NotifyAdminsOnAccessRequest) or nameof(WebEditableSettingsValues.AskRequesterName)
-                                or nameof(WebEditableSettingsValues.OneHandMode) or nameof(WebEditableSettingsValues.EnablePersistentMenuButton)
-                                when setting.Value.ValueKind is JsonValueKind.True or JsonValueKind.False => setting.Value.GetBoolean(),
-                            nameof(WebEditableSettingsValues.MaxPendingApprovals) or nameof(WebEditableSettingsValues.PendingStateTimeoutMinutes)
-                                when setting.Value.ValueKind == JsonValueKind.Number && setting.Value.TryGetInt32(out var number) => number,
+                            JsonValueKind.True or JsonValueKind.False when type == typeof(bool?) => setting.Value.GetBoolean(),
+                            JsonValueKind.Number when type == typeof(int?) && setting.Value.TryGetInt32(out var number) => number,
                             _ => null
                         };
                         if (value is null || !settings.TryAdd(setting.Name, value)) return false;
@@ -135,8 +157,8 @@ public static class AdminSettingsEndpoints
             var status = reply.Error switch
             {
                 "forbidden" => 403,
-                "setting_not_editable" or "setting_invalid" or "settings_import_invalid" => 400,
-                "setting_stale" => 409,
+                "setting_not_editable" or "setting_invalid" or "settings_import_invalid" or "settings_backup_invalid" => 400,
+                "setting_stale" or "urgent_timing_active" => 409,
                 "setting_save_failed" or "setting_export_unavailable" or "bridge_busy" => 503,
                 _ => 0
             };

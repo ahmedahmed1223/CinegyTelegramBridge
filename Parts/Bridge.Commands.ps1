@@ -200,8 +200,9 @@ function Set-HideAllLayerSelection {
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $known = @((Get-KnownLayers | ForEach-Object { [int]$_ }) | Sort-Object -Unique)
-    if ($SelectAll) { $value = 'all' }
-    elseif ($ClearAll) { $value = '' }
+    $selected = @()
+    if ($SelectAll) { $mode = 'all' }
+    elseif ($ClearAll) { $mode = 'none' }
     else {
         if ($known -notcontains $Layer) {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.layerNotInTemplates') -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
@@ -211,11 +212,13 @@ function Set-HideAllLayerSelection {
         if (([string](Get-Setting 'HideAllLayers')).Trim().Equals('all', [System.StringComparison]::OrdinalIgnoreCase)) { $selected = $known }
         if ($selected -contains $Layer) { $selected = @($selected | Where-Object { $_ -ne $Layer }) }
         else { $selected += $Layer }
-        $value = (@($selected | Sort-Object -Unique) -join ',')
+        $mode = if ($selected.Count) { 'selected' } else { 'none' }
     }
-    Set-Setting -Name 'HideAllLayers' -Value $value
-    Write-BridgeLog "User $UserId changed HideAllLayers to '$value'" "WARN"
-    Add-AuditEntry (T 'cmd.hideAllAudit' $value $(Format-UserAuditActor -UserId $UserId))
+    $saved = Save-HideAllLayerScope -Mode $mode -Layers $selected -UserId $UserId
+    if (-not $saved.ok) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'cmd.hideAllScopeNotSaved') -ReplyMarkup (Get-HideAllLayerSettingsKeyboard)
+        return
+    }
     Show-HideAllLayerSettings -ChatId $ChatId -UserId $UserId
 }
 

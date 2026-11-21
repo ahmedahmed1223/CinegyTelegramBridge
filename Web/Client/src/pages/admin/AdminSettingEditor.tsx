@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Modal, Slider, Stack, Switch, Text } from '@mantine/core'
+import { Alert, Button, Group, Modal, NumberInput, Stack, Switch, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,8 +9,6 @@ import { sessionKey } from '../../api/session'
 
 type Setting = Schemas['AdminOverviewSetting']
 type Preview = Schemas['AdminSettingPreview']
-const writable = new Set(['NotifyAdminsOnAccessRequest', 'AskRequesterName', 'MaxPendingApprovals', 'PendingStateTimeoutMinutes', 'OneHandMode', 'EnablePersistentMenuButton'])
-
 function settingMessage(code: string) {
   switch (code) {
     case 'setting_stale': return 'تغيّرت القيمة أو انتهت المراجعة. افتح الإعداد وراجع القيمة مجددًا.'
@@ -30,13 +28,14 @@ export function AdminSettingEditor({ setting }: { setting: Setting }) {
   const client = useQueryClient()
   const [opened, modal] = useDisclosure()
   const [enabled, setEnabled] = useState(false)
-  const [number, setNumber] = useState(0)
+  const [number, setNumber] = useState<string | number>(0)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [failure, setFailure] = useState('')
   const isBoolean = setting.kind === 'boolean'
   const minimum = setting.minimum ?? 0
   const maximum = setting.maximum ?? minimum
-  const allowEdit = writable.has(setting.id) && !setting.protected && (isBoolean || maximum > minimum)
+  const allowEdit = setting.editable && !setting.protected && (isBoolean || maximum > minimum)
+  const numericValue = typeof number === 'number' && Number.isInteger(number) && number >= minimum && number <= maximum ? number : null
 
   function refresh() {
     return client.invalidateQueries({ queryKey: ['admin-overview'] })
@@ -56,7 +55,7 @@ export function AdminSettingEditor({ setting }: { setting: Setting }) {
     mutationFn: async () => {
       const { data, error, response } = await api.POST('/api/admin/settings/{id}/review', {
         params: { path: { id: setting.id } },
-        body: { enabled: isBoolean ? enabled : null, value: isBoolean ? null : number },
+        body: { enabled: isBoolean ? enabled : null, value: isBoolean ? null : numericValue },
       })
       if (!data) throw new Error(errorCode(error, response))
       return data
@@ -87,7 +86,7 @@ export function AdminSettingEditor({ setting }: { setting: Setting }) {
 
   if (!allowEdit) return null
   const busy = reviewing.isPending || saving.isPending
-  const unchanged = isBoolean ? enabled === setting.enabled : number === setting.value
+  const unchanged = isBoolean ? enabled === setting.enabled : numericValue === null || numericValue === setting.value
 
   function open() {
     setEnabled(setting.enabled ?? false)
@@ -113,15 +112,10 @@ export function AdminSettingEditor({ setting }: { setting: Setting }) {
           {isBoolean ? (
             <Switch label="تفعيل الإعداد" checked={enabled} disabled={busy} onChange={(event) => setEnabled(event.currentTarget.checked)} />
           ) : (
-            <Stack gap="xs">
-              <Text size="sm" fw={600}>{number} {setting.unit}</Text>
-              <Slider min={minimum} max={maximum} step={1} value={number} onChange={setNumber} disabled={busy}
-                thumbLabel={setting.label} label={(value) => `${value} ${setting.unit}`.trim()} />
-              <Group justify="space-between">
-                <Text size="xs" c="dimmed">الحد الأدنى {minimum}</Text>
-                <Text size="xs" c="dimmed">الحد الأقصى {maximum}</Text>
-              </Group>
-            </Stack>
+            <NumberInput<number> label={setting.label} value={number} onChange={setNumber} disabled={busy}
+              min={minimum} max={maximum} step={1} allowDecimal={false} clampBehavior="none"
+              suffix={setting.unit ? ` ${setting.unit}` : undefined}
+              description={maximum === 2 ** 31 - 1 ? undefined : `من ${minimum} إلى ${maximum}`} />
           )}
         </>}
         <Group justify="flex-end" gap="xs">

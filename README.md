@@ -15,6 +15,58 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.139.0
+
+The web bulletin editor accepts TIFF files in picture fields and in new rows created from a picture. The shared bridge converter sizes and stores the result as PNG for Cinegy and the web preview.
+
+## Version 8.138.0
+
+The Telegram usage digest limits its template and cancellation tables and reports omitted rows. The template ranking keeps the busiest templates at the top even for larger histories.
+
+## Version 8.137.0
+
+Web layer comparison can replace a stale external catalogue record with a new record for a verified current external scene. The bridge checks the event and start marker in both observations and binds the review to the layer, definitions, and current operator permissions. The transaction is local to the catalogue and starts the new record independently.
+
+## Version 8.136.0
+
+Web administration provides on-demand engine health readings with sampled frame counts, input loss, license state, and the probe's timing. This read uses the native diagnostic path and requires the engine health option and a current administrator.
+
+## Version 8.135.0
+
+The Air dashboard can read the programme currently playing and the item cued in Cinegy. Operators can also copy a plain-text air summary with the engine status, reading time, and recorded layers.
+
+Operators can acknowledge the displayed handover report period. The Bot and Web workspace share that acknowledgement and retain its original timestamp on retry.
+
+## Version 8.134.0
+
+Web administration can preview and restore supported settings from a local host backup or return them to defaults. The bridge applies only the reviewed settings and checks that the backup and current configuration still match the reviewed copies.
+
+When remote restart is enabled, an administrator can review and request a graceful restart for a bridge launched and tracked by the desktop Manager. The Web workflow follows the attempt through the replacement process's first successful poll and tick.
+
+## Version 8.133.0
+
+Telegram Access adds a paged, searchable last-interaction view for administrators. Test-layer readiness verifies that the same active event appears in both Cinegy status reads before reporting what it observed.
+
+## Version 8.132.0
+
+Layer comparison offers reviewed removal of one stale external record from the bridge catalogue when two reads identify the same empty Cinegy filler and there is no managed layer work. The desktop Manager preserves the original launch paths when locally restarting its own child and refuses to replace a competing bridge instance.
+
+## Version 8.131.0
+
+The admin Health view adds a read-only operating metrics panel with uptime, command outcomes, Telegram throttling and dropped notifications, heartbeat date, and message size pressure. The Web panel and Telegram stats share the bridge process counters.
+
+## Version 8.130.0
+
+The Web workspace adds a role-aware operator guide and release notes. Administrators can review and change supported editorial timing and reminder settings and open a usage summary that separates template counts, current-process outcomes, and the past seven calendar days.
+
+## Version 8.129.0
+
+Web administration offers a runtime diagnostic download with health counters and a categorized timeline, alongside test-layer and restart readiness checks. Layer comparison supports reviewed adoption of a confirmed external scene that matches a registered template on its physical layer. Operators can acknowledge or snooze personal reminders from the signed-in workspace.
+
+## Version 8.128.0
+
+The Air dashboard can compare a selected layer with the engine and review the station-wide Hide All scope. Web administrators can review relay destination changes while the relay is stopped. The Live page includes acknowledgement and five-minute snooze for actionable follow-up reminders.
+
 ## Version 8.127.0
 
 Administrators can review and rename a broadcast layer in the web interface using the shared layer names used by the Bot. The Schedule page can review pausing and resuming the station-wide template queue. Shift History can look up a recorded air operation by its short reference.

@@ -249,6 +249,165 @@ internal static class SelfTest
             System.Text.Json.JsonSerializer.Deserialize<ManagerSettings>(
                 System.Text.Json.JsonSerializer.Serialize(new ManagerSettings { StartBridgeOnOpen = true }))!.StartBridgeOnOpen);
 
+        // Managed replacement planning and arbitration use synthetic handles.
+        var launch = new BridgeLaunchPlan(@"C:\Fixture Pwsh\pwsh.exe", @"D:\Playout Fixture\TelegramBridge.ps1",
+            @"D:\Playout Fixture", @"D:\Playout Fixture\config.json");
+        var managed = new ManagedBridgeReplacement();
+        var child = new BridgeChildIdentity(new object(), 7312, 52300);
+        var reusedPid = new BridgeChildIdentity(new object(), child.ProcessId, child.StartedAtUtcTicks + 1);
+        var anotherHandle = child with { Handle = new object() };
+        var changedCreation = child with { StartedAtUtcTicks = child.StartedAtUtcTicks + 1 };
+        Check("ordinary starts retain the explicit takeover option",
+            launch.CreateStartInfo().ArgumentList.Contains("-StopExisting") && !launch.CreateStartInfo().ArgumentList.Contains("-RequireSingleInstance"));
+        Check("an adopted child cannot reserve a managed replacement", !managed.TryReserve(null, child, launch));
+        Check("a different tracked child cannot reserve the outgoing process", !managed.TryReserve(child, reusedPid, launch));
+        Check("the exact owned child reserves a replacement", managed.TryReserve(child, child with { }, launch));
+        Check("a pending reservation cannot be overwritten", managed.IsPending && !managed.TryReserve(child, child, launch));
+        Check("a reused PID, stale handle or different birth cannot consume a reservation",
+            managed.Take(reusedPid) is null && managed.Take(anotherHandle) is null && managed.Take(changedCreation) is null && managed.IsPending);
+        var replacement = managed.Take(child);
+        Check("only the exact exit consumes the reservation once",
+            replacement is not null && managed.Take(child) is null && !managed.IsPending);
+        var replacementInfo = replacement?.CreateStartInfo();
+        Check("the managed replacement is noninteractive and refuses takeover",
+            replacementInfo is not null && replacementInfo.ArgumentList.Contains("-NonInteractive") &&
+            replacementInfo.ArgumentList.Contains("-RequireSingleInstance") && !replacementInfo.ArgumentList.Contains("-StopExisting"));
+        Check("a managed replacement retains the exact original paths and encoding",
+            replacementInfo?.FileName == launch.PowerShell && replacementInfo.WorkingDirectory == launch.Root &&
+            replacementInfo.ArgumentList.Contains(launch.ScriptPath) && replacementInfo.ArgumentList.Contains(launch.ConfigPath) &&
+            replacementInfo.StandardOutputEncoding == Encoding.UTF8 && replacementInfo.StandardErrorEncoding == Encoding.UTF8);
+        Check("the retry launch preserves strict flags", replacement?.CreateStartInfo().ArgumentList.SequenceEqual(replacementInfo!.ArgumentList) == true);
+        Check("a canceled reservation cannot restart the outgoing child",
+            managed.TryReserve(child, child, launch));
+        managed.Cancel();
+        Check("an exit after cancellation cannot claim a replacement", managed.Take(child) is null && !managed.IsPending);
+
+        // The journal and child handles here are synthetic. Nothing calls Process.Start or Kill.
+        var restartClock = DateTimeOffset.Parse("2026-11-21T19:00:00Z");
+        var ownerSession = new string('A', 64);
+        var sceneRevision = new string('B', 64);
+        var stages = new List<RestartJournalRecord>();
+        var journal = new ManagedRestartLedger(record => { stages.Add(record); return true; });
+        var reserve = new RestartWireRequest("reserve", "", Actor: 801, Session: ownerSession, Revision: sceneRevision);
+        var reserved = journal.Request(reserve, child, restartClock);
+        Check("managed Web restart journals the reservation before review", reserved.Ok && stages.Single().State == "reserved");
+        var review = reserve with { Action = "confirm", Id = reserved.Id };
+        Check("managed Web restart rejects a different browser proof",
+            !journal.Request(review with { Session = new string('C', 64) }, child, restartClock).Ok);
+        var confirmed = journal.Request(review, child, restartClock);
+        Check("managed Web restart confirms without granting an exit",
+            confirmed.Ok && confirmed.Receipt?.Length == 32 && !journal.HasCommittedExit &&
+            !journal.Request(review with { Action = "grant" }, child, restartClock).Ok);
+        var ack = review with { Action = "ack", Receipt = confirmed.Receipt };
+        Check("managed Web restart checks the receipt after it was offered",
+            !journal.Request(ack with { Receipt = new string('D', 32) }, child, restartClock).Ok &&
+            journal.Request(ack, child, restartClock).Ok && journal.Request(ack, child, restartClock).Ok);
+        var grant = review with { Action = "grant" };
+        Check("managed Web restart refuses expired or changed review context",
+            !journal.Request(grant, child, restartClock.AddMinutes(2)).Ok &&
+            !journal.Request(grant with { Revision = new string('E', 64) }, child, restartClock).Ok);
+        Check("managed Web restart records a retriable exact exit grant",
+            journal.Request(grant, child, restartClock).Ok && journal.Request(grant, child, restartClock).Ok && journal.HasCommittedExit);
+        Check("managed Web restart requires native cleanup before changing paths",
+            !journal.TryClaimReplacement(child, restartClock) &&
+            !journal.Request(grant with { Action = "cleanup" }, reusedPid, restartClock).Ok &&
+            journal.Request(grant with { Action = "cleanup" }, child, restartClock).Ok);
+        Check("only the exact cleaned child can launch once",
+            !journal.TryClaimReplacement(reusedPid, restartClock) && journal.TryClaimReplacement(child, restartClock) && !journal.TryClaimReplacement(child, restartClock));
+        Check("startup proof must come from the registered replacement",
+            journal.TryRegisterReplacement(reusedPid, restartClock) &&
+            !journal.Request(grant with { Action = "ready" }, child, restartClock).Ok &&
+            journal.Request(grant with { Action = "ready" }, reusedPid, restartClock).State == "running");
+        var unverified = new ManagedRestartLedger(_ => true, stages.First(stage => stage.State == "launching"));
+        Check("unproved replacement is stalled at the exact deadline",
+            !unverified.ExpireHandshake(restartClock.AddMinutes(1)) &&
+            unverified.ExpireHandshake(restartClock.AddMinutes(2)) &&
+            unverified.Current?.State == "stalled" &&
+            !unverified.TryRegisterReplacement(reusedPid, restartClock.AddMinutes(2)) &&
+            !unverified.TryClaimReplacement(child, restartClock.AddMinutes(2)));
+        var ambiguousLaunch = new ManagedRestartLedger(_ => true, stages.First(stage => stage.State == "launching"));
+        Check("an unverified replacement requires local recovery before the deadline",
+            ambiguousLaunch.StallHandshake(restartClock) &&
+            !ambiguousLaunch.TryRegisterReplacement(reusedPid, restartClock) &&
+            !ambiguousLaunch.Request(grant with { Action = "ready" }, reusedPid, restartClock).Ok &&
+            !ambiguousLaunch.Fail() && ambiguousLaunch.BlocksAutomation);
+
+        var grantedStage = stages.Single(stage => stage.State == "granted");
+        var cleanStage = stages.Single(stage => stage.State == "clean");
+        var launchingStage = stages.Last(stage => stage.State == "launching");
+        var boundary = grantedStage.ExpiresAt;
+        var journals = new List<RestartJournalRecord>();
+        var lateGrant = new ManagedRestartLedger(record => { journals.Add(record); return true; }, grantedStage);
+        Check("an expired grant becomes a durable stalled terminal state on first use",
+            !lateGrant.Request(grant, child, boundary).Ok && lateGrant.IsStalled && lateGrant.BlocksAutomation &&
+            journals.Single().State == "stalled" && ManagedRestartLedger.NeedsManualRecovery(journals.Single()));
+        Check("stalled old child cannot clean up or begin a second review",
+            !lateGrant.Request(grant with { Action = "cleanup" }, child, boundary).Ok &&
+            !lateGrant.Request(reserve, child, boundary).Ok && lateGrant.Request(grant with { Action = "status" }, child, boundary).State == "stalled" &&
+            !lateGrant.Fail() && lateGrant.IsStalled);
+        var lateCleanup = new ManagedRestartLedger(_ => true, grantedStage);
+        Check("cleanup just before the deadline still permits an in-time exact exit",
+            lateCleanup.Request(grant with { Action = "cleanup" }, child, boundary.AddTicks(-1)).Ok &&
+            lateCleanup.TryClaimReplacement(child, boundary.AddTicks(-1)));
+        var lateExit = new ManagedRestartLedger(_ => true, cleanStage);
+        Check("an exact but late exit cannot claim a replacement after cleanup",
+            !lateExit.TryClaimReplacement(child, boundary) && lateExit.IsStalled && lateExit.BlocksAutomation &&
+            !lateExit.TryClaimReplacement(child, boundary.AddSeconds(1)));
+        var lateReady = new ManagedRestartLedger(_ => true, launchingStage);
+        Check("positive proof at the deadline is rejected even from the exact replacement",
+            !lateReady.Request(grant with { Action = "ready" }, reusedPid, launchingStage.ExpiresAt).Ok && lateReady.IsStalled);
+        var stallWrites = 0;
+        var locked = new ManagedRestartLedger(_ => ++stallWrites > 1, cleanStage);
+        Check("a blocked journal write still latches expiry and retries persistence",
+            locked.ExpireHandshake(boundary) && locked.IsStalled && stallWrites == 1 &&
+            !locked.TryClaimReplacement(child, boundary) && stallWrites == 1 &&
+            !locked.ExpireHandshake(boundary.AddSeconds(1)) && stallWrites == 2 && locked.IsStalled);
+        Check("only deliberate local recovery clears the stalled automation guard",
+            lateExit.CompleteManualRecovery() && !lateExit.BlocksAutomation &&
+            !ManagedRestartLedger.NeedsManualRecovery(lateExit.Current));
+        var relayBeginning = new ManagedRestartLedger(_ => true, stages.Single(stage => stage.State == "received"));
+        Check("a newly active relay cancels the exact reviewed restart without granting exit",
+            relayBeginning.Request(grant with { Action = "relay-active" }, child, restartClock).State == "relay-active" &&
+            !relayBeginning.Request(grant, child, restartClock).Ok && !relayBeginning.BlocksAutomation);
+        var deniedJournal = new ManagedRestartLedger(_ => false);
+        Check("a journal write failure cannot grant consent", !deniedJournal.Request(reserve, child, restartClock).Ok && deniedJournal.Current is null);
+        Check("a previous supervisor's uncertain commit needs explicit local recovery",
+            ManagedRestartLedger.NeedsManualRecovery(stages.First(stage => stage.State == "granted")) &&
+            !ManagedRestartLedger.NeedsManualRecovery(stages.Last()));
+
+        var restartFixture = Path.Combine(Path.GetTempPath(), "ManagerRestartFixture-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var exitRecorded = stages.First(stage => stage.State == "granted");
+            Check("restart journal publishes a restricted durable record", RestartJournalStorage.Publish(restartFixture, exitRecorded));
+            Check("restart journal reads the exact committed revision", RestartJournalStorage.Read(restartFixture) == exitRecorded);
+            var recordedProcessId = 0u;
+            using var fixturePipe = new ManagedRestartPipe((caller, request, _) =>
+            {
+                recordedProcessId = caller;
+                return Task.FromResult(new RestartWireReply(request.Action == "probe", State: "available"));
+            });
+            fixturePipe.Start();
+            using var pipeClient = new System.IO.Pipes.NamedPipeClientStream(".", fixturePipe.Name, System.IO.Pipes.PipeDirection.InOut);
+            pipeClient.Connect(1500);
+            using var writer = new StreamWriter(pipeClient, new UTF8Encoding(false), leaveOpen: true);
+            using var reader = new StreamReader(pipeClient, new UTF8Encoding(false), leaveOpen: true);
+            writer.WriteLine("""{"action":"probe","pairing":"synthetic"}""");
+            writer.Flush();
+            using var pipeTimeout = new CancellationTokenSource(2000);
+            var response = reader.ReadLineAsync(pipeTimeout.Token).AsTask().GetAwaiter().GetResult();
+            Check("the private restart pipe reports the Windows client process identity",
+                recordedProcessId == (uint)Environment.ProcessId && response?.Contains("\"state\":\"available\"") == true);
+        }
+        finally
+        {
+            if (Directory.Exists(restartFixture))
+            {
+                File.Delete(Path.Combine(restartFixture, "manager-restart.json"));
+                Directory.Delete(restartFixture);
+            }
+        }
+
         // --- the bridge-managed list guard ---------------------------------
         Check("managed edit while running needs a restart",
             SettingsForm.NeedsRestartToPersist(true, new[] { "AdminUserIds" }));

@@ -87,19 +87,49 @@ function Remove-JsonProp {
     $Object.PSObject.Properties.Remove($Name) | Out-Null
 }
 
+function Get-ConfigDiskFingerprint {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $file = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($file -isnot [IO.FileInfo] -or $file.Length -gt 16MB -or
+            ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            ($file.Directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+        $stream = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            if ($stream.Length -ne $file.Length -or $stream.Length -gt 16MB) { return }
+            return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream))
+        }
+        finally { $stream.Dispose() }
+    }
+    catch { return }
+}
+
+function Test-ReviewedConfigFileVersions {
+    param([string]$Path, [System.Collections.IDictionary]$Version)
+
+    if ($Version.diskHash -cnotmatch '^[0-9A-F]{64}$' -or (Get-ConfigDiskFingerprint -Path $Path) -cne $Version.diskHash) { return $false }
+    if (-not $Version.sourcePath) { return $true }
+    return $Version.sourceHash -cmatch '^[0-9A-F]{64}$' -and
+        (Get-ConfigDiskFingerprint -Path $Version.sourcePath) -ceq $Version.sourceHash
+}
+
 function Save-ReviewedConfigSettings {
-    param([string]$Path, [System.Collections.IDictionary]$Patch, [System.Collections.IDictionary]$Expected, [long]$Deadline)
+    param([string]$Path, [System.Collections.IDictionary]$Patch, [System.Collections.IDictionary]$Expected, [long]$Deadline,
+        [System.Collections.IDictionary]$Relay, [System.Collections.IDictionary]$Version)
 
     # Save-Config holds the same mutex used by the manager. Review writes
     # touch only the approved scalars and never republish the secret store.
     $temporary = "$Path.review-$([guid]::NewGuid().ToString('N')).tmp"
     try {
-        if (-not $Patch.Count -or -not $Expected.Count -or ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline)) { return 'failed' }
+        if ((-not $Relay -and (-not $Patch.Count -or -not $Expected.Count)) -or
+            ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline)) { return 'failed' }
         $source = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         $backup = Get-Item -LiteralPath "$Path.bak" -Force -ErrorAction SilentlyContinue
         if ($source -isnot [IO.FileInfo] -or $source.Length -gt 16MB -or
             ($source.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
             ($backup -and ($backup -isnot [IO.FileInfo] -or ($backup.Attributes -band [IO.FileAttributes]::ReparsePoint)))) { return 'failed' }
+        if ($Version -and -not (Test-ReviewedConfigFileVersions -Path $Path -Version $Version)) { return 'stale' }
         $original = [IO.File]::ReadAllText($Path)
         $nodeOptions = [System.Text.Json.Nodes.JsonNodeOptions]@{ PropertyNameCaseInsensitive = $true }
         $documentOptions = [System.Text.Json.JsonDocumentOptions]@{
@@ -109,32 +139,43 @@ function Save-ReviewedConfigSettings {
         }
         $document = [System.Text.Json.Nodes.JsonNode]::Parse($original, $nodeOptions, $documentOptions)
         if ($document -isnot [System.Text.Json.Nodes.JsonObject]) { return 'failed' }
-        if (-not $document.ContainsKey('Settings')) { $document['Settings'] = [System.Text.Json.Nodes.JsonObject]::new($nodeOptions) }
-        $diskSettings = $document['Settings']
-        if ($diskSettings -isnot [System.Text.Json.Nodes.JsonObject]) { return 'failed' }
-
-        foreach ($name in $Expected.Keys) {
-            $current = if ($diskSettings.ContainsKey([string]$name)) {
-                $node = $diskSettings[[string]$name]
-                if ($null -ne $node) { ConvertFrom-Json -InputObject $node.ToJsonString() -NoEnumerate -ErrorAction Stop }
-            }
-            else { $script:DefaultSettings[$name] }
-            if ($name -ceq 'LayerNames') {
-                if ($null -eq $current) { $current = '' }
-                if ($current -isnot [string]) { return 'stale' }
-            }
-            else {
-                try { $current = ConvertTo-ImportedSettingValue -Name ([string]$name) -Value $current }
-                catch { return 'stale' }
-            }
-            if (-not [object]::Equals($current, $Expected[$name])) { return 'stale' }
+        if ($Relay) {
+            $relayPlan = Get-ReviewedRelayConfigPlan -Document $document -Change $Relay -NodeOptions $nodeOptions
+            if ($relayPlan.Code -cne 'ready') { return $relayPlan.Code }
         }
-        foreach ($name in $Patch.Keys) {
-            $value = $Patch[$name]
-            $valid = if ($name -ceq 'LayerNames') { $value -is [string] }
-            else { $value -is [bool] -or $value -is [int] }
-            if (-not $Expected.Contains($name) -or -not $valid) { return 'failed' }
-            $diskSettings[[string]$name] = [System.Text.Json.Nodes.JsonNode]::Parse((ConvertTo-Json -InputObject $Patch[$name] -Compress))
+        else {
+            if (-not $document.ContainsKey('Settings')) { $document['Settings'] = [System.Text.Json.Nodes.JsonObject]::new($nodeOptions) }
+            $diskSettings = $document['Settings']
+            if ($diskSettings -isnot [System.Text.Json.Nodes.JsonObject]) { return 'failed' }
+
+            foreach ($name in $Expected.Keys) {
+                $current = if ($diskSettings.ContainsKey([string]$name)) {
+                    $node = $diskSettings[[string]$name]
+                    if ($null -ne $node) { ConvertFrom-Json -InputObject $node.ToJsonString() -NoEnumerate -ErrorAction Stop }
+                }
+                else { $script:DefaultSettings[$name] }
+                if ($name -cin @('LayerNames', 'HideAllLayers')) {
+                    if ($null -eq $current) { $current = $script:DefaultSettings[$name] }
+                    if ($current -isnot [string]) { return 'stale' }
+                }
+                else {
+                    try { $current = ConvertTo-ImportedSettingValue -Name ([string]$name) -Value $current }
+                    catch { return 'stale' }
+                }
+                if (-not [object]::Equals($current, $Expected[$name])) { return 'stale' }
+            }
+            foreach ($name in $Patch.Keys) {
+                $value = $Patch[$name]
+                $valid = if ($name -cin @('LayerNames', 'HideAllLayers')) { $value -is [string] }
+                else { $value -is [bool] -or $value -is [int] }
+                if (-not $Expected.Contains($name) -or -not $valid) { return 'failed' }
+                $diskSettings[[string]$name] = [System.Text.Json.Nodes.JsonNode]::Parse((ConvertTo-Json -InputObject $Patch[$name] -Compress))
+            }
+        }
+        if ($Relay -and $relayPlan.SecretOnly) {
+            if ([IO.File]::ReadAllText($Path) -cne $original) { return 'stale' }
+            Write-BridgeSecretStore -Path $script:SecretStorePath -Secrets $relayPlan.Secrets -Deadline $Deadline
+            return 'saved'
         }
         $outputOptions = [System.Text.Json.JsonSerializerOptions]@{ WriteIndented = $true; MaxDepth = 100 }
         [IO.File]::WriteAllText($temporary, $document.ToJsonString($outputOptions))
@@ -143,13 +184,21 @@ function Save-ReviewedConfigSettings {
         if ([IO.File]::ReadAllText($Path) -cne $original) { return 'stale' }
         if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return 'failed' }
 
+        if ($Relay -and $relayPlan.Secrets) {
+            # Publish the new single-purpose secret before anyone can see its config reference.
+            Write-BridgeSecretStore -Path $script:SecretStorePath -Secrets $relayPlan.Secrets -Deadline $Deadline
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return 'failed' }
+        }
         # On Windows an atomic replacement with a sibling backup retains the
         # exact previous bytes. A filesystem that cannot do this fails closed.
+        if ($Version -and -not (Test-ReviewedConfigFileVersions -Path $Path -Version $Version)) { return 'stale' }
+        if ($Version -and $Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return 'failed' }
         [IO.File]::Replace($temporary, $Path, "$Path.bak", $false)
+        if ($Relay -and $relayPlan.Reference) { $script:SecretReferences['LiveStream.RtmpDestination'] = $relayPlan.Reference }
         return 'saved'
     }
     catch {
-        Write-BridgeLog 'Reviewed settings import could not publish a staged configuration.' 'ERROR'
+        Write-BridgeLog 'A reviewed change could not publish its staged configuration.' 'ERROR'
         return 'failed'
     }
     finally {
@@ -164,8 +213,9 @@ function Save-Config {
        clobbered by the next approval - and the in-memory copy picks that
        manual edit up at the same time. #>
     param([string]$Path = $ConfigPath, [long]$Deadline = 0,
-        [System.Collections.IDictionary]$ReviewedPatch, [System.Collections.IDictionary]$ReviewedExpected)
-    $reviewed = $PSBoundParameters.ContainsKey('ReviewedPatch')
+        [System.Collections.IDictionary]$ReviewedPatch, [System.Collections.IDictionary]$ReviewedExpected,
+        [System.Collections.IDictionary]$ReviewedRelay, [System.Collections.IDictionary]$ReviewedVersion)
+    $reviewed = $PSBoundParameters.ContainsKey('ReviewedPatch') -or $PSBoundParameters.ContainsKey('ReviewedRelay')
     if ($reviewed) { $script:LastConfigSaveConflict = $false }
     if ($LoadOnly -and [IO.Path]::GetFullPath($Path) -eq [IO.Path]::GetFullPath($ConfigPath) -and
         [IO.Path]::GetFileName($Path) -eq 'config.example.json') {
@@ -189,7 +239,7 @@ function Save-Config {
     }
     if ($reviewed) {
         try {
-            $status = Save-ReviewedConfigSettings -Path $Path -Patch $ReviewedPatch -Expected $ReviewedExpected -Deadline $Deadline
+            $status = Save-ReviewedConfigSettings -Path $Path -Patch $ReviewedPatch -Expected $ReviewedExpected -Deadline $Deadline -Relay $ReviewedRelay -Version $ReviewedVersion
             $script:LastConfigSaveFailed = $status -cne 'saved'
             $script:LastConfigSaveConflict = $status -ceq 'stale'
         }
@@ -818,7 +868,7 @@ function Get-BridgeTextWarnings {
 
 function Select-RichTableRows {
     <#
-        The newest rows a table may show, and how many were left out.
+        The rows a table may show, and how many were left out.
 
         Its own function because three screens had no cap at all and each
         would have grown into the same outage on a different station: a
@@ -826,25 +876,26 @@ function Select-RichTableRows {
         rewritten whole. A cap written four times is a cap that will be
         raised in three places and forgotten in the fourth.
 
-        The newest, because every one of these screens is read for what
-        happened most recently; the text version of each still carries the
-        whole window for anyone who needs it.
+        Recent activity keeps the newest rows by default. Rankings keep the
+        first rows so the highest-ranked entries remain visible.
     #>
-    param([AllowNull()][object[]]$Items, [int]$Maximum = 0)
+    param([AllowNull()][object[]]$Items, [int]$Maximum = 0, [switch]$KeepFirst)
     if ($Maximum -le 0) { $Maximum = $script:RichTableMaxRows }
     $all = @($Items)
     if ($all.Count -le $Maximum) {
         return [pscustomobject]@{ Rows = $all; Hidden = 0 }
     }
-    return [pscustomobject]@{ Rows = @($all | Select-Object -Last $Maximum); Hidden = ($all.Count - $Maximum) }
+    $visible = if ($KeepFirst) { $all | Select-Object -First $Maximum } else { $all | Select-Object -Last $Maximum }
+    return [pscustomobject]@{ Rows = @($visible); Hidden = ($all.Count - $Maximum) }
 }
 
 function Get-RichTableTrimNote {
     <# The line that admits what the table left out. Said on the screen, not
        only in a log: a table silently missing its oldest rows is a table that
        will be read as the whole story. #>
-    param([Parameter(Mandatory)][int]$Hidden, [Parameter(Mandatory)][int]$Shown)
+    param([Parameter(Mandatory)][int]$Hidden, [Parameter(Mandatory)][int]$Shown, [switch]$KeepFirst)
     if ($Hidden -le 0) { return '' }
+    if ($KeepFirst) { return (T 'core.firstRowsOnly' $Shown $Hidden) }
     return (T 'core.newestRowsOnly' $Shown $Hidden)
 }
 
@@ -1339,10 +1390,12 @@ function Write-AuditRecord {
         [long]$DurationMs = 0,
         [string]$Message = '',
         [string]$Values = '',
-        [int]$Count = 0
+        [int]$Count = 0,
+        [datetimeoffset]$At = [datetimeoffset]::UtcNow,
+        [switch]$ReturnStatus
     )
     $record = [ordered]@{
-        timestampUtc = [DateTime]::UtcNow.ToString('o')
+        timestampUtc = $At.UtcDateTime.ToString('o')
         operationId  = Protect-SensitiveText (($OperationId -replace '[\r\n]+', ' ').Trim())
         event        = Protect-SensitiveText (($EventName -replace '[\r\n]+', ' ').Trim())
         result       = Protect-SensitiveText (($Result -replace '[\r\n]+', ' ').Trim())
@@ -1366,21 +1419,25 @@ function Write-AuditRecord {
         # and lands in whatever the caller returns - Invoke-ShowTemplateResult
         # came back as an array and lost its .Success.
         Invoke-AuditRotation | Out-Null
-        Add-Content -LiteralPath $script:auditFile -Value ($record | ConvertTo-Json -Compress -Depth 4) -Encoding utf8
+        Add-Content -LiteralPath $script:auditFile -Value ($record | ConvertTo-Json -Compress -Depth 4) -Encoding utf8 -ErrorAction Stop
+        if ($ReturnStatus) { return $true }
     }
     catch {
         Write-BridgeLog "AUDIT_WRITE_FAILED id=$OperationId event=$EventName error=$($_.Exception.Message)" 'ERROR'
+        if ($ReturnStatus) { return $false }
     }
 }
 
 function Add-AuditEntry {
     <# Short in-memory history surfaced by the admin's 📜 button, so "who put
        that on air?" can be answered from Telegram without opening the log. #>
-    param([Parameter(Mandatory)][string]$Message)
+    param([Parameter(Mandatory)][string]$Message, [switch]$InMemoryOnly)
     $script:AuditTrail.Add("$(Format-AuditTrailStamp -At (Get-Date)) $Message")
     $max = Get-SettingInt 'AuditTrailSize' 1
     while ($script:AuditTrail.Count -gt $max) { $script:AuditTrail.RemoveAt(0) }
-    Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -EventName activity -Result success -Message $Message
+    if (-not $InMemoryOnly) {
+        Write-AuditRecord -OperationId "audit-$([guid]::NewGuid().ToString('N'))" -EventName activity -Result success -Message $Message
+    }
 }
 
 function Get-AuditRecordField {

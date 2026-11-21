@@ -43,6 +43,7 @@ $script:WebOnlyUserIdBase = 9000000000000000L
 $script:WebLoginRequests = @{}
 $script:WebLoginLifetimeMinutes = 5
 $script:WebLoginMaxPending = 50
+$script:WebRelayDestinationReviews = @{}
 $script:WebRelayReviewKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 $script:WebBulletinPreviewKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 $script:WebCaptureRecords = @{}
@@ -357,16 +358,33 @@ function Invoke-WebChannelOperation {
         'air.templateScene' { return Invoke-WebTemplateSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateCatalogue' { return Start-WebSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateDefinition' { return Invoke-WebTemplateDefinition -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.hideAllScope' { return Get-WebHideAllLayerScope -Arguments $arguments }
+        'air.hideAllScope.review' { return New-WebHideAllLayerScopeReview -Arguments $arguments }
+        'air.hideAllScope.confirm' { return Complete-WebHideAllLayerScopeReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.personalReminders' { return Get-WebPersonalAirReminders -Arguments $arguments }
+        'air.personalReminder.act' { return Invoke-WebPersonalAirReminderAction -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.templateFavorites' { return Get-WebTemplateFavorites -Arguments $arguments }
         'air.templateFavorite.set' { return Set-WebTemplateFavorite -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.settings.recovery.backups' { return Get-WebAdminSettingsBackups -Arguments $arguments }
+        'admin.settings.recovery.review' { return New-WebAdminSettingsRecoveryReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.settings.recovery.confirm' { return Complete-WebAdminSettingsRecoveryReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.settings.import.review' { return New-WebAdminSettingsImportReview -Arguments $arguments }
         'admin.settings.import.confirm' { return Complete-WebAdminSettingsImportReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.settings.export' { return Get-WebAdminSettingsExport -Arguments $arguments }
         'admin.settings.review' { return New-WebAdminSettingReview -Arguments $arguments }
         'admin.settings.confirm' { return Complete-WebAdminSettingReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.notifications.coverage' { return Get-WebAdminNotificationCoverage -Arguments $arguments }
+        'admin.usage-summary' { return Get-WebUsageSummary -Arguments $arguments }
         'admin.readiness' { return Get-WebShiftReadiness -Arguments $arguments }
+        'admin.self-test.readiness' { return Get-WebSelfTestReadiness -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.restart.review' { return Invoke-WebManagedRestart -Action reserve -Arguments $arguments }
+        'admin.restart.confirm' { return Invoke-WebManagedRestart -Action confirm -Arguments $arguments }
+        'admin.restart.cancel' { return Invoke-WebManagedRestart -Action cancel -Arguments $arguments }
+        'admin.restart.accept' { return Invoke-WebManagedRestart -Action ack -Arguments $arguments }
+        'admin.restart.status' { return Invoke-WebManagedRestart -Action status -Arguments $arguments }
+        'admin.restart.readiness' { return Get-WebRestartReadiness -Arguments $arguments }
         'admin.overview' { return Get-WebAdminOverview -Arguments $arguments }
+        'help.operator' { return Invoke-WebOperatorHelp -Arguments $arguments }
         'shift.notices' { return Invoke-WebShiftNotice -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.revoke.review' { return New-WebTelegramRevokeReview -Arguments $arguments }
         'telegram.access.revoke.confirm' { return Complete-WebTelegramRevokeReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -377,6 +395,7 @@ function Invoke-WebChannelOperation {
         'telegram.access.alias.review' { return New-WebTelegramAliasReview -Arguments $arguments }
         'telegram.access.alias.confirm' { return Complete-WebTelegramAliasReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.operator-activity' { return Get-WebTelegramOperatorActivity -Arguments $arguments }
+        'telegram.access.presence' { return Get-WebTelegramPresence -Arguments $arguments }
         'telegram.delivery.quarantine' { return Get-WebTelegramDeliveryQuarantine -Arguments $arguments }
         'telegram.delivery.quarantine.reset.review' { return New-WebTelegramQuarantineResetReview -Arguments $arguments }
         'telegram.delivery.quarantine.reset.confirm' { return Complete-WebTelegramQuarantineResetReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -388,12 +407,16 @@ function Invoke-WebChannelOperation {
         'admin.announcements.queue.confirm' { return Complete-WebAnnouncementReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.announcements.cancel.review' { return New-WebAnnouncementCancelReview -Arguments $arguments }
         'admin.announcements.cancel.confirm' { return Complete-WebAnnouncementCancelReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.operation-metrics' { return Get-WebOperationMetrics -Arguments $arguments }
+        'admin.engine-health' { return Get-WebEngineHealth -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.diagnostics.bundle' { return Get-WebDiagnosticBundle -Arguments $arguments }
         'admin.diagnostics.runtime-files' { return Get-WebRuntimeFileDiagnostics -Arguments $arguments }
         'schedule.executions' { return Get-WebScheduleExecutionPage -Arguments $arguments }
         'schedule.hold.review' { return New-WebScheduleHoldReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'schedule.hold.confirm' { return Complete-WebScheduleHoldReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'reports.templates' { return Get-WebTemplateReport -Arguments $arguments }
         'reports.weekly' { return Get-WebWeeklyReport -Arguments $arguments }
+        'reports.handover.acknowledge' { return Invoke-WebShiftHandoverAcknowledgement -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'reports.handover' { return Get-WebShiftHandoverReport -Arguments $arguments }
         'reports.ticker' { return Get-WebTickerReport -Arguments $arguments }
         'reports.bulletins' { return Get-WebBulletinReport -Arguments $arguments }
@@ -426,6 +449,14 @@ function Invoke-WebChannelOperation {
         'air.templateMaxAir.review' { return New-WebTemplateMaxAirReview -Arguments $arguments }
         'air.templateMaxAir.confirm' { return Complete-WebTemplateMaxAirReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.layer-removal' { return Invoke-WebLayerRemoval -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.programme' { return Get-WebProgrammeNowNext -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.layer-comparison' { return Get-WebLayerComparison -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.layer-adoption.review' { return Invoke-WebLayerAdoption -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.layer-adoption.confirm' { return Invoke-WebLayerAdoption -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) -ApplyReview }
+        'air.layer-forget.review' { return Invoke-WebLayerForget -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.layer-forget.confirm' { return Invoke-WebLayerForget -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) -ApplyReview }
+        'air.layer-replacement.review' { return Invoke-WebLayerReplacement -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.layer-replacement.confirm' { return Invoke-WebLayerReplacement -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) -ApplyReview }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
         'content.list' { return Get-WebContentPage -Arguments $arguments }
@@ -453,6 +484,8 @@ function Invoke-WebChannelOperation {
         'board.delete' { return Remove-WebProgrammeBoard -Arguments $arguments }
         'board.paste' { return Invoke-WebProgrammeBoardPaste -Arguments $arguments }
         'board.air' { return Invoke-WebProgrammeBoardAir -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'relay.destination.review' { return Invoke-WebRelayDestination -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'relay.destination.confirm' { return Invoke-WebRelayDestination -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) -ApplyReview }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
         'media.capture' { return Invoke-WebCapture -Arguments $arguments }
     }
@@ -545,6 +578,7 @@ function Get-WebRelayControlState {
             state = $state; revision = $revision; enabled = $enabled; configured = $configured
             canStart = $state -in 'stopped', 'failed' -and $configured
             canStop = -not $unverified -and ([bool]$process -or $retry)
+            canEditDestination = $state -in 'stopped', 'disabled', 'failed' -and -not (Test-Path -LiteralPath $relayPidFile)
             outcome = ''
         }
     }
@@ -2296,7 +2330,7 @@ function Get-WebUrgentTimingState {
     $snapshot = ConvertTo-Json -Compress -InputObject $state
     $state['revision'] = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($snapshot)))
     $state['floorSeconds'] = Get-UrgentFloorSeconds
-    $state['canEdit'] = -not [bool]$script:UrgentBoardRun
+    $state['canEdit'] = -not (Test-UrgentBoardTimingBusy)
     $state['bounds'] = @{}
     foreach ($kind in 'interval', 'repeats', 'total', 'gap') {
         $spec = Get-UrgentNumberSpec -Kind "d$kind"
@@ -3045,8 +3079,452 @@ function Get-WebUrgentRun {
 }
 
 function Get-WebLayerStatus {
-    param([int]$Layer)
-    return Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+    param([int]$Layer, [int]$TimeoutSec = 0, [switch]$RequireConsistentIdentity)
+    if ($TimeoutSec -le 0) { $TimeoutSec = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1 }
+    return Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
+        -Layer $Layer -TimeoutSec $TimeoutSec -RequireConsistentIdentity:$RequireConsistentIdentity
+}
+
+$script:WebLayerComparisonNextProbe = 0L
+
+function Get-WebLayerComparison {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline)
+
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-LayersScreenAccess -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    # Include tracked layers whose template was removed. The native comparison
+    # discovers external scenes on configured layers and rechecks orphan records.
+    $known = @((@(Get-KnownLayers) + @($script:OnAir.Keys)) | ForEach-Object { [int]$_ } |
+        Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+    $requested = Get-JsonProp $Arguments 'layer'
+    if ($null -eq $requested) {
+        return @{ ok = $true; data = @{ layers = @(
+            foreach ($layer in $known) { @{ layer = $layer; name = Get-WebLayerNameSafe -Layer $layer } }
+        ) } }
+    }
+    $layer = 0
+    if (-not [int]::TryParse([string]$requested, [ref]$layer) -or $layer -notin $known) {
+        return @{ ok = $false; error = 'layer_comparison_missing' }
+    }
+    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    if ($Deadline -gt 0 -and $now -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+    if ($now -lt $script:WebLayerComparisonNextProbe) { return @{ ok = $false; error = 'layer_comparison_busy' } }
+    try {
+        # This optional diagnostic must not delay the playout loop by a full
+        # station sweep. It performs one bounded status request per inspection.
+        $status = Get-WebLayerStatus -Layer $layer -TimeoutSec 2
+    }
+    finally {
+        $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + [Diagnostics.Stopwatch]::Frequency
+    }
+
+    $tracked = $script:OnAir[$layer]
+    $active = Get-JsonProp $status 'IsOnAir'
+    $disposition = 'failed'
+    if ((Get-JsonProp $status 'Success') -eq $true -and $active -is [bool]) {
+        # Use the pure decision, never the reconciliation executor. The latter
+        # can restore urgent board playout when an active layer goes empty.
+        $decision = Resolve-BridgeCinegyLayerState -Layer $layer -TrackedRecord $tracked -Status $status -DiscoverExternal
+        $disposition = $decision.Action
+    }
+    else { $active = $null }
+    $trackedId = ([string](Get-JsonProp $tracked 'ActiveId')).Trim().Trim('{', '}')
+    $reportedId = ([string](Get-JsonProp $status 'ActiveId')).Trim().Trim('{', '}')
+    $canReviewReplace = $disposition -ceq 'update' -and (Get-JsonProp $tracked 'Source') -ceq 'cinegy' -and
+        -not (Get-JsonProp $tracked 'ActiveIdConfirmed') -and $trackedId -and $reportedId -and $trackedId -ne $reportedId
+    $canReviewForget = $disposition -ceq 'remove' -and (Get-JsonProp $tracked 'Source') -ceq 'cinegy' -and
+        $null -ne (Get-WebExplicitCinegyFiller -Status $status)
+    return @{ ok = $true; data = @{
+        layer = $layer; tracked = $null -ne $tracked; engineActive = $active; canReviewForget = $canReviewForget; canReviewReplace = [bool]$canReviewReplace
+        disposition = $disposition; observedAt = [datetimeoffset]::UtcNow.ToUnixTimeMilliseconds()
+    } }
+}
+
+$script:WebLayerAdoptionReviews = @{}
+
+function Get-WebLocalLayerReviewDevice {
+    param([int]$Layer, [switch]$AllowTracked)
+    if ($Layer -notin @(Get-KnownLayers) -or (Get-Setting 'SceneMode') -ne 'Single' -or
+        (Test-AirRunActive) -or $script:BoardsLive.Count -gt 0 -or $script:UrgentManualLive.Count -gt 0 -or
+        @($script:AutoHideQueue | Where-Object Layer -EQ $Layer).Count -gt 0 -or
+        @($script:TemplateReminderQueue | Where-Object Layer -EQ $Layer).Count -gt 0) { return '' }
+    if (-not $AllowTracked -and ($script:OnAir.ContainsKey($Layer) -or
+            @($script:OnAirScenes | Where-Object Layer -EQ $Layer).Count -gt 0)) { return '' }
+
+    $device = [string](Resolve-AirGfxDevice -Layer $Layer).StatusPath
+    if ($device -cnotmatch '^gfx_[a-z0-9_]{1,32}$') { return '' }
+    $testLayer = Get-SettingInt 'TemplateTestLayer' 0
+    if ($testLayer -gt 0 -and (Resolve-AirGfxDevice -Layer $testLayer).StatusPath -ceq $device) { return '' }
+    foreach ($other in @(Get-KnownLayers; $script:OnAir.Keys)) {
+        if ($other -gt 0 -and $other -ne $Layer -and (Resolve-AirGfxDevice -Layer ([int]$other)).StatusPath -ceq $device) { return '' }
+    }
+    return $device
+}
+
+function Get-WebExternalLayerAdoptionRecord {
+    param([int]$Layer, [string]$Device, $Status)
+
+    $decision = Resolve-BridgeCinegyLayerState -Layer $layer -Status $status -DiscoverExternal
+    if ($decision.Action -cne 'add') { return }
+    # Only use a current registered key. A raw engine item name may contain a
+    # local path and the normal on-air projection is visible to web operators.
+    $key = [string]$decision.Record.Key
+    $registered = (Get-TemplateStore).Map[$key]
+    if (-not $registered -or [int](Get-JsonProp $registered 'Layer') -ne $layer -or
+        (Get-JsonProp $registered 'Key') -cne $key -or $key -in $script:MojazTemplateKey, $script:MojazUrgentKey -or
+        (Get-JsonProp $registered 'Bulletin') -or (Test-PermanentGraphicAutoHideProtected -Key $key -Layer $layer) -or
+        (Test-PermanentGraphicAutoHideProtected -Layer $layer)) { return }
+    $declaredDevice = [string](Get-JsonProp $registered 'Device')
+    if ($declaredDevice -and (Resolve-AirGfxDevice -Layer $layer -Device $declaredDevice).StatusPath -cne $device) {
+        return
+    }
+    return @{ Key = $key; Record = $decision.Record; Definition = $registered; DeclaredDevice = $declaredDevice }
+}
+
+function Invoke-WebLayerAdoption {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline, [switch]$ApplyReview)
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-LayersScreenAccess -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $layer = 0
+    if (-not [int]::TryParse([string](Get-JsonProp $Arguments 'layer'), [ref]$layer) -or $layer -le 0) {
+        return @{ ok = $false; error = 'layer_comparison_missing' }
+    }
+    $busy = @{ ok = $false; error = 'bridge_busy' }
+    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    if ($Deadline -gt 0 -and $now -ge $Deadline) { return $busy }
+    if ($now -lt $script:WebLayerComparisonNextProbe) { return @{ ok = $false; error = 'layer_comparison_busy' } }
+    $unavailable = @{ ok = $false; error = if ($ApplyReview) { 'layer_adoption_stale' } else { 'layer_adoption_unavailable' } }
+    $approval = if ($ApplyReview) {
+        Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebLayerAdoptionReviews
+    }
+    if ($ApplyReview -and (-not $approval -or $approval.Layer -ne $layer)) { return $unavailable }
+    $device = Get-WebLocalLayerReviewDevice -Layer $layer
+    $disk = Get-OnAirDiscoveryDiskRevision
+    if (-not $device -or -not $disk -or ($ApplyReview -and $approval.Disk -cne $disk)) { return $unavailable }
+
+    try {
+        $status = Get-WebLayerStatus -Layer $layer -TimeoutSec 2
+    }
+    finally {
+        $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + [Diagnostics.Stopwatch]::Frequency
+    }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
+    $stamp = Get-CinegyLayerReviewStamp -Status $status
+    $activeEventId = [guid]::Empty
+    if ($stamp -cnotmatch '^active:(.+)$' -or -not [guid]::TryParse($Matches[1], [ref]$activeEventId) -or $activeEventId -eq [guid]::Empty) {
+        return $unavailable
+    }
+    $started = Get-CinegyStatusStartTicks -Status $status
+    if ($started -le 0) { return $unavailable }
+    $adoption = Get-WebExternalLayerAdoptionRecord -Layer $layer -Device $device -Status $status
+    if (-not $adoption) { return $unavailable }
+    $key = $adoption.Key
+    $declaredDevice = $adoption.DeclaredDevice
+    if (-not (Test-TemplateAccess -Key $key -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $fingerprint = ConvertTo-Json -Compress -InputObject @($layer, $device, $stamp, $started, $key, $declaredDevice, $disk,
+        [string]$config.AirServerAddress, [int]$config.AirChannelNumber)
+    if (-not $ApplyReview) {
+        $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebLayerAdoptionReviews
+        $review = $script:WebLayerAdoptionReviews[$actor]
+        $review.Layer = $layer
+        $review.Disk = $disk
+        $maximumExpiry = [datetimeoffset]::UtcNow.AddMinutes(2)
+        if ($review.ExpiresAt -gt $maximumExpiry) { $review.ExpiresAt = $maximumExpiry }
+        return @{ ok = $true; data = @{ review = $token; layer = $layer; templateKey = $key } }
+    }
+    if ($approval.Fingerprint -cne $fingerprint) { return $unavailable }
+    $remaining = ($approval.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
+    if ($remaining -le 0) { return $unavailable }
+    $writeDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($remaining * [Diagnostics.Stopwatch]::Frequency)
+    if ($Deadline -gt 0) { $writeDeadline = [math]::Min($Deadline, $writeDeadline) }
+    $adoption.Record.Remove('CinegyEventName')
+    $result = Save-ReviewedOnAirDiscovery -Layer $layer -Record $adoption.Record -ExpectedDisk $disk -Deadline $writeDeadline
+    if ($result -ceq 'stale') { return $unavailable }
+    if ($result -ceq 'expired') { return $busy }
+    if ($result -cne 'saved') { return @{ ok = $false; error = 'layer_adoption_save_failed' } }
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = @{ layer = $layer; adopted = $true } }
+}
+
+$script:WebLayerForgetReviews = @{}
+
+function Get-WebExplicitCinegyFiller {
+    param($Status)
+    if ((Get-JsonProp $Status 'Success') -ne $true -or (Get-JsonProp $Status 'IsOnAir') -isnot [bool] -or
+        (Get-JsonProp $Status 'IsOnAir') -or (Get-JsonProp $Status 'OffAirReason') -cne 'empty-item') { return }
+
+    # Success and ActiveId from /status alone cannot establish which item
+    # /status/active described if a scene changed between the two reads.
+    try {
+        $item = ([xml][string](Get-JsonProp $Status 'ActiveXml')).SelectSingleNode('/Item')
+        if (-not $item -or $item.GetAttribute('IsEmpty') -notmatch '^(y|yes|true|1)$' -or
+            -not $item.HasAttribute('ScheduledAt')) { return }
+        $statusId = [guid]::Empty
+        $itemId = [guid]::Empty
+        if (-not [guid]::TryParse([string](Get-JsonProp $Status 'ActiveId'), [ref]$statusId) -or
+            -not [guid]::TryParse($item.GetAttribute('Id'), [ref]$itemId) -or
+            $itemId -eq [guid]::Empty -or $itemId -ne $statusId) { return }
+        $started = Get-CinegyStatusStartTicks -Status $Status
+        if ($started -gt 0) { return @{ Id = $itemId; Started = $started } }
+    }
+    catch { return }
+}
+
+function Get-WebExternalLayerForgetTarget {
+    param([int]$Layer, [string]$Device)
+    if ($script:LastSuccessfulLayerShows.ContainsKey($Layer) -or $script:RollbackCandidates.ContainsKey($Layer)) { return }
+    $record = $script:OnAir[$Layer]
+    $scenes = @($script:OnAirScenes | Where-Object Layer -EQ $Layer)
+    if (-not $record -or $scenes.Count -ne 1 -or (Get-JsonProp $record 'Source') -cne 'cinegy' -or
+        (Get-JsonProp $record 'ActiveIdConfirmed') -or (Get-JsonProp $record 'UserId') -gt 0 -or
+        (Get-JsonProp $record 'ChatId') -gt 0 -or (Get-JsonProp $record 'AirCopy') -or
+        $null -ne (Get-JsonProp $record 'Values')) { return }
+    $scene = $scenes[0]
+    $key = [string](Get-JsonProp $record 'Key')
+    $recordEvent = [guid]::Empty
+    if (-not $key -or $scene.Source -cne 'cinegy' -or $scene.Key -cne $key -or
+        $scene.ActiveIdConfirmed -or $scene.UserId -ne 0 -or $scene.ChatId -ne 0 -or
+        $scene.ActiveId -cne (Get-JsonProp $record 'ActiveId') -or
+        -not [guid]::TryParse($scene.ActiveId, [ref]$recordEvent) -or $recordEvent -eq [guid]::Empty) { return }
+
+    $store = Get-TemplateStore
+    $definition = $store.Map[$key]
+    if (-not $definition -or (Get-JsonProp $definition 'Key') -cne $key -or
+        [int](Get-JsonProp $definition 'Layer') -ne $Layer -or $key -in $script:MojazTemplateKey, $script:MojazUrgentKey -or
+        (Get-JsonProp $definition 'Bulletin') -or (Test-PermanentGraphicAutoHideProtected -Key $key -Layer $Layer) -or
+        (Test-PermanentGraphicAutoHideProtected -Layer $Layer)) { return }
+    foreach ($entry in $store.Map.Values) {
+        $otherLayer = [int](Get-JsonProp $entry 'Layer')
+        $declared = [string](Get-JsonProp $entry 'Device')
+        if ($otherLayer -le 0 -or -not $declared) { continue }
+        $sameDevice = (Resolve-AirGfxDevice -Layer $otherLayer -Device $declared).StatusPath -ceq $Device
+        if ($sameDevice -ne ($otherLayer -eq $Layer)) { return }
+    }
+
+    $state = Read-ReviewedOnAirDocument
+    if (-not $state -or $state.Revision -ceq 'missing') { return }
+    $persisted = @($state.Scenes | Where-Object Layer -EQ $Layer)
+    if ($persisted.Count -ne 1 -or $persisted[0].SceneId -cne $scene.SceneId -or $persisted[0].Key -cne $key -or
+        $persisted[0].ActiveId -cne $scene.ActiveId -or $persisted[0].Source -cne 'cinegy' -or
+        $persisted[0].ActiveIdConfirmed -or $persisted[0].UserId -ne 0 -or $persisted[0].ChatId -ne 0) { return }
+    return @{ Key = $key; SceneId = $scene.SceneId; Event = $recordEvent; Disk = $state.Revision
+        Local = Get-LayerRemovalFingerprint -Layer $Layer; RegisteredPath = [string](Get-JsonProp $definition 'Path')
+        DefinitionRevision = [string](Get-JsonProp $definition 'PresetRevision'); Document = $state; Scene = $scene; PersistedScene = $persisted[0] }
+}
+
+function Invoke-WebLayerForget {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline, [switch]$ApplyReview)
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-LayersScreenAccess -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $layer = 0
+    if (-not [int]::TryParse([string](Get-JsonProp $Arguments 'layer'), [ref]$layer) -or $layer -le 0) {
+        return @{ ok = $false; error = 'layer_comparison_missing' }
+    }
+    $busy = @{ ok = $false; error = 'bridge_busy' }
+    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    if ($Deadline -gt 0 -and $now -ge $Deadline) { return $busy }
+    if ($now -lt $script:WebLayerComparisonNextProbe) { return @{ ok = $false; error = 'layer_comparison_busy' } }
+    $unavailable = @{ ok = $false; error = if ($ApplyReview) { 'layer_forget_stale' } else { 'layer_forget_unavailable' } }
+    $approval = if ($ApplyReview) {
+        Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebLayerForgetReviews
+    }
+    if ($ApplyReview -and (-not $approval -or $approval.Layer -ne $layer)) { return $unavailable }
+    $device = Get-WebLocalLayerReviewDevice -Layer $layer -AllowTracked
+    if (-not $device) { return $unavailable }
+    $target = Get-WebExternalLayerForgetTarget -Layer $layer -Device $device
+    if (-not $target -or -not $target.Local -or ($ApplyReview -and $approval.Disk -cne $target.Disk)) { return $unavailable }
+    if (-not (Test-TemplateAccess -Key $target.Key -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
+    try { $status = Get-WebLayerStatus -Layer $layer -TimeoutSec 2 }
+    finally {
+        $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + [Diagnostics.Stopwatch]::Frequency
+    }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
+    $filler = Get-WebExplicitCinegyFiller -Status $status
+    if (-not $filler -or $target.Event -eq $filler.Id) { return $unavailable }
+    $fingerprint = ConvertTo-Json -Compress -InputObject @($layer, $device, $filler.Id, $filler.Started, $target.Local,
+        $target.SceneId, $target.Disk, $target.RegisteredPath, [string]$config.AirServerAddress, [int]$config.AirChannelNumber)
+    if (-not $ApplyReview) {
+        $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebLayerForgetReviews
+        $review = $script:WebLayerForgetReviews[$actor]
+        $review.Layer = $layer
+        $review.Disk = $target.Disk
+        $expiry = [datetimeoffset]::UtcNow.AddMinutes(2)
+        if ($review.ExpiresAt -gt $expiry) { $review.ExpiresAt = $expiry }
+        return @{ ok = $true; data = @{ review = $token; layer = $layer; templateKey = $target.Key } }
+    }
+    if ($approval.Fingerprint -cne $fingerprint) { return $unavailable }
+    $remaining = ($approval.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
+    if ($remaining -le 0) { return $unavailable }
+    $writeDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($remaining * [Diagnostics.Stopwatch]::Frequency)
+    if ($Deadline -gt 0) { $writeDeadline = [math]::Min($Deadline, $writeDeadline) }
+    $result = Save-ReviewedOnAirForget -Layer $layer -SceneId $target.SceneId -ExpectedDisk $target.Disk -Deadline $writeDeadline
+    if ($result -ceq 'stale') { return $unavailable }
+    if ($result -ceq 'expired') { return $busy }
+    if ($result -cne 'saved') { return @{ ok = $false; error = 'layer_forget_save_failed' } }
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = @{ layer = $layer; forgotten = $true } }
+}
+
+$script:WebLayerReplacementReviews = @{}
+
+function Test-WebLayerReplacementSchedule {
+    param([int]$Layer, $Store)
+
+    $keys = @(Get-UpcomingScheduleEvents | ForEach-Object { [string](Get-JsonProp $_ 'TemplateKey') })
+    $keys += @($script:MojazSchedules | Where-Object { (Get-JsonProp $_ 'Status') -in 'scheduled', 'queued', 'running' } |
+        ForEach-Object { Get-MojazRunDesignKey -Playback $_ })
+    foreach ($key in $keys) {
+        if ($key -and [int](Get-JsonProp $Store.Map[$key] 'Layer') -eq $Layer) { return $true }
+    }
+    return $false
+}
+
+function Get-WebLayerLedgerTime {
+    param($Value)
+
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) { return [datetimeoffset]$Value }
+    $parsed = [datetimeoffset]::MinValue
+    if ([datetimeoffset]::TryParse([string]$Value, [ref]$parsed)) { return $parsed }
+}
+
+function Get-WebLayerReplacementTarget {
+    param([int]$Layer, [string]$Device)
+
+    $target = Get-WebExternalLayerForgetTarget -Layer $Layer -Device $Device
+    if (-not $target -or -not $target.Local -or -not $target.DefinitionRevision -or
+        $target.Scene.TemplatePath -or $target.PersistedScene.TemplatePath -or
+        $target.Scene.LastVerifiedAtUtc -cne $target.PersistedScene.LastVerifiedAtUtc) { return }
+    $record = $script:OnAir[$Layer]
+    if ([long](Get-JsonProp $record 'UserId') -ne 0 -or [long](Get-JsonProp $record 'ChatId') -ne 0 -or
+        (Get-JsonProp $record 'TemplatePath') -or $script:PostShowQueue.Count -gt 0) { return }
+
+    # A ledger extension may contain authority the current canonical projection
+    # does not understand. Peers keep their extensions, but never discard an
+    # unknown field on the row being replaced.
+    try {
+        $document = ConvertFrom-Json -InputObject $target.Document.Json -AsHashtable -Depth 16 -ErrorAction Stop
+        $rows = @($document.Scenes | Where-Object { $_.SceneId -ceq $target.SceneId })
+        if ($rows.Count -ne 1) { return }
+        $allowed = 'SceneId', 'Layer', 'Key', 'At', 'UserId', 'ChatId', 'ActiveId', 'ActiveIdConfirmed', 'Source', 'TemplatePath', 'LastVerifiedAtUtc'
+        if (@($rows[0].Keys | Where-Object { $_ -cnotin $allowed }).Count -gt 0) { return }
+        $originalTime = Get-WebLayerLedgerTime $rows[0]['At']
+        $memoryTime = Get-WebLayerLedgerTime $target.Scene.At
+        $projectionTime = Get-WebLayerLedgerTime (Get-JsonProp $record 'At')
+        if (-not $originalTime -or $originalTime -ne $memoryTime -or $memoryTime -ne $projectionTime) { return }
+    }
+    catch { return }
+    return $target
+}
+
+function Get-WebReplacementActiveIdentity {
+    param($Status)
+
+    if ((Get-JsonProp $Status 'Success') -ne $true -or (Get-JsonProp $Status 'IsOnAir') -isnot [bool] -or
+        -not (Get-JsonProp $Status 'IsOnAir') -or -not (Get-JsonProp $Status 'ActiveTemplateName')) { return }
+    try {
+        $item = ([xml][string](Get-JsonProp $Status 'ActiveXml')).SelectSingleNode('/Item')
+        $reportedId = [guid]::Empty
+        $detailId = [guid]::Empty
+        if (-not $item -or $item.GetAttribute('IsEmpty') -match '^(y|yes|true|1)$' -or -not $item.HasAttribute('ScheduledAt') -or
+            -not [guid]::TryParse([string](Get-JsonProp $Status 'ActiveId'), [ref]$reportedId) -or
+            -not [guid]::TryParse($item.GetAttribute('Id'), [ref]$detailId) -or $detailId -eq [guid]::Empty -or
+            $detailId -ne $reportedId) { return }
+        $started = Get-CinegyStatusStartTicks -Status $Status
+        if ($started -gt 0) { return @{ Id = $detailId; Started = $started } }
+    }
+    catch { return }
+}
+
+function Invoke-WebLayerReplacement {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline, [switch]$ApplyReview)
+
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-LayersScreenAccess -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $layer = 0
+    if (-not [int]::TryParse([string](Get-JsonProp $Arguments 'layer'), [ref]$layer) -or $layer -le 0) {
+        return @{ ok = $false; error = 'layer_comparison_missing' }
+    }
+    $busy = @{ ok = $false; error = 'bridge_busy' }
+    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    if ($Deadline -gt 0 -and $now -ge $Deadline) { return $busy }
+    if ($now -lt $script:WebLayerComparisonNextProbe) { return @{ ok = $false; error = 'layer_comparison_busy' } }
+    $unavailable = @{ ok = $false; error = if ($ApplyReview) { 'layer_replacement_stale' } else { 'layer_replacement_unavailable' } }
+    $approval = if ($ApplyReview) {
+        Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebLayerReplacementReviews
+    }
+    if ($ApplyReview -and (-not $approval -or $approval.Layer -ne $layer)) { return $unavailable }
+    $device = Get-WebLocalLayerReviewDevice -Layer $layer -AllowTracked
+    if (-not $device) { return $unavailable }
+    $target = Get-WebLayerReplacementTarget -Layer $layer -Device $device
+    if (-not $target -or ($ApplyReview -and $approval.Disk -cne $target.Disk)) { return $unavailable }
+    if (-not (Test-TemplateAccess -Key $target.Key -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $store = Get-TemplateStore
+    if (Test-WebLayerReplacementSchedule -Layer $layer -Store $store) { return $unavailable }
+
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
+    try { $status = Get-WebLayerStatus -Layer $layer -TimeoutSec 2 -RequireConsistentIdentity }
+    finally {
+        $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + [Diagnostics.Stopwatch]::Frequency
+    }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
+    $identity = Get-WebReplacementActiveIdentity -Status $status
+    if (-not $identity -or $target.Event -eq $identity.Id) { return $unavailable }
+    $adoption = Get-WebExternalLayerAdoptionRecord -Layer $layer -Device $device -Status $status
+    if (-not $adoption -or -not (Get-JsonProp $adoption.Definition 'PresetRevision') -or
+        $target.Key -cne (Format-WebTemplateReportLabel -Text $target.Key) -or
+        $adoption.Key -cne (Format-WebTemplateReportLabel -Text $adoption.Key)) { return $unavailable }
+    if (-not (Test-TemplateAccess -Key $adoption.Key -Layer $layer -ChatId $actor -UserId $actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+
+    $fingerprint = ConvertTo-Json -Compress -InputObject @($layer, $device, $target.SceneId, $target.Event, $target.Local, $target.Disk,
+        $target.RegisteredPath, $target.DefinitionRevision, $identity.Id, $identity.Started, $adoption.Key, $adoption.DeclaredDevice,
+        [string](Get-JsonProp $adoption.Definition 'Path'), [string](Get-JsonProp $adoption.Definition 'PresetRevision'),
+        [string]$config.AirServerAddress, [int]$config.AirChannelNumber)
+    if (-not $ApplyReview) {
+        $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebLayerReplacementReviews
+        $review = $script:WebLayerReplacementReviews[$actor]
+        $review.Layer = $layer
+        $review.Disk = $target.Disk
+        $expiry = [datetimeoffset]::UtcNow.AddMinutes(2)
+        if ($review.ExpiresAt -gt $expiry) { $review.ExpiresAt = $expiry }
+        return @{ ok = $true; data = @{ review = $token; layer = $layer; oldTemplateKey = $target.Key; templateKey = $adoption.Key } }
+    }
+    if ($approval.Fingerprint -cne $fingerprint) { return $unavailable }
+    $remaining = ($approval.ExpiresAt - [datetimeoffset]::UtcNow).TotalSeconds
+    if ($remaining -le 0) { return $unavailable }
+    $writeDeadline = [Diagnostics.Stopwatch]::GetTimestamp() + [long]($remaining * [Diagnostics.Stopwatch]::Frequency)
+    if ($Deadline -gt 0) { $writeDeadline = [math]::Min($Deadline, $writeDeadline) }
+
+    # The engine observation authorizes only a new local external row. The old
+    # row never lends its record identity, flags, authorship or editorial data.
+    $adoption.Record.Remove('CinegyEventName')
+    $result = Save-ReviewedOnAirReplacement -Layer $layer -SceneId $target.SceneId -Record $adoption.Record -ExpectedDisk $target.Disk -Deadline $writeDeadline
+    if ($result -ceq 'stale') { return $unavailable }
+    if ($result -ceq 'expired') { return $busy }
+    if ($result -cne 'saved') { return @{ ok = $false; error = 'layer_replacement_save_failed' } }
+    Publish-WebChannelState -Force
+    return @{ ok = $true; data = @{ layer = $layer; replaced = $true } }
 }
 
 function Get-WebUrgentLayerStatus {

@@ -1517,12 +1517,15 @@ function Invoke-CallbackQuery {
         'menu:status' { Invoke-StatusCommand -ChatId $chatId -UserId $userId; break }
         'menu:material' { Show-MaterialScheduleScreen -ChatId $chatId -UserId $userId; break }
         'menu:handover' { Show-ShiftHandoverScreen -ChatId $chatId -UserId $userId; break }
-        'handover:done' {
-            # Recorded, not merely acknowledged: a spoken handover leaves
-            # nothing behind, and "who had it when" is the first question
-            # asked after anything goes wrong overnight.
-            Add-AuditEntry (T 'cb.handoverAudit' $(Format-UserAuditActor -UserId $userId))
-            Send-TelegramMessage -ChatId $chatId -Text (T 'reply.handoverRecorded') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
+        'handover:done' { Show-ShiftHandoverScreen -ChatId $chatId -UserId $userId; break }
+        { $_ -like 'handover:done:*' } {
+            $reference = Get-CallbackArg $data 'handover:done:'
+            $handover = Add-ShiftHandoverAcknowledgement -Actor $userId -ChatId $chatId -Reference $reference
+            $message = if (-not $handover.ContainsKey('error')) { T 'reply.handoverRecorded' }
+            elseif ($handover.error -in 'handover_disabled', 'handover_stale') { T 'reply.handoverRefresh' }
+            else { T 'reply.handoverUnavailable' }
+            $keyboard = @{ inline_keyboard = @(, @((New-Button (T 'adm.refresh') 'menu:handover'), (New-Button (T 'adm.menu') 'menu'))) }
+            Send-TelegramMessage -ChatId $chatId -Text $message -ReplyMarkup $keyboard
             break
         }
         'menu:fullstatus' {
@@ -2641,22 +2644,11 @@ function Invoke-CallbackQuery {
             break
         }
         'remsnooze:*' {
-            $reminderId = Get-CallbackArg $data 'remsnooze:'
-            $item = @($script:TemplateReminderQueue | Where-Object {
-                [string](Get-JsonProp $_ 'ReminderId') -eq $reminderId -and [long](Get-JsonProp $_ 'UserId') -eq $userId
-            } | Select-Object -First 1)
-            if ($item.Count -eq 0) {
-                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.alertExpiredOrOther') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
-                break
-            }
-            $item.Stage = 'initial'
-            $item.At = [datetimeoffset]::Now.AddMinutes(5)
-            $item.Minutes = [int](Get-JsonProp $item 'Minutes') + 5
-            if (Save-TemplateReminderQueue) {
-                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.reminderSet') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
-            } else {
-                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.reminderSaveFailed') -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
-            }
+            $result = Set-TemplateReminderSnooze -ReminderId (Get-CallbackArg $data 'remsnooze:') -UserId $userId
+            $message = if ($result.ok) { (T 'reply.reminderSet') }
+            elseif ($result.error -eq 'persistence') { (T 'reply.reminderSaveFailed') }
+            else { (T 'reply.alertExpiredOrOther') }
+            Send-TelegramMessage -ChatId $chatId -Text $message -ReplyMarkup (Get-MainMenuKeyboard -ChatId $chatId -UserId $userId)
             break
         }
         'rollbackconfirm:*' { Confirm-SafeRollback -Layer ([int](Get-CallbackArg $data 'rollbackconfirm:')) -ChatId $chatId -UserId $userId; break }

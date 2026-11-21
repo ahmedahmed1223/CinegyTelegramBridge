@@ -1,3 +1,53 @@
+function Get-WebProgrammeNowNext {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline)
+
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $ticks = [Diagnostics.Stopwatch]::GetTimestamp()
+    if ($Deadline -gt 0 -and $ticks -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+    if ($ticks -lt $script:WebLayerComparisonNextProbe) { return @{ ok = $false; error = 'layer_comparison_busy' } }
+
+    try {
+        # An explicit status read can reuse the rundown already obtained by the schedule screen.
+        # A stale or incomplete cache never determines what Cinegy has cued.
+        $cachedItems = @()
+        if ($script:MaterialScheduleCacheAt -is [datetimeoffset]) {
+            $cacheAge = ([datetimeoffset]::Now - $script:MaterialScheduleCacheAt).TotalSeconds
+            if ($cacheAge -ge 0 -and $cacheAge -le 5) { $cachedItems = $script:MaterialScheduleCache }
+        }
+        $snapshot = Get-AirProgrammeNowNextData -TimeoutSec 1 -CachedItems $cachedItems -Deadline $Deadline
+    }
+    finally {
+        $script:WebLayerComparisonNextProbe = [Diagnostics.Stopwatch]::GetTimestamp() + [Diagnostics.Stopwatch]::Frequency
+    }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+        return @{ ok = $false; error = 'bridge_busy' }
+    }
+
+    $project = {
+        param($Programme)
+        if (-not $Programme) { return $null }
+        $item = $Programme.Item
+        return @{
+            listed = [bool]$item
+            label = if ($item) { Format-WebTemplateReportLabel -Text ([string]$item.Name) } else { '' }
+            startsAtMs = if ($item -and $item.ScheduledAt -gt [datetimeoffset]::MinValue) { $item.ScheduledAt.ToUnixTimeMilliseconds() } else { $null }
+            durationSeconds = if ($item -and $item.Duration -gt [timespan]::Zero) { $item.Duration.TotalSeconds } else { $null }
+            remainingSeconds = if ($Programme.Remaining) { $Programme.Remaining.TotalSeconds } else { $null }
+        }
+    }
+    return @{ ok = $true; data = @{
+            checkedAtMs = [datetimeoffset]::Now.ToUnixTimeMilliseconds()
+            statusAvailable = $snapshot.StatusAvailable
+            scheduleAvailable = $snapshot.ScheduleAvailable
+            current = & $project $snapshot.Current
+            cued = & $project $snapshot.Cued
+        } }
+}
+
 function Get-WebScheduleMaterialSnapshot {
     if (-not (Get-Setting 'EnableMaterialSchedule')) {
         return @{ ok = $false; error = 'schedule_material_disabled' }

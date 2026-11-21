@@ -7,12 +7,19 @@ import { messageFor } from '../../api/messages'
 import { isAdmin, useSession } from '../../api/session'
 import { PageHeader } from '../../components/PageHeader'
 import { formatDateTime } from '../../lib/time'
+import { OperationMetricsPanel } from './OperationMetricsPanel'
+import { EngineHealthPanel } from './EngineHealthPanel'
 
+import { RuntimeDiagnosticBundleButton } from './RuntimeDiagnosticBundleButton'
 import { RuntimeFileDiagnosticsPage } from './RuntimeFileDiagnosticsPage'
 import { ShiftReadinessPanel } from './ShiftReadinessPanel'
+import { SelfTestReadinessPanel } from './SelfTestReadinessPanel'
+import { RestartReadinessPanel } from './RestartReadinessPanel'
 import { NotificationCoveragePanel } from './NotificationCoveragePanel'
+import { UsageSummaryPanel } from './UsageSummaryPanel'
 import { SettingsExportButton } from './SettingsExportButton'
 import { SettingsImportDialog } from './SettingsImportDialog'
+import { SettingsRecoveryDialog } from './SettingsRecoveryDialog'
 import { AdminSettingEditor } from './AdminSettingEditor'
 import { LayerNamesPanel } from './LayerNamesPanel'
 
@@ -48,7 +55,10 @@ const settingGroups = [
   ['access', 'طلبات الوصول'],
   ['presentation', 'واجهة البوت'],
   ['air', 'العرض والجدولة'],
-  ['newsroom', 'غرفة الأخبار'],
+  ['newsroom', 'مسودة الأخبار والشريط'],
+  ['urgent', 'عرض العواجل'],
+  ['bulletin', 'عرض الموجز'],
+  ['reminders', 'التذكيرات والتنبيهات'],
   ['monitoring', 'المراقبة'],
 ] as const
 const numberFormat = new Intl.NumberFormat('ar', { numberingSystem: 'latn' })
@@ -123,6 +133,8 @@ function SettingValue({ setting }: { setting: Setting }) {
 
 function SettingsPanel({ settings }: { settings: Setting[] }) {
   const [importOpen, setImportOpen] = useState(false)
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const labels = Object.fromEntries(settings.map((setting) => [setting.id, setting.label]))
   return (
     <Stack gap="lg">
       <Group justify="space-between">
@@ -130,10 +142,11 @@ function SettingsPanel({ settings }: { settings: Setting[] }) {
         <Group>
           <SettingsExportButton />
           <Button variant="default" onClick={() => setImportOpen(true)}>استيراد إعدادات الويب</Button>
+          <Button variant="default" onClick={() => setRecoveryOpen(true)}>استرجاع أو إعادة ضبط</Button>
         </Group>
       </Group>
-      {importOpen && <SettingsImportDialog labels={Object.fromEntries(settings.map((setting) => [setting.id, setting.label]))}
-        onClose={() => setImportOpen(false)} />}
+      {importOpen && <SettingsImportDialog labels={labels} onClose={() => setImportOpen(false)} />}
+      {recoveryOpen && <SettingsRecoveryDialog labels={labels} onClose={() => setRecoveryOpen(false)} />}
       <LayerNamesPanel />
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" style={{ alignItems: 'start' }}>
         {settingGroups.map(([id, label]) => {
@@ -204,12 +217,26 @@ export function AdminOverviewPage() {
             <Tabs.Tab value="readiness">جاهزية الوردية</Tabs.Tab>
             <Tabs.Tab value="files">ملفات التشغيل</Tabs.Tab>
           </Tabs.List>
-          <Tabs.Panel value="readiness">{session.data?.id != null && <ShiftReadinessPanel accountId={session.data.id} />}</Tabs.Panel>
-          <Tabs.Panel value="files"><RuntimeFileDiagnosticsPage embedded /></Tabs.Panel>
+          <Tabs.Panel value="readiness">
+            <Stack>
+              {session.data?.id != null && <ShiftReadinessPanel accountId={session.data.id} />}
+              <SelfTestReadinessPanel />
+            </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="files">
+            <Stack align="stretch">
+              <Group><RuntimeDiagnosticBundleButton /></Group>
+              <RuntimeFileDiagnosticsPage embedded />
+            </Stack>
+          </Tabs.Panel>
           <Tabs.Panel value="health">
             <Stack>
               {data && <HealthPanel overview={data} />}
+              <EngineHealthPanel />
+              {session.data?.id != null && <OperationMetricsPanel accountId={session.data.id} />}
+              {session.data?.id != null && <RestartReadinessPanel key={session.data.id} />}
               {session.data?.id != null && <NotificationCoveragePanel accountId={session.data.id} />}
+              {session.data?.id != null && <UsageSummaryPanel key={session.data.id} />}
             </Stack>
           </Tabs.Panel>
           <Tabs.Panel value="settings">{data && <SettingsPanel settings={data.settings} />}</Tabs.Panel>

@@ -75,20 +75,25 @@ function Set-OnAirCanonicalScenes {
     Sync-OnAirProjection
 }
 
+function New-OnAirLayerScene {
+    param([int]$Layer, $Record)
+    $atValue = Get-JsonProp $Record 'At'
+    $at = if ($atValue -is [datetime]) { $atValue.ToString('o') } elseif ($atValue) { [string]$atValue } else { (Get-Date).ToString('o') }
+    return [pscustomobject]@{
+        SceneId = "scene-$([guid]::NewGuid().ToString('N'))"; Layer = $Layer; Key = [string](Get-JsonProp $Record 'Key')
+        At = $at; UserId = [long](Get-JsonProp $Record 'UserId'); ChatId = [long](Get-JsonProp $Record 'ChatId')
+        ActiveId = [string](Get-JsonProp $Record 'ActiveId'); ActiveIdConfirmed = [bool](Get-JsonProp $Record 'ActiveIdConfirmed'); Source = if (Get-JsonProp $Record 'Source') { [string](Get-JsonProp $Record 'Source') } else { 'bridge' }
+        TemplatePath = [string](Get-JsonProp $Record 'TemplatePath'); LastVerifiedAtUtc = [string](Get-JsonProp $Record 'LastVerifiedAtUtc')
+    }
+}
+
 function Set-OnAirLayerRecord {
     param([Parameter(Mandatory)][int]$Layer, [Parameter(Mandatory)]$Record)
     if ($null -eq $script:OnAirScenes) { $script:OnAirScenes = [System.Collections.Generic.List[object]]::new() }
     for ($i = $script:OnAirScenes.Count - 1; $i -ge 0; $i--) {
         if ([int]$script:OnAirScenes[$i].Layer -eq $Layer) { $script:OnAirScenes.RemoveAt($i) }
     }
-    $atValue = Get-JsonProp $Record 'At'
-    $at = if ($atValue -is [datetime]) { $atValue.ToString('o') } elseif ($atValue) { [string]$atValue } else { (Get-Date).ToString('o') }
-    $script:OnAirScenes.Add([pscustomobject]@{
-            SceneId = "scene-$([guid]::NewGuid().ToString('N'))"; Layer = $Layer; Key = [string](Get-JsonProp $Record 'Key')
-            At = $at; UserId = [long](Get-JsonProp $Record 'UserId'); ChatId = [long](Get-JsonProp $Record 'ChatId')
-            ActiveId = [string](Get-JsonProp $Record 'ActiveId'); ActiveIdConfirmed = [bool](Get-JsonProp $Record 'ActiveIdConfirmed'); Source = if (Get-JsonProp $Record 'Source') { [string](Get-JsonProp $Record 'Source') } else { 'bridge' }
-            TemplatePath = [string](Get-JsonProp $Record 'TemplatePath'); LastVerifiedAtUtc = [string](Get-JsonProp $Record 'LastVerifiedAtUtc')
-        })
+    $script:OnAirScenes.Add((New-OnAirLayerScene -Layer $Layer -Record $Record))
     $script:OnAir[$Layer] = $Record
 }
 
@@ -221,6 +226,139 @@ function Save-OnAirState {
         Write-BridgeLog "Wrote onair.json ($($canonical.Scenes.Count) scene(s), $($json.Length) chars)" "DEBUG"
     }
     catch { Write-BridgeLog "Could not write onair.json: $($_.Exception.Message)" "WARN" }
+}
+
+function Read-ReviewedOnAirDocument {
+    try {
+        $file = Get-Item -LiteralPath $onAirFile -Force -ErrorAction Stop
+        if ($file -isnot [IO.FileInfo] -or $file.Length -gt 16MB -or
+            ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        $bytes = [IO.File]::ReadAllBytes($onAirFile)
+        $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes).TrimStart([char]0xFEFF)
+        $document = ConvertFrom-Json -InputObject $text -AsHashtable -Depth 16 -ErrorAction Stop
+        if ($document -isnot [System.Collections.IDictionary] -or $document['SchemaVersion'] -ne 1 -or
+            $document['Scenes'] -isnot [array]) { return $null }
+        $canonical = ConvertTo-BridgeLiveSceneState -Document $document
+        if (-not $canonical.Success) { return $null }
+        return @{
+            Revision = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+            Scenes = @($canonical.Scenes); Json = $text
+        }
+    }
+    catch [System.Management.Automation.ItemNotFoundException] { return @{ Revision = 'missing'; Scenes = @(); Json = '' } }
+    catch { return $null }
+}
+
+function Get-OnAirDiscoveryDiskRevision {
+    return [string](Get-JsonProp (Read-ReviewedOnAirDocument) 'Revision')
+}
+
+function Save-ReviewedOnAirDiscovery {
+    param([int]$Layer, [hashtable]$Record, [string]$ExpectedDisk, [long]$Deadline)
+    if ($script:OnAir.ContainsKey($Layer) -or @($script:OnAirScenes | Where-Object Layer -EQ $Layer).Count -ne 0) { return 'stale' }
+
+    # Do not use Save-OnAirState: it reconciles the projections in place before
+    # saving. Stage the same canonical representation and publish only after
+    # the disk commit. The single bridge thread owns both projections.
+    $scene = New-OnAirLayerScene -Layer $Layer -Record $Record
+    $staged = @($script:OnAirScenes) + @($scene)
+    $canonical = ConvertTo-BridgeLiveSceneState -Document @{ Scenes = $staged }
+    if (-not $canonical.Success) { return 'failed' }
+    $data = [ordered]@{ SchemaVersion = 1; Scenes = @($canonical.Scenes) }
+    $result = Write-ReviewedOnAirDocument -Json (ConvertTo-Json -InputObject $data -Depth 6) -ExpectedDisk $ExpectedDisk -Deadline $Deadline
+    if ($result -ceq 'saved') {
+        $script:OnAirScenes.Add($scene)
+        $script:OnAir[$Layer] = $Record
+    }
+    return $result
+}
+
+function Write-ReviewedOnAirDocument {
+    param([string]$Json, [string]$ExpectedDisk, [long]$Deadline)
+    $temporary = "$onAirFile.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $backup = Get-Item -LiteralPath "$onAirFile.bak" -Force -ErrorAction SilentlyContinue
+        if ($backup -and ($backup -isnot [IO.FileInfo] -or ($backup.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+            return 'failed'
+        }
+        [IO.File]::WriteAllText($temporary, $Json)
+        if ((Get-OnAirDiscoveryDiskRevision) -cne $ExpectedDisk) { return 'stale' }
+        if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return 'expired' }
+        if ($ExpectedDisk -ceq 'missing') { [IO.File]::Move($temporary, $onAirFile) }
+        else { [IO.File]::Replace($temporary, $onAirFile, "$onAirFile.bak", $false) }
+
+        return 'saved'
+    }
+    catch {
+        Write-BridgeLog 'Reviewed local layer change could not save the on-air record.' 'WARN'
+        return 'failed'
+    }
+    finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+
+function Save-ReviewedOnAirForget {
+    param([int]$Layer, [string]$SceneId, [string]$ExpectedDisk, [long]$Deadline)
+
+    $memory = @(for ($i = 0; $i -lt $script:OnAirScenes.Count; $i++) {
+        if ($script:OnAirScenes[$i].Layer -eq $Layer -and $script:OnAirScenes[$i].SceneId -ceq $SceneId) { $i }
+    })
+    $state = Read-ReviewedOnAirDocument
+    if ($memory.Count -ne 1 -or -not $script:OnAir.ContainsKey($Layer) -or
+        -not $state -or $state.Revision -cne $ExpectedDisk -or $state.Revision -ceq 'missing') { return 'stale' }
+
+    $persisted = @(for ($i = 0; $i -lt $state.Scenes.Count; $i++) {
+        if ($state.Scenes[$i].Layer -eq $Layer -and $state.Scenes[$i].SceneId -ceq $SceneId) { $i }
+    })
+    if ($persisted.Count -ne 1) { return 'stale' }
+
+    # Keep every unrelated record and any extension fields. The on-air
+    # writer has already validated this exact document revision.
+    try {
+        $document = [System.Text.Json.Nodes.JsonNode]::Parse($state.Json)
+        $document['Scenes'].RemoveAt($persisted[0])
+        $json = $document.ToJsonString([System.Text.Json.JsonSerializerOptions]@{ WriteIndented = $true })
+    }
+    catch { return 'failed' }
+    $result = Write-ReviewedOnAirDocument -Json $json -ExpectedDisk $ExpectedDisk -Deadline $Deadline
+    if ($result -ceq 'saved') {
+        $script:OnAirScenes.RemoveAt($memory[0])
+        [void]$script:OnAir.Remove($Layer)
+    }
+    return $result
+}
+
+function Save-ReviewedOnAirReplacement {
+    param([int]$Layer, [string]$SceneId, [hashtable]$Record, [string]$ExpectedDisk, [long]$Deadline)
+
+    $memory = @(for ($i = 0; $i -lt $script:OnAirScenes.Count; $i++) {
+        if ($script:OnAirScenes[$i].Layer -eq $Layer) { $i }
+    })
+    $state = Read-ReviewedOnAirDocument
+    if ($memory.Count -ne 1 -or $script:OnAirScenes[$memory[0]].SceneId -cne $SceneId -or
+        -not $script:OnAir.ContainsKey($Layer) -or -not $state -or $state.Revision -cne $ExpectedDisk -or
+        $state.Revision -ceq 'missing') { return 'stale' }
+    $persisted = @(for ($i = 0; $i -lt $state.Scenes.Count; $i++) {
+        if ($state.Scenes[$i].Layer -eq $Layer) { $i }
+    })
+    if ($persisted.Count -ne 1 -or $state.Scenes[$persisted[0]].SceneId -cne $SceneId) { return 'stale' }
+
+    # Stage a new catalogue row at the original index. The durable swap must
+    # happen before either in-memory projection changes. Preserve peer fields.
+    $scene = New-OnAirLayerScene -Layer $Layer -Record $Record
+    try {
+        $document = [System.Text.Json.Nodes.JsonNode]::Parse($state.Json)
+        $replacement = [System.Text.Json.Nodes.JsonNode]::Parse((ConvertTo-Json -InputObject $scene -Depth 6))
+        $document['Scenes'].RemoveAt($persisted[0])
+        $document['Scenes'].Insert($persisted[0], $replacement)
+        $json = $document.ToJsonString([System.Text.Json.JsonSerializerOptions]@{ WriteIndented = $true })
+    }
+    catch { return 'failed' }
+    $result = Write-ReviewedOnAirDocument -Json $json -ExpectedDisk $ExpectedDisk -Deadline $Deadline
+    if ($result -ceq 'saved') {
+        $script:OnAirScenes[$memory[0]] = $scene
+        $script:OnAir[$Layer] = $Record
+    }
+    return $result
 }
 
 function Update-OnAirStateFromCinegy {

@@ -584,7 +584,8 @@ function Import-TemplateReminderQueue {
             $reminderId = [string](Get-JsonProp $raw 'ReminderId')
             if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12) }
             $stage = [string](Get-JsonProp $raw 'Stage')
-            if ($stage -notin @('initial', 'followup')) { $stage = 'initial' }
+            if ([string]::IsNullOrWhiteSpace($stage)) { $stage = 'initial' }
+            elseif ($stage -notin @('initial', 'followup', 'web-visible')) { continue }
             $restored.Add(@{
                     ReminderId = $reminderId; Stage = $stage
                     Layer = $layer; At = $at; ChatId = [long](Get-JsonProp $raw 'ChatId'); UserId = [long](Get-JsonProp $raw 'UserId')
@@ -679,26 +680,49 @@ function Get-TemplateReminderTargetDecision {
 function Update-TemplateReminderQueue {
     param([datetimeoffset]$Now = [datetimeoffset]::Now)
     if ($script:TemplateReminderQueue.Count -eq 0) { return }
+    $webAvailable = (Get-Setting 'WebAccessEnabled') -and (Test-WebChannelActive)
     foreach ($item in @($script:TemplateReminderQueue | Where-Object { [datetimeoffset](Get-JsonProp $_ 'At') -le $Now })) {
         $index = $script:TemplateReminderQueue.IndexOf($item)
-        $script:TemplateReminderQueue.RemoveAt($index)
-        if (-not (Save-TemplateReminderQueue)) {
-            $script:TemplateReminderQueue.Insert($index, $item)
-            Write-BridgeLog "Deferred due personal reminder '$([string](Get-JsonProp $item 'ReminderId'))': could not persist queue consumption." 'WARN'
-            continue
+        if ($index -lt 0) { continue }
+        $stage = [string](Get-JsonProp $item 'Stage')
+        if ([string]::IsNullOrWhiteSpace($stage)) { $stage = 'initial' }
+        $recipient = [long](Get-JsonProp $item 'UserId')
+        $webOnly = (Test-WebOnlyUserId -UserId $recipient) -or (Test-WebOnlyUserId -UserId ([long](Get-JsonProp $item 'ChatId')))
+        $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))
+        $offerWeb = $stage -eq 'initial' -and $webAvailable -and $recipient -gt 0 -and ($webOnly -or $followUpMinutes -le 0)
+        $decision = if ($offerWeb) { Get-TemplateReminderTargetDecision -Reminder $item }
+        $visible = $null
+        if ($offerWeb -and $decision.ShouldNotify) {
+            # Replace the due row with its actionable state in one durable
+            # write. A failed save keeps the initial reminder eligible to retry.
+            $visible = Publish-WebTemplateReminder -Item $item -Index $index -Now $Now
+            if (-not $visible) {
+                Write-BridgeLog "Deferred due Web personal reminder '$([string](Get-JsonProp $item 'ReminderId'))': could not persist presentation." 'WARN'
+                continue
+            }
         }
-        $decision = Get-TemplateReminderTargetDecision -Reminder $item
+        else {
+            $script:TemplateReminderQueue.RemoveAt($index)
+            if (-not (Save-TemplateReminderQueue)) {
+                $script:TemplateReminderQueue.Insert($index, $item)
+                Write-BridgeLog "Deferred due personal reminder '$([string](Get-JsonProp $item 'ReminderId'))': could not persist queue consumption." 'WARN'
+                continue
+            }
+        }
+        # Web windows and obsolete states are consumed quietly; Web-only
+        # accounts never enter either Telegram delivery path.
+        if ($stage -notin 'initial', 'followup' -or $webOnly) { continue }
+        if (-not $decision) { $decision = Get-TemplateReminderTargetDecision -Reminder $item }
         if (-not $decision.ShouldNotify) {
             Write-BridgeLog "Discarded personal reminder for '$($item.TemplateKey)' on layer $($item.Layer): $($decision.Reason)"
             continue
         }
-        $stage = [string](Get-JsonProp $item 'Stage')
         if ($stage -eq 'followup') {
             Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text (T 'tick.followUp' $($item.TemplateKey) $($item.Layer))
             Write-BridgeLog "Sent personal reminder follow-up for '$($item.TemplateKey)' to user $($item.UserId)."
             continue
         }
-        $reminderId = [string](Get-JsonProp $item 'ReminderId')
+        $reminderId = if ($visible) { [string]$visible.ReminderId } else { [string](Get-JsonProp $item 'ReminderId') }
         if ([string]::IsNullOrWhiteSpace($reminderId)) { $reminderId = ([guid]::NewGuid().ToString('N')).Substring(0, 12); $item.ReminderId = $reminderId }
         $onAirCopy = ''
         $remainingText = ''
@@ -724,8 +748,7 @@ function Update-TemplateReminderQueue {
         $ackKeyboard = @{ inline_keyboard = @(, @((New-Button (T 'tick.remindLater') "remsnooze:$reminderId"), (New-Button (T 'tick.hideTemplate') "hide:$($item.Layer)"))) }
         Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text $reminderText -ReplyMarkup $ackKeyboard
         Write-BridgeLog "Sent personal reminder for '$($item.TemplateKey)' to user $($item.UserId)."
-        $followUpMinutes = [math]::Min(1440, (Get-SettingInt 'TemplateReminderFollowUpMinutes' 0))
-        if ($followUpMinutes -gt 0) {
+        if (-not $visible -and $followUpMinutes -gt 0) {
             $item.Stage = 'followup'
             $item.FollowUpMinutes = $followUpMinutes
             $item.At = $Now.AddMinutes($followUpMinutes)
@@ -739,12 +762,20 @@ function Confirm-TemplateReminder {
     param(
         [Parameter(Mandatory)][string]$ReminderId,
         [Parameter(Mandatory)][long]$UserId,
-        [ref]$FailureReason
+        [ref]$FailureReason,
+        [switch]$RequireCurrent
     )
     if ($null -ne $FailureReason) { $FailureReason.Value = '' }
-    $item = @($script:TemplateReminderQueue | Where-Object {
-            [string](Get-JsonProp $_ 'ReminderId') -eq $ReminderId -and [long](Get-JsonProp $_ 'UserId') -eq $UserId
-        } | Select-Object -First 1)
+    $item = @(if ($RequireCurrent) {
+            Get-CurrentTemplateReminderActions -UserId $UserId -IncludeWebVisible |
+                Where-Object { [string](Get-JsonProp $_ 'ReminderId') -ceq $ReminderId } | Select-Object -First 1
+        }
+        else {
+            $script:TemplateReminderQueue | Where-Object {
+                [string](Get-JsonProp $_ 'ReminderId') -eq $ReminderId -and [long](Get-JsonProp $_ 'UserId') -eq $UserId -and
+                    [string](Get-JsonProp $_ 'Stage') -ne 'web-visible'
+            } | Select-Object -First 1
+        })
     if ($item.Count -eq 0) {
         if ($null -ne $FailureReason) { $FailureReason.Value = 'not_found' }
         return $false
@@ -772,6 +803,37 @@ function Update-Heartbeat {
     Write-BridgeLog "Heartbeat sent to admins"
 }
 
+function Get-BridgeOperationMetrics {
+    param([datetime]$Now = (Get-Date))
+
+    $uptime = $Now - $script:BridgeStartedAt
+    $limiting = [int]$script:TelegramRateLimitHits
+    return @{
+        Now = $Now
+        Uptime = $uptime
+        StartedAt = $script:BridgeStartedAt
+        State = if ($uptime.TotalMinutes -lt 15) { 'recent-start' }
+        elseif ($limiting -gt 0) { 'telegram-limiting' }
+        else { 'stable' }
+        AirOperations = $script:AirOperationCounters
+        TelegramRateLimitHits = $limiting
+        TelegramOutboxDropped = [int]$script:TelegramOutboxDropped
+        LastHeartbeatDate = $script:LastHeartbeatDate
+        OnAirCount = $script:OnAir.Count
+        RichPayloadPeak = Get-RichPayloadPeak
+    }
+}
+
+function Get-BridgeOperationVerdict {
+    param([string]$State)
+
+    switch ($State) {
+        'recent-start' { return T 'tick.recentStart' }
+        'telegram-limiting' { return T 'tick.telegramLimiting' }
+        default { return T 'tick.stableRun' }
+    }
+}
+
 function Get-BridgeStatsBlocks {
     <#
         The operating numbers as a real table, label against value.
@@ -786,30 +848,29 @@ function Get-BridgeStatsBlocks {
         leads the text version: this screen is opened because something feels
         off, and the answer should not have to be assembled from nine rows.
     #>
-    $now = Get-Date
-    $uptime = $now - $script:BridgeStartedAt
-    $counters = $script:AirOperationCounters
+    $metrics = Get-BridgeOperationMetrics
+    $now = $metrics.Now
+    $uptime = $metrics.Uptime
+    $counters = $metrics.AirOperations
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
-    $verdict = if ($uptime.TotalMinutes -lt 15) { (T 'tick.recentStart') }
-    elseif ([int]$script:TelegramRateLimitHits -gt 0) { (T 'tick.telegramLimiting') }
-    else { (T 'tick.stableRun') }
-    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { (T 'tick.notSentYet') }
+    $verdict = Get-BridgeOperationVerdict -State $metrics.State
+    $lastBeat = if ($metrics.LastHeartbeatDate -gt [datetime]::MinValue) { $metrics.LastHeartbeatDate.ToString('yyyy-MM-dd') } else { (T 'tick.notSentYet') }
 
     $rows = @(
         , @((T 'tick.uptime'), (T 'tick.dhm' $([int]$uptime.TotalDays) $($uptime.Hours) $($uptime.Minutes)))
-        , @((T 'tick.since'), $script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
+        , @((T 'tick.since'), $metrics.StartedAt.ToString('yyyy-MM-dd HH:mm:ss'))
         , @((T 'tick.airOperations'), "$total  (✅ $($counters.Success) · ❌ $($counters.Failed) · ⛔ $($counters.Blocked))")
-        , @((T 'tick.telegramLimit'), [string]$script:TelegramRateLimitHits)
-        , @((T 'tick.droppedFromQueue'), [string]$script:TelegramOutboxDropped)
+        , @((T 'tick.telegramLimit'), [string]$metrics.TelegramRateLimitHits)
+        , @((T 'tick.droppedFromQueue'), [string]$metrics.TelegramOutboxDropped)
         , @((T 'tick.telegramConnection'), [string]$script:RuntimeState.Monitoring.TelegramConnectionState)
         , @((T 'tick.cinegyHealth'), [string]$script:RuntimeState.Monitoring.CinegyHealthState)
         , @((T 'tick.lastHeartbeat'), $lastBeat)
-        , @((T 'tick.scenesOnAir'), [string]$script:OnAir.Count)
+        , @((T 'tick.scenesOnAir'), [string]$metrics.OnAirCount)
     )
     # What is closest to losing its table. A screen crosses the payload limit
     # gradually as the station's day fills up, and until this line the first
     # to know was the operator whose table had already vanished.
-    $peak = Get-RichPayloadPeak
+    $peak = $metrics.RichPayloadPeak
     if ($peak.Length -gt 0) {
         $rows += , @((T 'tick.largestScreen'), (T 'tick.percentOfLimit' $($peak.Percent) $($peak.Screen)))
     }
@@ -829,9 +890,10 @@ function Get-BridgeStatsText {
        how long this instance has been up, what it has done, and whether
        Telegram has been throttling it. Uptime is the one that matters most -
        a bridge that has been up for eleven minutes has been restarting. #>
-    $now = Get-Date
-    $uptime = $now - $script:BridgeStartedAt
-    $counters = $script:AirOperationCounters
+    $metrics = Get-BridgeOperationMetrics
+    $now = $metrics.Now
+    $uptime = $metrics.Uptime
+    $counters = $metrics.AirOperations
     $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
 
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -851,11 +913,9 @@ function Get-BridgeStatsText {
     # exists to show - a bridge up for eleven minutes has been restarting -
     # with Telegram's flood limit beside it, the other thing that is wrong
     # while every individual figure still looks ordinary.
-    $verdict = if ($uptime.TotalMinutes -lt 15) { (T 'tick.recentStart') }
-    elseif ([int]$script:TelegramRateLimitHits -gt 0) { (T 'tick.telegramLimiting') }
-    else { (T 'tick.stableRun') }
+    $verdict = Get-BridgeOperationVerdict -State $metrics.State
 
-    $peakMeasurement = Get-RichPayloadPeak
+    $peakMeasurement = $metrics.RichPayloadPeak
     $peakLine = if ($peakMeasurement.Length -gt 0) {
         (T 'tick.biggestScreen' $($peakMeasurement.Percent) $(ConvertTo-TelegramHtmlText $peakMeasurement.Screen))
     }
@@ -863,7 +923,7 @@ function Get-BridgeStatsText {
     $lines.Add((T 'tick.numbersHtml' $($script:BridgeVersion)))
     $lines.Add((T 'tick.localTimeHtml' $($now.ToString('yyyy-MM-dd HH:mm:ss'))))
     $lines.Add("<b>$verdict</b>")
-    $lastBeat = if ($script:LastHeartbeatDate -gt [datetime]::MinValue) { $script:LastHeartbeatDate.ToString('yyyy-MM-dd') } else { (T 'tick.notSentYet') }
+    $lastBeat = if ($metrics.LastHeartbeatDate -gt [datetime]::MinValue) { $metrics.LastHeartbeatDate.ToString('yyyy-MM-dd') } else { (T 'tick.notSentYet') }
 
     # Full-size text, each line opening with its own glyph. A <pre> table
     # aligns the values into a column and Telegram draws it two sizes down;
@@ -874,10 +934,10 @@ function Get-BridgeStatsText {
     # the rest is quoted underneath as the detail behind them.
     $lines.Add('')
     $lines.Add((T 'tick.uptime' $([int]$uptime.TotalDays) $($uptime.Hours) $($uptime.Minutes)))
-    $lines.Add((T 'tick.since' $($script:BridgeStartedAt.ToString('yyyy-MM-dd HH:mm:ss'))))
+    $lines.Add((T 'tick.since' $($metrics.StartedAt.ToString('yyyy-MM-dd HH:mm:ss'))))
     $lines.Add((T 'tick.airOps' $total $($counters.Success) $($counters.Failed) $($counters.Blocked)))
     $lines.Add('')
-    $lines.Add((T 'tick.countersBlock' $($script:TelegramRateLimitHits) $($script:TelegramOutboxDropped) $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState)) $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState)) $lastBeat $($script:OnAir.Count) $peakLine))
+    $lines.Add((T 'tick.countersBlock' $($metrics.TelegramRateLimitHits) $($metrics.TelegramOutboxDropped) $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.TelegramConnectionState)) $(ConvertTo-TelegramHtmlText ([string]$script:RuntimeState.Monitoring.CinegyHealthState)) $lastBeat $($metrics.OnAirCount) $peakLine))
     return ($lines -join "`n")
 }
 
@@ -904,25 +964,39 @@ function Read-AuditRecords {
     <# Reads recent audit entries. audit.jsonl is already the permanent,
        structured record of every control action, so /digest and /who read it
        rather than inventing a second log to drift out of sync with it. #>
-    param([int]$MaxLines = 500)
+    param([int]$MaxLines = 500, [switch]$RequireCompleteRead)
+    $readError = if ($RequireCompleteRead) { 'Stop' } else { 'SilentlyContinue' }
     # Reads back into the archives when the active file is short. Without
     # this the first digest after a rotation would report an empty morning:
     # the history did not go anywhere, it only changed file.
     $lines = @()
     if (Test-Path -LiteralPath $script:auditFile) {
-        $lines = @(Get-Content -LiteralPath $script:auditFile -Tail $MaxLines -ErrorAction SilentlyContinue)
+        $lines = @(Get-Content -LiteralPath $script:auditFile -Tail $MaxLines -ErrorAction $readError)
     }
     if ($lines.Count -lt $MaxLines) {
         foreach ($archive in @(Get-AuditArchiveFiles)) {
             $needed = $MaxLines - $lines.Count
             if ($needed -le 0) { break }
-            $lines = @(@(Get-Content -LiteralPath $archive.FullName -Tail $needed -ErrorAction SilentlyContinue)) + $lines
+            $lines = @(@(Get-Content -LiteralPath $archive.FullName -Tail $needed -ErrorAction $readError)) + $lines
         }
     }
 
     $records = foreach ($line in $lines) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try { $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            if ($RequireCompleteRead) { throw 'The audit tail contains an unreadable entry.' }
+            continue
+        }
+        try {
+            $decoded = ConvertFrom-Json -InputObject $line -NoEnumerate -ErrorAction Stop
+            if ($RequireCompleteRead -and $decoded -isnot [System.Management.Automation.PSCustomObject]) {
+                throw 'The audit entry is not a JSON object.'
+            }
+            $decoded
+        }
+        catch {
+            if ($RequireCompleteRead) { throw 'The audit tail contains an unreadable entry.' }
+            continue
+        }
     }
     return @($records)
 }
@@ -1067,14 +1141,16 @@ function Get-MissedEventsRecords {
 }
 
 function Get-MissedEventsWindow {
-    param([int]$Hours = 12)
-    $since = (Get-Date).ToUniversalTime().AddHours(-[math]::Max(1, $Hours))
+    param([int]$Hours = 12, [Nullable[datetime]]$Through = $null)
+    $until = if ($null -ne $Through) { ([datetime]$Through).ToUniversalTime() } else { (Get-Date).ToUniversalTime() }
+    $since = $until.AddHours(-[math]::Max(1, $Hours))
     $limit = 1500
     $raw = @(Read-AuditRecords -MaxLines $limit)
     $records = @($raw | ForEach-Object {
             $record = $_
             $when = Read-AuditRecordStamp -Record $record
-            if (-not $when -or $when.ToUniversalTime() -lt $since) { return }
+            if (-not $when -or $when.ToUniversalTime() -lt $since -or
+                ($null -ne $Through -and $when.ToUniversalTime() -gt $until)) { return }
             [pscustomobject]@{
                 When    = $when
                 Action  = (Get-AuditRecordField -Record $record -Name 'action')
@@ -1454,6 +1530,27 @@ function Add-CancelReason {
     Save-CancelReasons | Out-Null
 }
 
+function Get-BridgeUsageDigestSnapshot {
+    param([int]$TopCount = 5, [datetime]$Now = (Get-Date))
+
+    $counts = $script:AirOperationCounters
+    $weekly = Get-ReportRecords -From ($Now.Date.AddDays(-6)) -To $Now -EventName 'air_control'
+    $operations = @($weekly.Records).Count
+    $ranking = @($script:UsageCounts.GetEnumerator() |
+        Sort-Object -Property @{ Expression = 'Value'; Descending = $true }, 'Key' | Select-Object -First $TopCount)
+    return [pscustomobject]@{
+        CapturedAt = $Now
+        Total = [int]$counts.Success + [int]$counts.Failed + [int]$counts.Blocked
+        Outcomes = @{ Success = [int]$counts.Success; Failed = [int]$counts.Failed; Blocked = [int]$counts.Blocked }
+        WeeklyOperations = $operations
+        DailyAverage = [math]::Round($operations / 7, 1)
+        WeeklyTruncated = [bool](Get-JsonProp $weekly 'Truncated')
+        Ranked = @(foreach ($item in $ranking) {
+            @{ Key = [string]$item.Key; Value = [int]$item.Value; LastUsed = Get-JsonProp $script:TemplateLastUsed ([string]$item.Key) }
+        })
+    }
+}
+
 function Get-UsageDigestBlocks {
     <#
         The usage summary as tables: a ranking, and how the operations ended.
@@ -1474,12 +1571,12 @@ function Get-UsageDigestBlocks {
         later as nothing at all.
     #>
     param([int]$TopCount = 5)
-    $now = Get-Date
-    $counters = $script:AirOperationCounters
-    $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
-    $week = Get-ReportRecords -From ($now.Date.AddDays(-6)) -To $now -EventName 'air_control'
-    $weeklyOperations = @($week.Records).Count
-    $dailyAverage = [math]::Round($weeklyOperations / 7, 1)
+    $digest = Get-BridgeUsageDigestSnapshot -TopCount $TopCount
+    $now = $digest.CapturedAt
+    $counters = $digest.Outcomes
+    $total = $digest.Total
+    $weeklyOperations = $digest.WeeklyOperations
+    $dailyAverage = $digest.DailyAverage
 
     $blocks = @(
         @{ type = 'heading'; text = (T 'tick.usageDigest'); size = 3 }
@@ -1487,8 +1584,8 @@ function Get-UsageDigestBlocks {
         @{ type = 'paragraph'; text = (T 'tick.sinceLastRun' $(Get-ArabicCountNoun -Count $total -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') $(Get-ArabicCountNoun -Count $weeklyOperations -One 'عملية' -Two 'عمليتان' -Few 'عمليات' -Many 'عملية' -EnglishOne 'operation' -EnglishMany 'operations') $dailyAverage) }
     )
 
-    $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
-    if ($ranked.Count -eq 0) {
+    $ranked = Select-RichTableRows -Items $digest.Ranked -KeepFirst
+    if (@($ranked.Rows).Count -eq 0) {
         $blocks += @{ type = 'paragraph'; text = (T 'tick.noTemplatesUsed') }
     }
     else {
@@ -1499,10 +1596,10 @@ function Get-UsageDigestBlocks {
                 @{ text = (T 'tick.col.lastTime'); is_header = $true }
             ))
         $rank = 0
-        foreach ($item in $ranked) {
+        foreach ($item in $ranked.Rows) {
             $rank++
-            $lastUsed = if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
-                ([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm')
+            $lastUsed = if ($item.LastUsed) {
+                ([datetime]$item.LastUsed).ToLocalTime().ToString('MM-dd HH:mm')
             }
             else { '—' }
             $cells += , @(
@@ -1513,6 +1610,8 @@ function Get-UsageDigestBlocks {
             )
         }
         $blocks += @{ type = 'table'; cells = $cells }
+        $rankNote = Get-RichTableTrimNote -Hidden $ranked.Hidden -Shown @($ranked.Rows).Count -KeepFirst
+        if ($rankNote) { $blocks += @{ type = 'paragraph'; text = $rankNote } }
     }
 
     $blocks += @{ type = 'table'; cells = @(
@@ -1528,13 +1627,16 @@ function Get-UsageDigestBlocks {
 
     if ($script:CancelReasons.Count -gt 0) {
         $reasonCells = @(, @(@{ text = (T 'tick.undoReason'); is_header = $true }, @{ text = (T 'tick.col.times'); is_header = $true }))
-        foreach ($reason in ($script:CancelReasons.Keys | Sort-Object)) {
+        $reasons = Select-RichTableRows -Items @($script:CancelReasons.Keys | Sort-Object) -KeepFirst
+        foreach ($reason in $reasons.Rows) {
             $reasonCells += , @(
                 @{ text = [string](Get-CancelReasonLabel -Reason $reason) }
                 @{ text = [string]$script:CancelReasons[$reason] }
             )
         }
         $blocks += @{ type = 'table'; cells = $reasonCells }
+        $reasonNote = Get-RichTableTrimNote -Hidden $reasons.Hidden -Shown @($reasons.Rows).Count -KeepFirst
+        if ($reasonNote) { $blocks += @{ type = 'paragraph'; text = $reasonNote } }
     }
     # T-31 on the on-demand rich path: plain lines, because a table cell
     # cannot hold markup and the names here arrive escaped for HTML already.
@@ -1662,10 +1764,11 @@ function Get-UsageDigestText {
     # parse_mode=HTML. Template names are typed by an administrator, so each
     # one is escaped; the ranking sits in a blockquote because it is a list
     # inside a summary rather than the summary itself.
+    $digest = Get-BridgeUsageDigestSnapshot -TopCount $TopCount
     $lines.Add((T 'tick.usageDigestHtml'))
-    $lines.Add((T 'tick.localTimeHtml' $((Get-Date).ToString('yyyy-MM-dd HH:mm'))))
+    $lines.Add((T 'tick.localTimeHtml' $($digest.CapturedAt.ToString('yyyy-MM-dd HH:mm'))))
 
-    $ranked = @($script:UsageCounts.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First $TopCount)
+    $ranked = $digest.Ranked
     if ($ranked.Count -eq 0) { $lines.Add((T 'tick.noTemplatesUsedHtml')) }
     else {
         # Cumulative since counting began, not this week's: UsageCounts is
@@ -1681,8 +1784,8 @@ function Get-UsageDigestText {
                 $rank++
                 $uses = Get-ArabicCountNoun -Count ([int]$item.Value) -One 'مرة' -Two 'مرتين' -Few 'مرات' -Many 'مرة' -EnglishOne 'time' -EnglishMany 'times'
                 $line = "$rank. <b>$(ConvertTo-TelegramHtmlText ([string]$item.Key))</b> — $uses"
-                if ($script:TemplateLastUsed.ContainsKey($item.Key)) {
-                    $line += (T 'tick.lastTime' $(([datetime]$script:TemplateLastUsed[$item.Key]).ToLocalTime().ToString('MM-dd HH:mm')))
+                if ($item.LastUsed) {
+                    $line += (T 'tick.lastTime' $(([datetime]$item.LastUsed).ToLocalTime().ToString('MM-dd HH:mm')))
                 }
                 $line
             })
@@ -1690,14 +1793,10 @@ function Get-UsageDigestText {
         $lines.Add("$tag$($rankLines -join "`n")</blockquote>")
     }
 
-    $counters = $script:AirOperationCounters
-    $total = [int]$counters.Success + [int]$counters.Failed + [int]$counters.Blocked
-    # The scheduled weekly digest cannot use the process counters: a restart
-    # at handover made a quiet week look empty. Audit is the durable source.
-    $week = Get-ReportRecords -From ((Get-Date).Date.AddDays(-6)) -To (Get-Date) -EventName 'air_control'
-    $weeklyOperations = @($week.Records).Count
-    $completedDays = 7
-    $dailyAverage = [math]::Round($weeklyOperations / $completedDays, 1)
+    $counters = $digest.Outcomes
+    $total = $digest.Total
+    $weeklyOperations = $digest.WeeklyOperations
+    $dailyAverage = $digest.DailyAverage
 
     # The same grammar as 🩺 مركز صحة النظام: the figures that answer the
     # screen lead, each line opening with its own glyph, and the outcome

@@ -1,4 +1,5 @@
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconPlugConnected, IconStack2, IconArrowBackUp } from '@tabler/icons-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
@@ -6,13 +7,15 @@ import { PageHeader } from '../../components/PageHeader'
 import { useNow } from '../../hooks/useNow'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { cinegyLamp, telegramLamp } from '../../lib/lamps'
-import { formatAgo, formatClock, isFresh } from '../../lib/time'
+import { formatAgo, formatClock, formatDateTime, isFresh } from '../../lib/time'
 import { AirOperationsMenu } from './AirOperationsMenu'
+import { LayerComparisonModal } from './LayerComparisonModal'
 import { LayerTile } from './LayerTile'
 import { LayerTimerModal } from './LayerTimerModal'
 import { LayerRemovalModal, type RemovalOperation } from './LayerRemovalModal'
 import { LayerRollbackModal } from './LayerRollbackModal'
 import { LayerTextModal } from './LayerTextModal'
+import { ProgrammeNowNextPanel } from './ProgrammeNowNextPanel'
 
 const healthLabel: Record<string, string> = {
   healthy: 'سليم',
@@ -22,6 +25,7 @@ const healthLabel: Record<string, string> = {
 
 export function StatusPage() {
   const [rollbackOpen, setRollbackOpen] = useState(false)
+  const [comparisonOpen, setComparisonOpen] = useState(false)
   const [editingLayer, setEditingLayer] = useState<number | null>(null)
   const [timedLayer, setTimedLayer] = useState<number | null>(null)
   const [removal, setRemoval] = useState<{ layer: number; operation: RemovalOperation } | null>(null)
@@ -52,18 +56,45 @@ export function StatusPage() {
   const engine = cinegyLamp(status, now)
   const telegram = telegramLamp(status)
   const layers = [...status.layers].sort((a, b) => a.layer - b.layer)
+  const engineHealth = healthLabel[status.cinegy.health] ?? 'غير معروف'
+  const telegramConnection = status.telegram.state === 'connected' ? 'متصل'
+    : status.telegram.state === 'disconnected' ? 'منقطع' : 'غير معروف'
+
+  const copyStatus = async () => {
+    const engineRead = status.cinegy.lastReadAt > 0 ? formatDateTime(status.cinegy.lastReadAt) : 'غير متاحة'
+    const layerList = layers.length
+      ? layers.map(layer => `الطبقة ${layer.layer} · ${(layer.name || layer.key || 'بلا اسم').replace(/\s+/g, ' ')}`)
+      : [fresh ? 'لا طبقات معروضة' : 'حالة الطبقات غير مؤكَّدة']
+    const summary = [
+      'حالة الهواء',
+      `المحرك · ${engineHealth}`,
+      `Telegram · ${telegramConnection}`,
+      `آخر قراءة · ${engineRead}${fresh ? '' : ' · غير مؤكَّدة'}`,
+      ...layerList,
+    ].join('\n')
+    try {
+      await navigator.clipboard.writeText(summary)
+      notifications.show({ message: 'نُسخ ملخّص حالة الهواء', color: 'teal' })
+    } catch {
+      notifications.show({ message: 'تعذّر نسخ ملخّص حالة الهواء', color: 'red' })
+    }
+  }
 
   return (
     <Stack gap="xl">
       <PageHeader title="لوحة الهواء" description="تابع الطبقات المعروضة وحالة محرك البث."
         actions={
           <Group gap="sm">
-            <AirOperationsMenu disabled={!live.bridgeOnline} />
+            <AirOperationsMenu disabled={!live.bridgeOnline} onCopyStatus={() => void copyStatus()} />
+            <Button variant="default" disabled={!live.bridgeOnline}
+              onClick={() => setComparisonOpen(true)}>مقارنة الطبقات</Button>
             <Button variant="default" disabled={!live.bridgeOnline} leftSection={<IconArrowBackUp size={18} />}
               onClick={() => setRollbackOpen(true)}>التراجع عن أمر</Button>
             <Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>البث المباشر</Button>
           </Group>
         } />
+      <ProgrammeNowNextPanel disabled={!live.bridgeOnline} />
+      {comparisonOpen && <LayerComparisonModal onClose={() => setComparisonOpen(false)} />}
       {rollbackOpen && <LayerRollbackModal onClose={() => setRollbackOpen(false)} />}
       {editingLayer !== null && <LayerTextModal layer={editingLayer} onClose={() => setEditingLayer(null)} />}
       {timedLayer !== null && <LayerTimerModal layer={timedLayer} onClose={() => setTimedLayer(null)} />}
@@ -80,7 +111,7 @@ export function StatusPage() {
           icon={<IconCpu size={20} />}
           tone={engine.state}
           title="المحرك"
-          value={healthLabel[status.cinegy.health] ?? 'غير معروف'}
+          value={engineHealth}
           detail={
             status.cinegy.lastReadAt > 0 ? (
               <>
@@ -96,7 +127,7 @@ export function StatusPage() {
           icon={<IconBrandTelegram size={20} />}
           tone={telegram.state}
           title="Telegram"
-          value={status.telegram.state === 'connected' ? 'متصل' : status.telegram.state === 'disconnected' ? 'منقطع' : 'غير معروف'}
+          value={telegramConnection}
           detail={telegram.detail}
         />
         <SummaryCard

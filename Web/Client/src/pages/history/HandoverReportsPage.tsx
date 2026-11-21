@@ -1,5 +1,6 @@
 import { Alert, Button, Group, Paper, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
+import { HandoverAcknowledgementPanel } from './HandoverAcknowledgementPanel'
 import { Link } from 'react-router'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
@@ -134,7 +135,10 @@ export function HandoverReportsPage({ view }: { view: 'handover' | 'weekly' }) {
       {active.error && <Alert color="red" role="alert">{messageFor(active.error.message)}</Alert>}
       {active.data?.truncated && <Alert color="orange">التقرير جزئي. يعرض أحدث السجلات المتاحة في الفترة.</Alert>}
       {view === 'weekly' && weekly.data && <Weekly report={weekly.data} />}
-      {view === 'handover' && handover.data && <Handover report={handover.data} />}
+      {view === 'handover' && handover.data && <>
+        {handover.data.acknowledgement && <HandoverAcknowledgementPanel key={user?.id} scope={handover.data.acknowledgement} />}
+        <Handover report={handover.data} />
+      </>}
     </Stack>
   )
 }

@@ -92,6 +92,8 @@ function Add-BridgeTextAdmin {
     $catalogue['adm.noOpenDrafts'] = @{ ar = '✍️ لا مسودات مفتوحة.'; en = '✍️ No open drafts.' }
     $catalogue['adm.autoImportant'] = @{ ar = '<b>📌 الأهم تلقائيًا</b>'; en = '<b>📌 What matters most</b>' }
     $catalogue['adm.handoverNote'] = @{ ar = '<i>راجع القائمة مع من يستلم، ثم اضغط «سلّمت» ليُسجَّل.</i>'; en = '<i>Go through the list with whoever takes over, then press "handed over" to record it.</i>' }
+    $catalogue['adm.handoverPeriod'] = @{ ar = 'فترة التسليم من {0} إلى {1} بتوقيت المحطة.'; en = 'The handover covers {0} to {1} station time.' }
+    $catalogue['adm.handoverRecent'] = @{ ar = 'آخر تسليم لك للفترة من {0} إلى {1}، سُجّل عند {2}.'; en = 'Your latest handover covered {0} to {1} and was recorded at {2}.' }
     $catalogue['adm.handedOver'] = @{ ar = '✅ سلّمت المناوبة'; en = '✅ I handed the shift over' }
     $catalogue['adm.someLayersUnchecked'] = @{ ar = '🟠 تعذّر فحص بعض الطبقات'; en = '🟠 Some layers could not be checked' }
     $catalogue['adm.layersOnAir'] = @{ ar = '🟠 طبقات على الهواء'; en = '🟠 Layers on air' }

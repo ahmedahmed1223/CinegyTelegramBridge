@@ -1,6 +1,6 @@
 import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBell, IconBroadcast, IconSpeakerphone, IconCalendarTime, IconDevices, IconDeviceTv, IconHistory, IconLayoutGrid, IconNews, IconSettings, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
+import { IconBell, IconBroadcast, IconHelpCircle, IconSpeakerphone, IconCalendarTime, IconDevices, IconDeviceTv, IconHistory, IconLayoutGrid, IconNews, IconSettings, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
 import { useState } from 'react'
 import { isAdmin, useSession } from '../api/session'
@@ -8,6 +8,7 @@ import { useNow } from '../hooks/useNow'
 import { useStatusStream } from '../hooks/useStatusStream'
 import { bridgeLamp, cinegyLamp, telegramLamp } from '../lib/lamps'
 import { LivePage } from '../pages/live/LivePage'
+import { PersonalAirReminders } from '../pages/live/PersonalAirReminders'
 import { LiveStatusContext } from './LiveStatusContext'
 import { SignalLamp } from './SignalLamp'
 import { UserMenu } from './UserMenu'
@@ -31,6 +32,7 @@ const navigation = [
 const sections = [
   { label: 'التشغيل', links: navigation.slice(0, 7) },
   { label: 'الإدارة', links: navigation.slice(7) },
+  { label: 'المساعدة', links: [{ to: '/help', label: 'دليل الويب', description: 'دليل التشغيل وما الجديد', icon: IconHelpCircle, admin: false }] },
 ]
 
 export function Shell() {
@@ -74,6 +76,7 @@ export function Shell() {
                 <SignalLamp label="المحرك" {...cinegyLamp(status, now)} />
                 <SignalLamp label="Telegram" {...telegramLamp(status)} />
               </Group>
+              <PersonalAirReminders />
               {session.data && <UserMenu user={session.data} />}
             </Group>
           </Group>

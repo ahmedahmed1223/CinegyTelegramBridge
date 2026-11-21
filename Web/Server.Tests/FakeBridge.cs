@@ -114,8 +114,24 @@ public sealed class FakeBridge : IBridgeChannel
                     Reply("""{"id":"morning","alreadyQueued":false}"""),
                 _ => new BridgeReply(false, default, "bulletin_urgent_gone")
             },
+            "relay.destination.review" => Reply("""{"review":"ff230333333333333333333333333333"}"""),
+            "relay.destination.confirm" => Reply("""{"state":"stopped","revision":"next","enabled":true,"configured":true,"canStart":true,"canStop":false,"canEditDestination":true,"outcome":"destination-saved"}"""),
+            "admin.diagnostics.bundle" => Reply("""
+                {"schemaVersion":1,"generatedAtMs":1470000000,"bridgeVersion":"8.128.0","powershellVersion":"7.6.0","uptimeSeconds":407,"workingSetMB":199.5,"privateMemoryMB":97.2,"diskFreeGB":1.5,"lowDisk":true,"airOperations":{"success":10,"failed":2,"blocked":1},"runtimeFiles":{"checkedAt":1,"parseLimitBytes":1048576,"items":[]},"timeline":{"state":"available","truncated":false,"byteLimit":131072,"lineLimit":200,"items":[{"atMs":1234,"severity":"warn","category":"relay","action":"","outcome":"","raw":"test-secret C:\\private-directory"}]},"path":"C:\\other-secret","actor":9283471}
+                """),
+            "admin.restart.review" => Reply("""{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"reserved","receipt":"","activeScenes":1}"""),
+            "admin.restart.confirm" => Reply("""{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"reviewed","receipt":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","activeScenes":1}"""),
+            "admin.restart.accept" => Reply("""{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"received","receipt":"","activeScenes":1}"""),
+            "admin.restart.status" => Reply("""{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"running","receipt":"","activeScenes":1}"""),
+            "admin.restart.readiness" => Reply("""{"checkedAt":1460000000,"state":"supervisor-reported","activeScenes":2,"supervisor":"synthetic-supervisor.exe","path":"C:/fixture/private.ps1"}"""),
+            "admin.settings.export" => Reply("""
+                {"Kind":"CinegyTelegramBridge.Settings","BridgeVersion":"8.129.0","ExportedAt":"2026-11-21T18:00:00Z","Settings":{"TemplateReminderFollowUpMinutes":0,"MojazNotifyOnFinish":false,"UrgentBoardIntervalSeconds":8,"BotToken":"fixture-secret"}}
+                """),
+            "admin.settings.import.review" => Reply("""
+                {"changes":[{"id":"TemplateReminderFollowUpMinutes","kind":"integer","beforeValue":5,"afterValue":0}],"review":"editorial-review"}
+                """),
             "relay.control" => a.GetProperty("action").GetString() == "status"
-                ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"outcome":""}""")
+                ? Reply("""{"state":"stopped","revision":"review","enabled":true,"configured":true,"canStart":true,"canStop":false,"canEditDestination":true,"outcome":""}""")
                 : Reply("""{"state":"starting","revision":"next","enabled":true,"configured":true,"canStart":false,"canStop":true,"outcome":"starting"}"""),
             "urgent.write" => a.GetProperty("revision").GetInt32() == 3
                 ? Reply("null")

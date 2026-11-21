@@ -25,6 +25,20 @@ function showValue(change: Change, side: 'before' | 'after') {
   return value == null ? '—' : new Intl.NumberFormat('ar').format(value)
 }
 
+export function SettingsChangesTable({ changes, labels }: { changes: Change[]; labels: Record<string, string> }) {
+  return (
+    <Table>
+      <Table.Thead><Table.Tr><Table.Th>الإعداد</Table.Th><Table.Th>الحالي</Table.Th><Table.Th>بعد الحفظ</Table.Th></Table.Tr></Table.Thead>
+      <Table.Tbody>
+        {changes.map((change) => (
+          <Table.Tr key={change.id}><Table.Td>{labels[change.id] ?? change.id}</Table.Td>
+            <Table.Td>{showValue(change, 'before')}</Table.Td><Table.Td>{showValue(change, 'after')}</Table.Td></Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
+  )
+}
+
 export function SettingsImportDialog({ labels, onClose }: { labels: Record<string, string>; onClose: () => void }) {
   const cache = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
@@ -68,15 +82,7 @@ export function SettingsImportDialog({ labels, onClose }: { labels: Record<strin
           <FileInput label="ملف إعدادات الويب" description="ملف JSON، حتى ١٦ كيلوبايت." accept=".json,application/json"
             value={file} disabled={busy} clearable onChange={(chosen) => { preview.reset(); apply.reset(); setFile(chosen) }} />
         ) : review.changes.length ? (
-          <Table>
-            <Table.Thead><Table.Tr><Table.Th>الإعداد</Table.Th><Table.Th>الحالي</Table.Th><Table.Th>بعد الحفظ</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>
-              {review.changes.map((change) => (
-                <Table.Tr key={change.id}><Table.Td>{labels[change.id] ?? change.id}</Table.Td>
-                  <Table.Td>{showValue(change, 'before')}</Table.Td><Table.Td>{showValue(change, 'after')}</Table.Td></Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+          <SettingsChangesTable changes={review.changes} labels={labels} />
         ) : <Text size="sm">قيم الملف مطابقة للإعدادات الحالية.</Text>}
         <Group justify="end">
           <Button variant="default" disabled={busy} onClick={review ? () => { setReview(null); preview.reset() } : onClose}>

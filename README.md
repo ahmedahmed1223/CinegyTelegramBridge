@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.112.0
+
+The web ticker keeps the TXT import dialog open until it reloads the saved draft. Operators can then continue editing against the new revision.
+
 ## Version 8.111.0
 
 Administrators can delete programme boards from the web newsroom after reviewing the board name and row count. The bridge checks the reviewed revision before deleting and keeps the board and backup when the primary file cannot be moved.

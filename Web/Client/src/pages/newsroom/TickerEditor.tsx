@@ -391,7 +391,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
         onCommand={(body) => tickerCommand({ ...body, pausedPage })}
         onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
       {draft && showTxt && <TickerTxt draft={draft} onClose={() => setShowTxt(false)}
-        onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
+        onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey }, { throwOnError: true })} />}
       <Modal opened={!!schedule} onClose={() => { if (!busy) { setSchedule(null); setError('') } }} title="جدولة نشر شريط الأخبار">
         {schedule && <form onSubmit={(event) => {
           event.preventDefault()

@@ -16,24 +16,32 @@ export function TickerTxt({ draft, onClose, onRefresh }: {
 }) {
   const [file, setFile] = useState<File | null>(null)
   const [review, setReview] = useState<Review | null>(null)
+  const [saved, setSaved] = useState(false)
+  const refresh = useMutation({ mutationFn: onRefresh, onSuccess: onClose })
   const command = useMutation({
     mutationFn: ({ selected, revision, token }: { selected: File; revision: string; token?: string }) =>
       uploadTickerTxt(selected, revision, token),
     onSuccess: async (value, { revision }) => {
       if (value) setReview({ revision, value })
       else {
-        onClose()
-        await onRefresh()
+        setSaved(true)
+        refresh.mutate()
       }
     },
-    onError: async () => { await onRefresh() },
+    onError: async () => { await onRefresh().catch(() => undefined) },
   })
   const reviewValue = review?.value
   const outdated = !!review && review.revision !== draft.revision
   const wrongType = !!file && !file.name.toLowerCase().endsWith('.txt')
   return (
-    <Modal opened title="استيراد أخبار من TXT" size="xl" onClose={() => { if (!command.isPending) onClose() }}>
-      <form onSubmit={(event) => {
+    <Modal opened title="استيراد أخبار من TXT" size="xl" withCloseButton={!saved}
+      onClose={() => { if (!command.isPending && !saved) onClose() }}>
+      {saved ? <Stack gap="md">
+        {refresh.isError ? <>
+          <Alert color="orange" role="alert">حُفظت أخبار الملف، وتعذّر عرض المسودة المحدّثة.</Alert>
+          <Button onClick={() => refresh.mutate()}>إعادة تحميل المسودة</Button>
+        </> : <Text size="sm" role="status">حُفظت أخبار الملف. جارٍ تحميل المسودة المحدّثة…</Text>}
+      </Stack> : <form onSubmit={(event) => {
         event.preventDefault()
         if (file && !wrongType && !command.isPending) command.mutate({ selected: file, revision: draft.revision })
       }}>
@@ -67,7 +75,7 @@ export function TickerTxt({ draft, onClose, onRefresh }: {
             </Button>}
           </Group>
         </Stack>
-      </form>
+      </form>}
     </Modal>
   )
 }

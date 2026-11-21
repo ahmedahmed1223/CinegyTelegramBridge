@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.112.0'; Items = @('After importing a ticker TXT file, the window stays open until the new draft is ready to edit.') },
                 @{ Version = '8.111.0'; Items = @('Administrators can delete a programme board in the web newsroom after reviewing its name and saved row count. If the board changes meanwhile, refresh it before confirming again.') },
                 @{ Version = '8.110.0'; Items = @('Paste rows into a programme board from a spreadsheet or separated text. Review the column mapping and skipped rows before saving the batch.') },
                 @{ Version = '8.109.0'; Items = @('Open Programme boards in the web newsroom to prepare the same rows as in the bot. Administrators can create boards and set who may edit their text.') },
@@ -352,6 +353,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.112.0'; Items = @('بعد استيراد أخبار الشريط من ملف TXT تبقى نافذة الاستيراد مفتوحة حتى تصبح المسودة المحدّثة جاهزة للتحرير.') },
                 @{ Version = '8.111.0'; Items = @('يمكن للمشرف حذف لوحة برنامج من الويب بعد مراجعة اسمها وعدد صفوفها. إذا تغيّرت اللوحة أثناء المراجعة يلزم تحديثها قبل إعادة التأكيد.') },
                 @{ Version = '8.110.0'; Items = @('يمكن لصق عدة صفوف في لوحة البرنامج ومراجعة توزيع النص على الأعمدة والأسطر المستبعدة قبل إضافة الدفعة.') },
                 @{ Version = '8.109.0'; Items = @('افتح «لوحات البرامج» في غرفة الأخبار على الويب لإعداد الصفوف نفسها التي تظهر في البوت. يمكن للمشرف إنشاء اللوحة وتحديد من يحرّر نصوصها.') },

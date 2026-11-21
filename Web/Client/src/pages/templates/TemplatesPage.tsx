@@ -13,7 +13,7 @@ import {
   TextInput,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { IconFlask, IconPlayerPlay, IconRefresh, IconSearch } from '@tabler/icons-react'
+import { IconFlask, IconPlayerPlay, IconPlus, IconRefresh, IconSearch } from '@tabler/icons-react'
 import { useState } from 'react'
 import { getTemplates, type TemplateDto } from '../../api/air'
 import { messageFor } from '../../api/messages'
@@ -21,11 +21,13 @@ import { isAdmin, useSession } from '../../api/session'
 import { PageHeader } from '../../components/PageHeader'
 import { ShowModal } from './ShowModal'
 import { TemplateRehearsal } from './TemplateRehearsal'
+import { TemplateRegistration } from './TemplateRegistration'
 
 export function TemplatesPage() {
   const [search, setSearch] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDto | null>(null)
   const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
+  const [registering, setRegistering] = useState(false)
   const session = useSession()
   const canRehearse = isAdmin(session.data)
   const { data: templates, error, isLoading, refetch, isFetching } = useQuery({
@@ -47,6 +49,8 @@ export function TemplatesPage() {
   return (
     <Stack gap="xl">
       <PageHeader title="مكتبة القوالب" description="ابحث عن القالب وجهّز حقوله قبل العرض." actions={
+        <Group gap="xs">
+          {canRehearse && <Button leftSection={<IconPlus size={17} />} onClick={() => setRegistering(true)}>تسجيل قالب</Button>}
           <ActionIcon
             variant="default"
             size="lg"
@@ -57,7 +61,9 @@ export function TemplatesPage() {
           >
             <IconRefresh size={18} />
           </ActionIcon>
+        </Group>
       } />
+      {registering && <TemplateRegistration onClose={() => setRegistering(false)} />}
 
       <TextInput
         aria-label="بحث في القوالب"
@@ -98,15 +104,15 @@ export function TemplatesPage() {
               <Stack justify="space-between" h="100%" gap="md">
                 <Stack gap="xs">
                   <Group justify="space-between" align="flex-start" wrap="nowrap">
-                    <div>
+                    <div style={{ minWidth: 0 }}>
                       <Text fw={700} size="md" lineClamp={1} title={template.name}>
                         {template.name}
                       </Text>
-                      <Text size="xs" c="dimmed" className="cgb-mono">
+                      <Text size="xs" c="dimmed" className="cgb-mono" style={{ overflowWrap: 'anywhere' }}>
                         {template.key}
                       </Text>
                     </div>
-                    <Badge color="blue" variant="light" size="sm" radius="sm">
+                    <Badge color="blue" variant="light" size="sm" radius="sm" style={{ flexShrink: 0 }}>
                       طبقة {template.layer}
                     </Badge>
                   </Group>

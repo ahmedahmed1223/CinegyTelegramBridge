@@ -40,6 +40,11 @@ public static class AirEndpoints
             .Produces<TemplateRehearsalResult>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        api.MapPost("/template-catalogue", TemplateCatalogue)
+            .RequireAuthorization(AccountEndpoints.AdminPolicy)
+            .Produces<TemplateCatalogueResult>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
         api.MapPost("/hide/{layer:int}", Hide)
             .Produces(StatusCodes.Status204NoContent)
@@ -105,6 +110,26 @@ public static class AirEndpoints
         if (!reply.Ok) return AirResult(reply);
         http.Response.Headers.CacheControl = "no-store";
         return TypedResults.Ok(reply.Data.Deserialize<TemplateRehearsalResult>(JsonDefaults.Options));
+    }
+
+    private static async Task<IResult> TemplateCatalogue(TemplateCatalogueRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("air.templateCatalogue", new
+        {
+            actor = http.User.UserId(), request.Action, request.Folder, request.Page, request.Search,
+            request.Definition, request.Review
+        }, http.RequestAborted);
+        if (reply.IsUnavailable) return ApiErrors.BridgeUnavailable();
+        if (!reply.Ok) return reply.Error switch
+        {
+            "scene_definition_invalid" => ApiErrors.Of(400, reply.Error),
+            "scene_not_found" => ApiErrors.Of(404, reply.Error),
+            "scene_registry_stale" or "scene_key_taken" => ApiErrors.Of(409, reply.Error),
+            "scene_folder_missing" or "scene_registry_failed" => ApiErrors.Of(503, reply.Error),
+            _ => AirResult(reply)
+        };
+        return TypedResults.Ok(reply.Data.Deserialize<TemplateCatalogueResult>(JsonDefaults.Options));
     }
 
     private static IResult PresetResult(BridgeReply reply, HttpContext http)

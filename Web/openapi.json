@@ -1369,6 +1369,85 @@
         }
       }
     },
+    "/api/air/template-catalogue": {
+      "post": {
+        "tags": [
+          "Air"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateCatalogueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCatalogueResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/air/hide/{layer}": {
       "post": {
         "tags": [
@@ -5621,6 +5700,124 @@
           }
         }
       },
+      "TemplateCataloguePreview": {
+        "required": [
+          "review",
+          "key",
+          "file",
+          "layer",
+          "description",
+          "category",
+          "fields",
+          "sharedTemplates"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sharedTemplates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "nullable": true
+      },
+      "TemplateCatalogueRequest": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "search": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "definition": {
+            "$ref": "#/components/schemas/TemplateSceneDefinition"
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "TemplateCatalogueResult": {
+        "required": [
+          "folder",
+          "entries",
+          "page",
+          "pageCount",
+          "preview"
+        ],
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "nullable": true
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateSceneEntry"
+            },
+            "nullable": true
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "pageCount": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TemplateCataloguePreview"
+          }
+        }
+      },
       "TemplateDto": {
         "required": [
           "key",
@@ -5871,6 +6068,65 @@
           "autoHideFailed": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "TemplateSceneDefinition": {
+        "required": [
+          "key",
+          "file",
+          "layer"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
+          }
+        },
+        "default": null,
+        "nullable": true
+      },
+      "TemplateSceneEntry": {
+        "required": [
+          "name",
+          "path",
+          "folder"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "boolean"
           }
         }
       },

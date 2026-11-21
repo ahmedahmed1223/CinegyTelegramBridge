@@ -617,9 +617,17 @@ function Save-TemplateDefinitionChange {
             $layer = 0
             if ([string]::IsNullOrWhiteSpace($templatePath)) { throw (T 'tpl.pathEmpty') }
             if (-not [int]::TryParse([string](Get-JsonProp $Definition 'layer'), [ref]$layer) -or $layer -le 0) { throw (T 'tpl.layerPositive') }
-            $root = [IO.Path]::GetFullPath($scriptRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-            $resolved = [IO.Path]::GetFullPath((Join-Path $scriptRoot $templatePath))
-            if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw (T 'tpl.pathInsideProject') }
+            $expanded = [Environment]::ExpandEnvironmentVariables($templatePath.Trim())
+            if ([IO.Path]::GetExtension($expanded) -ne '.cintitle') { throw (T 'tpl.notCintitle' $TemplateKey) }
+            if (-not [IO.Path]::IsPathFullyQualified($expanded)) {
+                if ([IO.Path]::IsPathRooted($expanded)) { throw (T 'tpl.pathInsideProject') }
+                $base = [Environment]::ExpandEnvironmentVariables([string](Get-Setting 'TemplateBasePath')).Trim()
+                # Preserve edits to older definitions that stored a project-relative path.
+                if (-not [IO.Path]::IsPathFullyQualified($base)) { $base = $scriptRoot }
+                $root = [IO.Path]::GetFullPath($base).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+                $resolved = [IO.Path]::GetFullPath($expanded, $root)
+                if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw (T 'tpl.pathInsideProject') }
+            }
             $fields = @(Get-JsonProp $Definition 'fields')
             foreach ($field in $fields) {
                 $fieldName = if ($field -is [string]) { $field } else { [string](Get-JsonProp $field 'name') }

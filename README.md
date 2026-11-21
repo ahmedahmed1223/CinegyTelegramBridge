@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.117.0
+
+Administrators can browse and search the configured scene folder in the web template library. They can review a scene file, its target layer and its input fields, then register the definition in the catalogue shared with Telegram. The bridge backs up the catalogue before writing. Use a station-managed scene folder with write access limited to scene maintainers.
+
 ## Version 8.116.0
 
 Administrators can review and rehearse a template from the web library using sample values. Rehearsal requires single-scene mode and an empty test device separate from registered graphics. Automatic hide uses the reviewed duration from the show request and requires confirmation of the rehearsal event.

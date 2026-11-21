@@ -536,6 +536,75 @@ Describe 'Web channel: the pipe' {
         Should -Invoke Invoke-ExitLayer -Times 1
     }
 
+    It 'lists and registers selected scenes through the shared catalogue without escaping the configured folder' {
+        $script:WebSceneTestRoot = Join-Path $TestDrive 'scenes'
+        $studio = Join-Path $script:WebSceneTestRoot 'studio'
+        New-Item -ItemType Directory -Path $studio -Force | Out-Null
+        $sceneFile = Join-Path $studio 'evening.cintitle'
+        Set-Content -LiteralPath $sceneFile -Value '<Scene />'
+        Set-Content -LiteralPath (Join-Path $studio '%SystemRoot%-report.cintitle') -Value '<Scene />'
+        Set-Content -LiteralPath (Join-Path $studio 'notes.txt') -Value 'station notes'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'outside.cintitle') -Value '<Scene />'
+        $script:WebSceneTestRegistry = Join-Path $TestDrive 'scene-registry.json'
+        Set-Content -LiteralPath $script:WebSceneTestRegistry -Value '{}'
+        Mock Get-TemplateRegistryFilePath { $script:WebSceneTestRegistry }
+        Mock Get-Setting { $script:WebSceneTestRoot } -ParameterFilter { $Name -eq 'TemplateBasePath' }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableFullTemplateManagement' }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Add-AuditEntry {}
+        $catalogueCall = {
+            param($payload)
+            $line = @{ op = 'air.templateCatalogue'; args = $payload } | ConvertTo-Json -Depth 6 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        $request = @{ actor = 4322; action = 'browse'; folder = '' }
+        (& $catalogueCall $request).error | Should -Be 'forbidden'
+        $request.actor = 4321
+        (& $catalogueCall $request).data.entries.name | Should -Be @('studio')
+        $work = @{
+            Request = @{ op = 'air.templateCatalogue'; args = $request.Clone() }
+            Deadline = [Diagnostics.Stopwatch]::GetTimestamp() + 12 * [Diagnostics.Stopwatch]::Frequency
+            Claim = [Threading.Tasks.TaskCompletionSource[bool]]::new()
+            Reply = [Threading.Tasks.TaskCompletionSource[string]]::new()
+        }
+        $script:WebChannel.Shared.Queue.Enqueue($work)
+        Invoke-WebChannelRequests
+        $work.Claim.Task.Result | Should -BeTrue
+        $work.Reply.Task.IsCompleted | Should -BeFalse
+        (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}' | ConvertFrom-Json).ok | Should -BeTrue
+        while (-not $work.Reply.Task.IsCompleted -and [Diagnostics.Stopwatch]::GetTimestamp() -lt $work.Deadline) {
+            Invoke-WebChannelRequests
+            Start-Sleep -Milliseconds 25
+        }
+        $work.Reply.Task.IsCompleted | Should -BeTrue
+        $request.folder = '..'
+        (& $catalogueCall $request).error | Should -Be 'scene_not_found'
+        $request.folder = 'studio'
+        $files = (& $catalogueCall $request).data.entries
+        $files.name | Should -Be @('evening.cintitle')
+        $files.folder | Should -BeFalse
+        $request.action = 'review'
+        $request.definition = @{ key = 'evening'; file = $files.path; layer = 8; description = 'بطاقة المساء'; fields = @('Title', 'Guest') }
+        $plan = (& $catalogueCall $request).data.preview
+        $plan.fields | Should -Be @('Title', 'Guest')
+        (Get-TemplateStore).Map.ContainsKey('evening') | Should -BeFalse
+        $request.action = 'register'
+        $request.review = $plan.review
+        Add-Content -LiteralPath $sceneFile -Value '<!-- scene changed after review -->'
+        (& $catalogueCall $request).error | Should -Be 'scene_registry_stale'
+        $request.action = 'review'
+        $request.review = (& $catalogueCall $request).data.preview.review
+        $request.action = 'register'
+        (& $catalogueCall $request).ok | Should -BeTrue
+        $saved = (Get-TemplateStore).Map['evening']
+        $saved.Path | Should -Be $sceneFile
+        $saved.Fields | Should -Be @('Title', 'Guest')
+        $saved.Layer | Should -Be 8
+        (& $catalogueCall $request).error | Should -Be 'scene_registry_stale'
+        @(Get-TemplateBackupFiles -Path $script:WebSceneTestRegistry).Count | Should -Be 1
+    }
+
     It 'rehearses a selected template with sample values only on the reviewed isolated device' {
         $templateFile = Join-Path $TestDrive 'web-rehearsal.cintitle'
         Set-Content -LiteralPath $templateFile -Value '<Scene />'

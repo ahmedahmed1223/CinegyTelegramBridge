@@ -575,6 +575,15 @@ Describe 'Template definition storage' {
         $result.Success | Should -BeFalse
         $result.Error | Should -Match 'على الهواء'
     }
+
+    It 'does not register a relative scene outside the configured scene directory' {
+        $script:TemplateDefinitionSceneRoot = Join-Path $TestDrive 'scenes'
+        Mock Get-Setting { $script:TemplateDefinitionSceneRoot } -ParameterFilter { $Name -eq 'TemplateBasePath' }
+        (Resolve-TemplateScenePath -Path 'valid.cintitle') | Should -Be (Join-Path $script:TemplateDefinitionSceneRoot 'valid.cintitle')
+        $result = Save-TemplateDefinitionChange -TemplateKey 'escaped' -Action create -Definition @{ path = '../escaped.cintitle'; layer = 5 }
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Be (T 'tpl.pathInsideProject')
+    }
 }
 
 Describe 'Template create wizard' {

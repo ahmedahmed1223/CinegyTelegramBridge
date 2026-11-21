@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.117.0'; Items = @('From the web library, administrators can browse the configured scenes folder, enter a template and its fields, and review it before saving to the catalogue shared with the bot.') },
                 @{ Version = '8.116.0'; Items = @('Administrators can review and run a template rehearsal with sample values from the web library. Cinegy must confirm the rehearsal item before automatic hide is armed.') },
                 @{ Version = '8.115.0'; Items = @('Choose a ready text while preparing a template on the web. Administrators can create, edit, rename and delete texts shared with the bot.') },
                 @{ Version = '8.114.0'; Items = @('Select and review text corrections for the programme row already on air. Use the row editor for the saved version.') },
@@ -357,6 +358,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.117.0'; Items = @('يستطيع المشرف تصفّح مجلد المشاهد من مكتبة الويب واختيار ملف وإدخال حقوله وطبقته، ثم مراجعتها قبل حفظ القالب في السجل المشترك مع البوت.') },
                 @{ Version = '8.116.0'; Items = @('يستطيع المشرف مراجعة بروفة القالب بقيم تجريبية من مكتبة الويب وتشغيلها على طبقة التجربة. يُضبط الإخفاء التلقائي بعد تأكيد مشهد البروفة.') },
                 @{ Version = '8.115.0'; Items = @('اختر نصًا جاهزًا عند تجهيز قالب للعرض في الويب. يستطيع المشرف إضافة النصوص المشتركة مع البوت وتعديلها وتسميتها وحذفها.') },
                 @{ Version = '8.114.0'; Items = @('حدّد الحقول النصية التي تريد تصحيحها في صف البرنامج المعروض وراجعها قبل التطبيق. لتحرير النسخة المحفوظة استخدم زر تحرير الصف.') },

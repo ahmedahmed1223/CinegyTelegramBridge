@@ -39,6 +39,11 @@ Set-JsonProp $config 'TemplateRegistryPath' $fixtureRegistry
 Set-JsonProp $config.Settings 'NewsFilePath' $fixtureTicker
 Set-JsonProp $config.Settings 'EnableUrgentBoard' $true
 Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $true
+$fixtureScenes = Join-Path $runtime 'scene-library'
+$fixtureStudio = Join-Path $fixtureScenes 'studio'
+New-Item -ItemType Directory -Path $fixtureStudio -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $fixtureStudio 'new-programme.cintitle') -Value '<Scene />'
+Set-JsonProp $config.Settings 'TemplateBasePath' $fixtureScenes
 Set-JsonProp $config.Settings 'TemplateTestLayer' 9
 Set-JsonProp $config.Settings 'UrgentBoardIntervalSeconds' 30
 Set-JsonProp $config.Settings 'EnableNewsTickerManagement' $true

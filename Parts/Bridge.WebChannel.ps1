@@ -24,8 +24,10 @@ $script:WebChannel = $null
 $script:WebTickerSheetRequest = $null
 $script:WebTickerTxtRequest = $null
 $script:WebBulletinPhotoRequest = $null
+$script:WebSceneRequest = $null
 $script:WebUrgentManualReviews = @{}
 $script:WebTemplateRehearsalReviews = @{}
+$script:WebTemplateCatalogueReviews = @{}
 $script:WebProgrammeBoardAirReviews = @{}
 $script:WebBulletinPlaybackReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
@@ -159,6 +161,7 @@ function Stop-WebChannel {
     $channel.Shared.Stop = $true
     Stop-WebTickerSheetRequest -ErrorCode 'channel_closed'
     Stop-WebBulletinPhotoRequest -ErrorCode 'channel_closed'
+    Stop-WebSceneRequest -Code 'channel_closed'
     if ($script:WebTickerTxtRequest) {
         $worker = $script:WebTickerTxtRequest
         $script:WebTickerTxtRequest = $null
@@ -306,6 +309,7 @@ function Invoke-WebChannelRequests {
        requests cannot hold the air clock; the rest wait for the next pass. #>
     param([int]$Limit = 25)
     Update-WebBulletinPhotoRequest
+    Update-WebSceneRequest
     if (-not (Test-WebChannelActive)) { return }
     Update-WebTickerSheetRequest
     Update-WebTickerTxtRequest
@@ -326,7 +330,8 @@ function Invoke-WebChannelRequests {
             if ($null -eq $answer -and (
                 [object]::ReferenceEquals((Get-JsonProp $script:WebTickerSheetRequest 'Entry'), $item) -or
                 [object]::ReferenceEquals((Get-JsonProp $script:WebTickerTxtRequest 'Entry'), $item) -or
-                [object]::ReferenceEquals((Get-JsonProp $script:WebBulletinPhotoRequest 'Entry'), $item))) { continue }
+                [object]::ReferenceEquals((Get-JsonProp $script:WebBulletinPhotoRequest 'Entry'), $item) -or
+                [object]::ReferenceEquals((Get-JsonProp $script:WebSceneRequest 'Entry'), $item))) { continue }
         }
         catch {
             Write-BridgeLog "Web channel operation failed: $($_.Exception.Message)" 'ERROR'
@@ -348,6 +353,7 @@ function Invoke-WebChannelOperation {
         'account.grant' { return Grant-WebOnlyAccount -Arguments $arguments }
         'account.revoke' { return Revoke-WebOnlyAccount -Arguments $arguments }
         'air.templates' { return Get-WebTemplates }
+        'air.templateCatalogue' { return Start-WebSceneRequest -Arguments $arguments -Entry $Entry }
         'air.presets' { return Get-WebTemplatePresets -Arguments $arguments }
         'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
         'air.rehearsal' { return Invoke-WebTemplateRehearsal -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -707,6 +713,200 @@ function Revoke-WebOnlyAccount {
 }
 
 # ------------------------------------------------------------- air operations
+
+function Get-WebSceneItem {
+    param([string]$Root, [string]$RelativePath)
+
+    # The configured root is trusted. Reject links at every descendant so a
+    # junction cannot turn this picker into a browser for the rest of the host.
+    $cursor = Get-Item -LiteralPath $Root -ErrorAction SilentlyContinue
+    if (-not $cursor -or -not $cursor.PSIsContainer) { return }
+    if (-not $RelativePath) { return $cursor }
+    if ($RelativePath.Length -gt 1024) { return }
+    foreach ($segment in $RelativePath.Split('/')) {
+        if (-not $cursor.PSIsContainer -or -not $segment -or $segment -in '.', '..' -or
+            $segment.EndsWith('.') -or $segment.EndsWith(' ') -or
+            $segment.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) { return }
+        $cursor = Get-Item -LiteralPath (Join-Path $cursor.FullName $segment) -ErrorAction SilentlyContinue
+        if (-not $cursor -or ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+    }
+    return $cursor
+}
+
+function Get-WebSceneFolder {
+    param([string]$Root, [string]$Folder, [int]$Page, [string]$Search)
+    $target = Get-WebSceneItem -Root $Root -RelativePath $folder
+    if (-not $target -or -not $target.PSIsContainer) { return @{ ok = $false; error = 'scene_not_found' } }
+    try {
+        $children = @(Get-ChildItem -LiteralPath $target.FullName -ErrorAction Stop | Where-Object {
+            -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($_.PSIsContainer -or $_.Extension -ieq '.cintitle') -and
+                $_.Name.Contains($search, [StringComparison]::OrdinalIgnoreCase) -and
+                [Environment]::ExpandEnvironmentVariables($_.FullName) -ceq $_.FullName
+        } | Sort-Object -Property @{ Expression = { -not $_.PSIsContainer } }, Name)
+    }
+    catch { return @{ ok = $false; error = 'scene_not_found' } }
+    $window = Get-BridgePageWindow -ItemCount $children.Count -Page $page -PageSize 24
+    $prefix = if ($folder) { "$folder/" } else { '' }
+    $entries = @(foreach ($child in @($children | Select-Object -Skip $window.StartIndex -First 24)) {
+        @{ name = $child.Name; path = "$prefix$($child.Name)"; folder = $child.PSIsContainer }
+    })
+    return @{ ok = $true; data = @{ folder = $folder; entries = $entries; page = $window.Page; pageCount = $window.PageCount } }
+}
+
+function Get-WebSceneWorkerScript {
+    # Copy the two filesystem readers, not the bridge or its session state.
+    $itemReader = ${function:Get-WebSceneItem}.ToString()
+    $folderReader = ${function:Get-WebSceneFolder}.ToString()
+    return @"
+param(`$root, `$request, `$pagingModule)
+function Get-WebSceneItem { $itemReader }
+function Get-WebSceneFolder { $folderReader }
+`$ErrorActionPreference = 'Stop'
+if (`$request.Action -ceq 'browse') {
+    Import-Module `$pagingModule
+    return Get-WebSceneFolder -Root `$root -Folder `$request.RelativePath -Page `$request.Page -Search `$request.Search
+}
+`$scene = Get-WebSceneItem -Root `$root -RelativePath `$request.RelativePath
+if (`$scene -and -not `$scene.PSIsContainer -and `$scene.Extension -ieq '.cintitle' -and
+    [Environment]::ExpandEnvironmentVariables(`$scene.FullName) -ceq `$scene.FullName) {
+    return @{ FullName = `$scene.FullName; WriteTicks = `$scene.LastWriteTimeUtc.Ticks; Length = `$scene.Length }
+}
+return @{}
+"@
+}
+
+function Test-WebSceneCatalogueAccess {
+    param([long]$Actor)
+    return ((Test-Authorized -ChatId $Actor -UserId $Actor) -and (Test-Admin -ChatId $Actor -UserId $Actor) -and
+        (Get-Setting 'EnableFullTemplateManagement'))
+}
+
+function Get-WebSceneCatalogueRoot {
+    return [Environment]::ExpandEnvironmentVariables([string](Get-Setting 'TemplateBasePath')).Trim()
+}
+
+function Start-WebSceneRequest {
+    param([System.Collections.IDictionary]$Arguments, [hashtable]$Entry)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-WebSceneCatalogueAccess -Actor $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if ($script:WebSceneRequest) { return @{ ok = $false; error = 'bridge_busy' } }
+    $root = Get-WebSceneCatalogueRoot
+    if (-not [IO.Path]::IsPathFullyQualified($root)) { return @{ ok = $false; error = 'scene_folder_missing' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $invalid = @{ ok = $false; error = 'scene_definition_invalid' }
+    if ($action -ceq 'browse') {
+        $page = 0
+        [int]::TryParse([string](Get-JsonProp $Arguments 'page'), [ref]$page) | Out-Null
+        $search = ([string](Get-JsonProp $Arguments 'search')).Trim()
+        if ($search.Length -gt 120) { return $invalid }
+        $query = @{ Action = $action; RelativePath = [string](Get-JsonProp $Arguments 'folder'); Page = $page; Search = $search }
+        return Start-WebSceneWorker -Entry $Entry -Root $root -Actor $actor -Query $query
+    }
+    if ($action -cnotin 'review', 'register') { return $invalid }
+
+    $submitted = Get-JsonProp $Arguments 'definition'
+    $key = ([string](Get-JsonProp $submitted 'key')).Trim()
+    $file = [string](Get-JsonProp $submitted 'file')
+    $description = ([string](Get-JsonProp $submitted 'description')).Trim()
+    $category = ([string](Get-JsonProp $submitted 'category')).Trim()
+    $fields = @(Get-JsonProp $submitted 'fields' | Where-Object { $null -ne $_ } | ForEach-Object { ([string]$_).Trim() })
+    $layer = 0
+    if ($key -notmatch '^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$' -or $description.Length -gt 120 -or $category.Length -gt 60 -or
+        -not [int]::TryParse([string](Get-JsonProp $submitted 'layer'), [ref]$layer) -or $layer -le 0 -or
+        $fields.Count -gt 40 -or @($fields | Where-Object { -not $_ -or $_.Length -gt 100 }).Count -gt 0 -or
+        @($fields | Sort-Object -Unique).Count -ne $fields.Count) { return $invalid }
+
+    $query = @{ Action = $action; RelativePath = $file; Key = $key; Layer = $layer; Description = $description
+        Category = $category; Fields = $fields; Review = [string](Get-JsonProp $Arguments 'review') }
+    return Start-WebSceneWorker -Entry $Entry -Root $root -Actor $actor -Query $query
+}
+
+function Start-WebSceneWorker {
+    param([hashtable]$Entry, [string]$Root, [long]$Actor, [hashtable]$Query)
+    $pipeline = [powershell]::Create()
+    try {
+        $pagingModule = Join-Path $moduleRoot 'BridgeUiPaging.psm1'
+        [void]$pipeline.AddScript((Get-WebSceneWorkerScript)).AddArgument($Root).AddArgument($Query).AddArgument($pagingModule)
+        $invocation = $pipeline.BeginInvoke()
+        $script:WebSceneRequest = @{ Pipeline = $pipeline; Invocation = $invocation; Entry = $Entry; Query = $Query
+            Root = $Root; Actor = $Actor; Reported = $false }
+    }
+    catch {
+        $pipeline.Dispose()
+        return @{ ok = $false; error = 'scene_not_found' }
+    }
+}
+
+function Stop-WebSceneRequest {
+    param([string]$Code)
+    $pending = $script:WebSceneRequest
+    if (-not $pending -or $pending.Reported) { return }
+    $pending.Reported = $true
+    [void]$pending.Entry.Reply.TrySetResult((@{ ok = $false; error = $Code } | ConvertTo-Json -Compress))
+    # Dispose only after the I/O really ends. Stopping an SMB call may itself
+    # wait, and an expired request must not open a second worker behind it.
+    try { [void]$pending.Pipeline.BeginStop($null, $null) }
+    catch { Write-BridgeLog 'Could not cancel the scene directory read.' 'DEBUG' }
+}
+
+function Update-WebSceneRequest {
+    $pending = $script:WebSceneRequest
+    if (-not $pending) { return }
+    if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $pending.Entry.Deadline) {
+        Stop-WebSceneRequest -Code 'bridge_busy'
+    }
+    if (-not $pending.Invocation.IsCompleted) { return }
+    $script:WebSceneRequest = $null
+    try {
+        if ($pending.Reported) { return }
+        $result = @($pending.Pipeline.EndInvoke($pending.Invocation) | Select-Object -First 1)
+        $reply = if (-not (Test-WebSceneCatalogueAccess -Actor $pending.Actor)) { @{ ok = $false; error = 'forbidden' } }
+        elseif ((Get-WebSceneCatalogueRoot) -cne $pending.Root) { @{ ok = $false; error = 'scene_registry_stale' } }
+        elseif (-not $result.Count) { @{ ok = $false; error = 'scene_not_found' } }
+        elseif ($pending.Query.Action -ceq 'browse') { $result[0] }
+        else { Complete-WebTemplateRegistration -Pending $pending -Scene $result[0] }
+    }
+    catch { $reply = @{ ok = $false; error = 'scene_not_found' } }
+    finally { $pending.Pipeline.Dispose() }
+    [void]$pending.Entry.Reply.TrySetResult(($reply | ConvertTo-Json -Depth 6 -Compress))
+}
+
+function Complete-WebTemplateRegistration {
+    param([hashtable]$Pending, [hashtable]$Scene)
+    $query = $Pending.Query
+    $actor = $Pending.Actor
+    $key = $query.Key
+    $layer = $query.Layer
+    $stale = @{ ok = $false; error = 'scene_registry_stale' }
+    if (-not (Get-JsonProp $Scene 'FullName')) {
+        if ($query.Action -ceq 'register') { return $stale }
+        return @{ ok = $false; error = 'scene_not_found' }
+    }
+    $store = Get-TemplateStore
+    if ($store.Map.ContainsKey($key) -or $key -in @(Get-JsonProp $store 'InvalidKeys')) {
+        if ($query.Action -ceq 'register') { return $stale }
+        return @{ ok = $false; error = 'scene_key_taken' }
+    }
+    $shared = @($store.Map.Values | Where-Object { $_.Layer -eq $layer } | ForEach-Object { $_.Key } | Sort-Object)
+    $fingerprint = ConvertTo-Json -InputObject @($key, $scene.FullName, $scene.WriteTicks, $scene.Length,
+        $layer, $query.Description, $query.Category, $query.Fields, $shared) -Depth 5 -Compress
+    if ($query.Action -ceq 'review') {
+        $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebTemplateCatalogueReviews
+        return @{ ok = $true; data = @{ preview = @{
+            review = $token; key = $key; file = $query.RelativePath; layer = $layer; description = $query.Description
+            category = $query.Category; fields = $query.Fields; sharedTemplates = $shared
+        } } }
+    }
+    $review = Use-WebAirReview -Actor $actor -Token $query.Review -Reviews $script:WebTemplateCatalogueReviews
+    if (-not $review -or $review.Fingerprint -cne $fingerprint) { return $stale }
+    if ([Diagnostics.Stopwatch]::GetTimestamp() -ge $Pending.Entry.Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+    $written = Save-TemplateDefinitionChange -TemplateKey $key -Action create -Definition @{
+        path = $scene.FullName; layer = $layer; description = $query.Description; category = $query.Category; fields = $query.Fields
+    }
+    if (-not $written.Success) { return @{ ok = $false; error = 'scene_registry_failed' } }
+    Add-AuditEntry (T 'atpl.savedAudit' 'create' $key (Format-UserAuditActor -UserId $actor))
+    return @{ ok = $true; data = @{} }
+}
 
 function Get-WebTemplateFields {
     param([Parameter(Mandatory)][hashtable]$Template)

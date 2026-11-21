@@ -1608,6 +1608,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/air/template-catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateCatalogueRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCatalogueResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/air/hide/{layer}": {
         parameters: {
             query?: never;
@@ -4515,6 +4599,41 @@ export interface components {
             /** Format: int32 */
             failures: number;
         };
+        TemplateCataloguePreview: {
+            review: string;
+            key: string;
+            file: string;
+            /** Format: int32 */
+            layer: number;
+            description: string;
+            category: string;
+            fields: string[];
+            sharedTemplates: string[];
+        } | null;
+        TemplateCatalogueRequest: {
+            action: string;
+            /** @default null */
+            folder: string | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            page: number | null;
+            /** @default null */
+            search: string | null;
+            definition?: components["schemas"]["TemplateSceneDefinition"];
+            /** @default null */
+            review: string | null;
+        };
+        TemplateCatalogueResult: {
+            folder: string | null;
+            entries: components["schemas"]["TemplateSceneEntry"][] | null;
+            /** Format: int32 */
+            page: number | null;
+            /** Format: int32 */
+            pageCount: number | null;
+            preview: components["schemas"]["TemplateCataloguePreview"];
+        };
         TemplateDto: {
             key: string;
             name: string;
@@ -4594,6 +4713,24 @@ export interface components {
             preview: components["schemas"]["TemplateRehearsalPreview"];
             /** @default false */
             autoHideFailed: boolean;
+        };
+        /** @default null */
+        TemplateSceneDefinition: {
+            key: string;
+            file: string;
+            /** Format: int32 */
+            layer: number;
+            /** @default null */
+            description: string | null;
+            /** @default null */
+            category: string | null;
+            /** @default null */
+            fields: string[] | null;
+        } | null;
+        TemplateSceneEntry: {
+            name: string;
+            path: string;
+            folder: boolean;
         };
         TickerBackupItem: {
             id: string;

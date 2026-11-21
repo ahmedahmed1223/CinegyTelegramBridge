@@ -14,6 +14,14 @@ public sealed record TemplateRehearsalRequest(string Key, string Action, string?
 public sealed record TemplateRehearsalField(string Label, string Value);
 public sealed record TemplateRehearsalPreview(string Review, int Layer, int AutoHideSeconds, TemplateRehearsalField[] Fields);
 public sealed record TemplateRehearsalResult(TemplateRehearsalPreview? Preview, bool AutoHideFailed = false);
+public sealed record TemplateSceneEntry(string Name, string Path, bool Folder);
+public sealed record TemplateSceneDefinition(string Key, string File, int Layer, string? Description = null, string? Category = null, string[]? Fields = null);
+public sealed record TemplateCatalogueRequest(string Action, string? Folder = null, int? Page = null, string? Search = null,
+    TemplateSceneDefinition? Definition = null, string? Review = null);
+public sealed record TemplateCataloguePreview(string Review, string Key, string File, int Layer, string Description,
+    string Category, string[] Fields, string[] SharedTemplates);
+public sealed record TemplateCatalogueResult(string? Folder, TemplateSceneEntry[]? Entries, int? Page, int? PageCount,
+    TemplateCataloguePreview? Preview);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);

@@ -4759,6 +4759,14 @@
           "review": {
             "type": "string",
             "nullable": true
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
           }
         }
       },

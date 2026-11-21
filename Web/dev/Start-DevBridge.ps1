@@ -22,6 +22,7 @@ param(
     [long]$OwnerId = 1001,
     [string]$CaptureFixtureDirectory,
     [string]$SheetFixturePath,
+    [switch]$ProgrammeCorrectionFixture,
     [string]$FixtureRuntimeDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'cgb-dev-bridge')
 )
 
@@ -206,6 +207,11 @@ function Invoke-ShowTemplateResult {
         Key = $Key; At = $shownAt; ActiveId = $activeId; ActiveIdConfirmed = $true
         UserId = $UserId; Source = 'bridge'; Variables = $Variables
     }
+    $fixtureScene = if ($template.Path) { Get-Item -LiteralPath $template.Path -ErrorAction SilentlyContinue }
+    $script:LastSuccessfulLayerShows[$layer] = @{
+        Key = $Key; ActiveId = $activeId; ActiveIdConfirmed = $true
+        TemplatePath = $template.Path; SceneWriteTicks = if ($fixtureScene) { $fixtureScene.LastWriteTimeUtc.Ticks } else { 0 }
+    }
     $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $layer })
     if ($AutoHideSeconds -gt 0) {
         $script:AutoHideQueue += @{ Layer = $layer; At = $shownAt.AddSeconds($AutoHideSeconds) }
@@ -255,14 +261,30 @@ function Invoke-ExitLayer {
 
 function Send-PostboxValues {
     param([hashtable]$Values)
-    $live = $script:OnAir[(Get-MojazRunLayer -Playback $script:MojazPlayback)]
-    if (-not $live) { return @{ Success = $false; Error = 'No running fixture scene.' } }
-    $live.Variables = $Values
+    if ($script:MojazPlayback) {
+        $live = $script:OnAir[(Get-MojazRunLayer -Playback $script:MojazPlayback)]
+        if (-not $live) { return @{ Success = $false; Error = 'No running fixture scene.' } }
+        $live.Variables = $Values
+    }
+    else {
+        $updated = $false
+        foreach ($live in $script:OnAir.Values) {
+            $variables = Get-JsonProp $live 'Variables'
+            if ($variables -isnot [System.Collections.IDictionary]) { continue }
+            foreach ($name in $Values.Keys) {
+                if (-not $variables.Contains($name)) { continue }
+                $variables[$name] = $Values[$name]
+                $updated = $true
+            }
+        }
+        if (-not $updated) { return @{ Success = $false; Error = 'No fixture scene has those fields.' } }
+    }
     return @{ Success = $true; Xml = '' }
 }
 
 function Get-TitlerLayerStatus {
-    param([int]$Layer)
+    param([int]$Layer, [string]$Device)
+    if ($Device -match '^\d+$') { $Layer = [int]$Device }
     $live = $script:OnAir[$Layer]
     $startedAt = Get-JsonProp $live 'At'
     return @{
@@ -289,9 +311,11 @@ Open-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $started.AddMinu
 Close-BridgeOutage -Ledger $script:StreamOutages -Kind black -At $started.AddMinutes(-46) | Out-Null
 $script:RuntimeState.Monitoring.TelegramConnectionState = 'connected'
 $script:RuntimeState.Monitoring.CinegyHealthState = 'healthy'
-$script:OnAir[1] = [pscustomobject]@{ Key = 'شعار القناة'; At = $started.AddMinutes(-47); UserId = $OwnerId; Source = 'bridge' }
-$script:OnAir[3] = [pscustomobject]@{ Key = 'شريط الأخبار العاجلة'; At = $started.AddSeconds(-95); ActiveId = 'dev-graphics-3'; UserId = 1003; Source = 'bridge' }
-$script:OnAir[5] = [pscustomobject]@{ Key = 'اسم الضيف — د. سامر الخطيب'; At = $started.AddSeconds(-20); UserId = 0; Source = 'cinegy' }
+if (-not $ProgrammeCorrectionFixture) {
+    $script:OnAir[1] = [pscustomobject]@{ Key = 'شعار القناة'; At = $started.AddMinutes(-47); UserId = $OwnerId; Source = 'bridge' }
+    $script:OnAir[3] = [pscustomobject]@{ Key = 'شريط الأخبار العاجلة'; At = $started.AddSeconds(-95); ActiveId = 'dev-graphics-3'; UserId = 1003; Source = 'bridge' }
+    $script:OnAir[5] = [pscustomobject]@{ Key = 'اسم الضيف — د. سامر الخطيب'; At = $started.AddSeconds(-20); UserId = 0; Source = 'cinegy' }
+}
 $script:AutoHideQueue = @([pscustomobject]@{ Layer = 5; At = $started.AddSeconds(40) })
 
 Write-Host "Dev bridge on pipe $PipeName. Ctrl+C to stop." -ForegroundColor Cyan

@@ -23,7 +23,8 @@ public sealed record ProgrammeBoardEditRequest(string Action, string? Id = null,
 public sealed record ProgrammeBoardPasteRequest(string Action, string Id, int Revision, string Format, string Text, string? Review);
 public sealed record ProgrammeBoardPastePreview(string Review, ProgrammeBoardField[] Fields, Dictionary<string, string>[] Rows, int[] SkippedLines);
 public sealed record ProgrammeBoardPasteResult(ProgrammeBoardPastePreview? Preview, int? SavedPage);
-public sealed record ProgrammeBoardAirRequest(string Action, string Id, int Revision, string RowId, string? Review);
+public sealed record ProgrammeBoardAirRequest(string Action, string Id, int Revision, string RowId, string? Review,
+    Dictionary<string, string>? Values = null);
 public sealed record ProgrammeBoardAirField(string Label, string Value);
 public sealed record ProgrammeBoardAirPreview(string Review, int Layer, string Template, ProgrammeBoardAirField[] Fields,
     bool ReplacesGraphic, string? GraphicName, int? AutoHideSeconds, bool StopsUrgent = false, bool StopsBulletin = false);

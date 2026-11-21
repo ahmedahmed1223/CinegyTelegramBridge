@@ -1817,6 +1817,116 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'reviews a live programme correction and writes only selected fields to the confirmed scene' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-BoardsAvailable { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Get-BoardTextFields { 'programme.title'; 'programme.guest' }
+        Mock Get-MojazFieldLabel { $FieldName }
+        Mock Write-BridgeValidatedJson { $true }
+        $script:BoardCorrectionProgrammePath = Join-Path $TestDrive 'correction-programme.cintitle'
+        $script:BoardCorrectionLogoPath = Join-Path $TestDrive 'correction-logo.cintitle'
+        Set-Content -LiteralPath $script:BoardCorrectionProgrammePath -Value '<Scene />'
+        Set-Content -LiteralPath $script:BoardCorrectionLogoPath -Value '<Scene />'
+        Mock Get-TemplateStore {
+            @{ Map = @{ Programme = @{ Layer = 7; Path = $script:BoardCorrectionProgrammePath }
+                    Logo = @{ Layer = 2; Path = $script:BoardCorrectionLogoPath } } }
+        }
+        Mock Get-MojazDesignFields {
+            @{ Name = $script:BoardCorrectionOtherField; Kind = 'text' }
+        } -ParameterFilter { $TemplateKey -eq 'Logo' }
+        $script:BoardCorrectionOtherField = 'logo.channel'
+        $script:BoardCorrectionEvent = '{programme-event}'
+        $script:BoardCorrectionExternal = $false
+        Mock Get-TitlerLayerStatus {
+            if ($Device -eq '4' -and $script:BoardCorrectionExternal) {
+                return @{ Success = $true; IsOnAir = $true; ActiveId = '{external-event}' }
+            }
+            if ($Layer -notin 2, 7) { return @{ Success = $true; IsOnAir = $false } }
+            $id = if ($Layer -eq 7) { $script:BoardCorrectionEvent } else { '{logo-event}' }
+            @{ Success = $true; IsOnAir = $true; ActiveId = $id }
+        }
+        Mock Invoke-SetValues { $true }
+        $board = (New-ContentBoard -Name 'برنامج التصحيح' -TemplateKey 'Programme' -EditRole 'admin').Value
+        $board = (Add-BoardItem -Board $board -TextFields @('programme.title', 'programme.guest') -Values @{
+                'programme.title' = 'الافتتاح'; 'programme.guest' = 'الاسم المحفوظ' } -MaxFieldLength 100).Value
+        $boardId = $board.Id
+        try {
+            Save-ContentBoard -Board $board | Should -BeTrue
+            $script:OnAir[7] = @{ Key = 'Programme'; ActiveId = '{programme-event}'; ActiveIdConfirmed = $true; At = Get-Date }
+            $script:OnAir[2] = @{ Key = 'Logo'; ActiveId = '{logo-event}'; ActiveIdConfirmed = $true; At = Get-Date }
+            $script:LastSuccessfulLayerShows[7] = @{ Key = 'Programme'; ActiveId = '{programme-event}'; ActiveIdConfirmed = $true
+                TemplatePath = $script:BoardCorrectionProgrammePath; SceneWriteTicks = (Get-Item $script:BoardCorrectionProgrammePath).LastWriteTimeUtc.Ticks }
+            $script:LastSuccessfulLayerShows[2] = @{ Key = 'Logo'; ActiveId = '{logo-event}'; ActiveIdConfirmed = $true
+                TemplatePath = $script:BoardCorrectionLogoPath; SceneWriteTicks = (Get-Item $script:BoardCorrectionLogoPath).LastWriteTimeUtc.Ticks }
+            Set-BoardItemLive -Layer 7 -BoardId $boardId -ItemId $board.Items[0].Id -AirIdentity (Get-BoardAirIdentity -Layer 7 -Key 'Programme')
+            $request = @{ actor = 4322; action = 'update-preview'; id = $boardId; revision = $board.Revision; rowId = $board.Items[0].Id
+                values = @{ 'programme.guest' = 'الاسم المصحّح' } }
+            $sendCorrection = {
+                $line = @{ op = 'board.air'; args = $request } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            (& $sendCorrection).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $first = & $sendCorrection
+            $first.ok | Should -BeTrue
+            $first.data.preview.fields.value | Should -Be 'الاسم المصحّح'
+            Should -Invoke Invoke-SetValues -Times 0 -Exactly
+
+            $request.action = 'update'
+            $request.review = $first.data.preview.review
+            $script:BoardCorrectionEvent = '{different}'
+            (& $sendCorrection).error | Should -Be 'board_stale'
+            $script:BoardCorrectionEvent = '{programme-event}'
+            $request.action = 'update-preview'
+            $second = & $sendCorrection
+            $request.action = 'update'
+            $request.review = $second.data.preview.review
+            $script:BoardCorrectionOtherField = 'programme.guest'
+            (& $sendCorrection).error | Should -Be 'board_air_conflict'
+            Should -Invoke Invoke-SetValues -Times 0 -Exactly
+
+            $script:BoardCorrectionOtherField = 'logo.channel'
+            $request.action = 'update-preview'
+            $script:BoardCorrectionExternal = $true
+            (& $sendCorrection).error | Should -Be 'board_air_conflict'
+            $script:BoardCorrectionExternal = $false
+            $oldTicks = $script:LastSuccessfulLayerShows[7].SceneWriteTicks
+            $script:LastSuccessfulLayerShows[7].SceneWriteTicks = $oldTicks - 1
+            (& $sendCorrection).error | Should -Be 'board_air_conflict'
+            $script:LastSuccessfulLayerShows[7].SceneWriteTicks = $oldTicks
+            $latest = & $sendCorrection
+            $request.action = 'update'
+            $request.review = $latest.data.preview.review
+            (& $sendCorrection).ok | Should -BeTrue
+            (& $sendCorrection).error | Should -Be 'board_stale'
+            Should -Invoke Invoke-SetValues -Times 1 -Exactly -ParameterFilter {
+                $Quiet -and $Values.Count -eq 1 -and $Values['programme.guest'] -ceq 'الاسم المصحّح'
+            }
+            $saved = Get-ContentBoard -BoardId $boardId
+            $saved.Revision | Should -Be $board.Revision
+            $saved.Items[0].Values.'programme.guest' | Should -Be 'الاسم المحفوظ'
+
+            $request.action = 'update-preview'
+            $after = & $sendCorrection
+            $request.action = 'update'
+            $request.review = $after.data.preview.review
+            $expired = Invoke-WebChannelOperation -Request @{ op = 'board.air'; args = $request } -Entry @{ Deadline = [long]1 }
+            $expired.error | Should -Be 'bridge_busy'
+            Should -Invoke Invoke-SetValues -Times 1 -Exactly
+        }
+        finally {
+            Clear-BoardItemLive -Layer 7
+            $script:OnAir.Remove(7)
+            $script:OnAir.Remove(2)
+            $script:LastSuccessfulLayerShows.Remove(7)
+            $script:LastSuccessfulLayerShows.Remove(2)
+            Remove-ContentBoardFile -BoardId $boardId
+        }
+    }
+
     It 'shares programme boards with the bot and applies its row permissions and revision checks' {
         Mock Test-Authorized { $UserId -in 4321, 4322 }
         Mock Test-Admin { $UserId -eq 4321 }

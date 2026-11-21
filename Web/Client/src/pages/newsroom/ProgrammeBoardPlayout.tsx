@@ -4,19 +4,22 @@ import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 
 const number = new Intl.NumberFormat('ar')
-type Result = Schemas['ProgrammeBoardAirResult']
-export type BoardAirTarget = { action: 'show' | 'hide'; rowId: string; revision: number }
+export type BoardAirResult = Schemas['ProgrammeBoardAirResult']
+export type BoardAirTarget = { action: 'show' | 'hide' | 'update'; rowId: string; revision: number; values?: Record<string, string> }
 
 export function ProgrammeBoardPlayout({ id, target, onClose, onChanged }: {
   id: string
   target: BoardAirTarget
   onClose: () => void
-  onChanged: (result?: Result) => void
+  onChanged: (result?: BoardAirResult) => void
 }) {
   const hiding = target.action === 'hide'
+  const updating = target.action === 'update'
+  const title = { show: 'مراجعة عرض صف البرنامج', hide: 'مراجعة إخفاء صف البرنامج', update: 'مراجعة التصحيح على الهواء' }[target.action]
+  const confirmation = { show: 'عرض الصف على الهواء', hide: 'تأكيد إخفاء الصف', update: 'تطبيق التصحيح على الهواء' }[target.action]
   async function request(action: string, review: string | null, signal?: AbortSignal) {
     const { data, error, response } = await api.POST('/api/content/boards/air', {
-      body: { id, revision: target.revision, rowId: target.rowId, action, review },
+      body: { id, revision: target.revision, rowId: target.rowId, action, review, values: target.values ?? null },
       signal,
     })
     if (!data) throw new Error(errorCode(error, response))
@@ -40,7 +43,7 @@ export function ProgrammeBoardPlayout({ id, target, onClose, onChanged }: {
   const close = () => { if (!apply.isPending) onClose() }
 
   return (
-    <Modal opened onClose={close} size="lg" title={hiding ? 'مراجعة إخفاء صف البرنامج' : 'مراجعة عرض صف البرنامج'}>
+    <Modal opened onClose={close} size="lg" title={title}>
       <Stack gap="md">
         {review.isFetching && <Stack gap="xs" aria-label="جارٍ التحقق من الطبقة">
           <Skeleton height={20} width="55%" />
@@ -68,15 +71,16 @@ export function ProgrammeBoardPlayout({ id, target, onClose, onChanged }: {
           </Alert>}
           {!!preview.autoHideSeconds && <Text size="sm" c="dimmed">الإخفاء التلقائي بعد {number.format(preview.autoHideSeconds)} ثانية.</Text>}
           {hiding && <Text size="sm">سيُخفى المشهد الجاري على هذه الطبقة بعد التحقق من هويته.</Text>}
+          {updating && <Text size="sm">يُطبّق التصحيح على نص العرض الحالي فور تأكيده.</Text>}
         </>}
         {error && <Alert color="orange" role="alert">
           {error.message === 'board_stale' ? 'تغيّر الصف أو المشهد منذ فتح المراجعة. حدّث اللوحة وافتح مراجعة جديدة.' : messageFor(error.message)}
         </Alert>}
         <Group justify="flex-end">
-          <Button variant="default" disabled={apply.isPending} onClick={close}>{error ? 'إغلاق' : 'إلغاء'}</Button>
+          <Button variant="default" disabled={apply.isPending} onClick={close}>{updating ? 'رجوع إلى الحقول' : error ? 'إغلاق' : 'إلغاء'}</Button>
           {preview && !error && <Button color="red.9" loading={apply.isPending} disabled={review.isFetching}
             onClick={() => apply.mutate(preview.review)}>
-            {hiding ? 'تأكيد إخفاء الصف' : 'عرض الصف على الهواء'}
+            {confirmation}
           </Button>}
         </Group>
       </Stack>

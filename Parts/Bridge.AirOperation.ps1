@@ -827,7 +827,7 @@ function Invoke-ShowTemplateResult {
     if ([string]::IsNullOrWhiteSpace($defaultType)) { $defaultType = 'Text' }
 
     if (-not $operationStarted) { Start-AirOperation -Operation $operation -Action SHOW -Layer ([int]$template.Layer) -UserId $UserId }
-    $sceneFile = if ((Get-Setting 'MojazMultiDesign') -and $template.Path) {
+    $sceneFile = if ($template.Path) {
         Get-Item -LiteralPath $template.Path -ErrorAction SilentlyContinue
     }
     $sceneWrite = if ($sceneFile) { $sceneFile.LastWriteTimeUtc.Ticks } else { 0 }

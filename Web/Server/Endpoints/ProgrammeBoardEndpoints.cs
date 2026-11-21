@@ -86,7 +86,7 @@ internal static class ProgrammeBoardEndpoints
     {
         var reply = await bridge.SendAsync("board.air", new
         {
-            actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.RowId, request.Review
+            actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.RowId, request.Review, request.Values
         }, http.RequestAborted);
         if (!reply.Ok) return Error(reply.Error);
         http.Response.Headers.CacheControl = "no-store";
@@ -101,7 +101,7 @@ internal static class ProgrammeBoardEndpoints
             or "board_invalid_text" or "board_invalid_template" or "board_invalid_name" or "board_name_too_long" or "board_invalid_role"
             or "board_paste_invalid"
             => ApiErrors.Of(400, code),
-        "board_stale" or "board_at_edge" or "board_capacity" or "board_air_refused" or "board_air_multiple" => ApiErrors.Of(409, code),
+        "board_stale" or "board_at_edge" or "board_capacity" or "board_air_refused" or "board_air_multiple" or "board_air_conflict" => ApiErrors.Of(409, code),
         "board_save_failed" or "board_delete_failed" or "board_air_unverified" => ApiErrors.Of(503, code),
         _ => ApiErrors.BridgeUnavailable(),
     };

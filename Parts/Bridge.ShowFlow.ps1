@@ -887,7 +887,8 @@ function Invoke-HideAllLayers {
 }
 
 function Invoke-SetValues {
-    param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0)
+    param([Parameter(Mandatory)][hashtable]$Values, [Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0,
+        [switch]$Quiet, [hashtable]$Types = @{})
     if ($UserId -eq 0) { $UserId = $ChatId }
     $operation = New-AirOperationContext -Action UPDATE -UserId $UserId
     if (-not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) {
@@ -895,17 +896,21 @@ function Invoke-SetValues {
         return $false
     }
     Start-AirOperation -Operation $operation -Action UPDATE -UserId $UserId
-    $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -TimeoutSec (Get-AirTimeout)
+    $result = Send-PostboxValues -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber -Values $Values -Types $Types -TimeoutSec (Get-AirTimeout)
     if (Get-Setting 'LogAirXml') { Write-BridgeLog "Air POSTBOX XML: $($result.Xml)" }
     if ($result.Success) {
         $actor = Format-UserAuditActor -UserId $UserId
         Write-BridgeLog "User $actor set values: $($Values.Keys -join ', ')"
         Add-AuditEntry (T 'flow.updateAudit' $($Values.Keys -join ', ') $actor)
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.updated' $($Values.Keys -join ', ')) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        if (-not $Quiet) {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.updated' $($Values.Keys -join ', ')) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        }
         Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -Values (Format-AuditTemplateValues -Variables $Values)
     }
     else {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.updateFailed' $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        if (-not $Quiet) {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'flow.updateFailed' $($result.Error)) -ReplyMarkup (Get-MainMenuKeyboard -ChatId $ChatId -UserId $UserId)
+        }
         Write-AirOperationResult -OperationId $operation.Id -Action UPDATE -Result failed -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target ($Values.Keys -join ',') -ErrorText ([string]$result.Error)
     }
     return $result.Success

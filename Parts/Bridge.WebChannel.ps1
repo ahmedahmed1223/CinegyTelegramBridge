@@ -371,7 +371,7 @@ function Invoke-WebChannelOperation {
         'board.edit' { return Invoke-WebProgrammeBoardEdit -Arguments $arguments }
         'board.delete' { return Remove-WebProgrammeBoard -Arguments $arguments }
         'board.paste' { return Invoke-WebProgrammeBoardPaste -Arguments $arguments }
-        'board.air' { return Invoke-WebProgrammeBoardAir -Arguments $arguments }
+        'board.air' { return Invoke-WebProgrammeBoardAir -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
         'media.capture' { return Invoke-WebCapture -Arguments $arguments }
     }

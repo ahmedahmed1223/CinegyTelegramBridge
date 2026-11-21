@@ -267,6 +267,22 @@ Describe 'Get-TitlerLayerStatus' {
         $result.IsOnAir | Should -BeFalse
     }
 
+    It 'distinguishes an absent device from a vanishing active item' {
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            $reply = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::NotFound)
+            throw [Microsoft.PowerShell.Commands.HttpResponseException]::new('Not found', $reply)
+        }
+        Mock Invoke-WebRequest -ModuleName CinegyAirTitler {
+            @{ StatusCode = 200; Content = '<Status><Active Id="item"/></Status>' }
+        } -ParameterFilter { $Uri -like '*/gfx_7/status' }
+        $absent = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 8
+        $absent.OffAirReason | Should -Be 'device-not-found'
+        $absent.IsOnAir | Should -BeNullOrEmpty
+        $unknown = Get-TitlerLayerStatus -AirServerAddress 'air-host' -AirChannelNumber 0 -Layer 7
+        $unknown.OffAirReason | Should -Be 'unreadable'
+        $unknown.IsOnAir | Should -BeNullOrEmpty
+    }
+
     It 'returns an unknown result instead of claiming hidden when Cinegy is unreachable' {
         Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'connection refused' }
 

@@ -9,7 +9,8 @@ import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { ProgrammeBoardPaste } from './RowPaste'
-import { ProgrammeBoardPlayout, type BoardAirTarget } from './ProgrammeBoardPlayout'
+import { ProgrammeBoardCorrection } from './ProgrammeBoardCorrection'
+import { ProgrammeBoardPlayout, type BoardAirResult, type BoardAirTarget } from './ProgrammeBoardPlayout'
 import classes from './NewsroomPage.module.css'
 
 type Board = Schemas['ProgrammeBoardEditor']
@@ -131,6 +132,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const [role, setRole] = useState<{ value: string; revision: number } | null>(null)
   const [pasting, setPasting] = useState(false)
   const [air, setAir] = useState<BoardAirTarget | null>(null)
+  const [correction, setCorrection] = useState<Row | null>(null)
   const [airNotice, setAirNotice] = useState<{ text: string; warning: boolean } | null>(null)
   const [saved, setSaved] = useState(false)
   const cache = useQueryClient()
@@ -172,6 +174,21 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const busy = write.isPending || removeBoard.isPending || query.isFetching
   const editing = !!draft || !!role || pasting
   const blocked = busy || editing
+  const liveRow = board?.rows.find(row => row.id === board.liveRowId)
+  function acceptAirChange(action: BoardAirTarget['action'], result?: BoardAirResult) {
+    if (result) {
+      cache.setQueriesData<Board>({ queryKey: ['programme-board', id] },
+        (cached) => cached && { ...cached, liveRowId: result.liveRowId })
+      if (action === 'hide') setAirNotice({ text: 'أُخفي صف البرنامج.', warning: false })
+      else if (action === 'update') setAirNotice({ text: 'أُرسل تصحيح النص إلى المشهد المعروض.', warning: false })
+      else if (!result.liveRowId) setAirNotice({ text: 'أُرسل أمر العرض وتعذّر تأكيد المشهد. راجع حالة الطبقة.', warning: true })
+      else if (result.autoHideFailed) setAirNotice({ text: 'عُرض الصف وتعذّر ضبط الإخفاء التلقائي.', warning: true })
+      else setAirNotice({ text: 'عُرض صف البرنامج.', warning: false })
+      setAir(null)
+      setCorrection(null)
+    }
+    void cache.invalidateQueries({ queryKey: ['programme-board', id] })
+  }
   function startRow(row?: Row) {
     if (!board) return
     write.reset()
@@ -275,11 +292,15 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
       {!board.fields.length && <Alert color="orange">لا يحتوي قالب اللوحة الآن على حقول نصية قابلة للتحرير.</Alert>}
       {board.liveRowId && <Group justify="space-between">
         <Badge color="red" variant="light">صف من اللوحة على الهواء</Badge>
-        <Button color="red" variant="light" size="compact-sm" leftSection={<IconPlayerStop size={16} />}
-          disabled={blocked} onClick={() => {
-            setAirNotice(null)
-            setAir({ action: 'hide', rowId: board.liveRowId!, revision: board.revision })
-          }}>مراجعة الإخفاء</Button>
+        <Group gap="xs">
+          {board.canEdit && liveRow && <Button variant="light" size="compact-sm" leftSection={<IconEdit size={16} />}
+            disabled={blocked || !board.fields.length} onClick={() => { setAirNotice(null); setCorrection(liveRow) }}>تصحيح على الهواء</Button>}
+          <Button color="red" variant="light" size="compact-sm" leftSection={<IconPlayerStop size={16} />}
+            disabled={blocked} onClick={() => {
+              setAirNotice(null)
+              setAir({ action: 'hide', rowId: board.liveRowId!, revision: board.revision })
+            }}>مراجعة الإخفاء</Button>
+        </Group>
       </Group>}
       {airNotice && <Alert role="status" color={airNotice.warning ? 'orange' : 'teal'}>{airNotice.text}</Alert>}
       {saved && <Text size="sm" role="status">حُفظت التغييرات.</Text>}
@@ -340,18 +361,9 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
         </form>
       </Paper>}
       {board.pageCount > 1 && <Pagination disabled={blocked} total={board.pageCount} value={board.page + 1} onChange={(next) => setPage(next - 1)} />}
-      {air && <ProgrammeBoardPlayout id={id} target={air} onClose={() => setAir(null)} onChanged={(result) => {
-        if (result) {
-          cache.setQueriesData<Board>({ queryKey: ['programme-board', id] },
-            (cached) => cached && { ...cached, liveRowId: result.liveRowId })
-          if (air.action === 'hide') setAirNotice({ text: 'أُخفي صف البرنامج.', warning: false })
-          else if (!result.liveRowId) setAirNotice({ text: 'أُرسل أمر العرض وتعذّر تأكيد المشهد. راجع حالة الطبقة.', warning: true })
-          else if (result.autoHideFailed) setAirNotice({ text: 'عُرض الصف وتعذّر ضبط الإخفاء التلقائي.', warning: true })
-          else setAirNotice({ text: 'عُرض صف البرنامج.', warning: false })
-          setAir(null)
-        }
-        void cache.invalidateQueries({ queryKey: ['programme-board', id] })
-      }} />}
+      {air && <ProgrammeBoardPlayout id={id} target={air} onClose={() => setAir(null)} onChanged={(result) => acceptAirChange(air.action, result)} />}
+      {correction && <ProgrammeBoardCorrection board={board} row={correction} onClose={() => setCorrection(null)}
+        onChanged={(result) => acceptAirChange('update', result)} />}
     </>}
   </Stack>
 }

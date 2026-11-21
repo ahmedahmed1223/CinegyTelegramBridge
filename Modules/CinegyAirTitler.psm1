@@ -295,9 +295,12 @@ function Get-TitlerLayerStatus {
     )
 
     $uri = "http://$($AirServerAddress):$(5521 + $AirChannelNumber)/$((Resolve-AirGfxDevice -Device $Device -Layer $Layer).StatusPath)/status"
+    $statusReceived = $false
     try {
         $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec $TimeoutSec -UseBasicParsing
+        $statusReceived = $true
         $xml = [xml]$response.Content
+        if ($xml.DocumentElement.Name -cne 'Status') { throw "Cinegy status did not contain a Status element." }
         $activeNode = $xml.SelectSingleNode('/Status/Active')
         $licenseNode = $xml.SelectSingleNode('/Status/License')
         $outputNode = $xml.SelectSingleNode('/Status/Output')
@@ -393,10 +396,11 @@ function Get-TitlerLayerStatus {
         # Same field set as the success path. A caller reading a field that
         # exists only when the call worked crashes under StrictMode exactly
         # when the engine is already in trouble - the worst possible moment.
+        $statusCode = if ($_.Exception -is [Microsoft.PowerShell.Commands.HttpResponseException]) { [int]$_.Exception.Response.StatusCode } else { 0 }
         return [pscustomobject]@{
             Success  = $false
             IsOnAir  = $null
-            OffAirReason = 'unreadable'
+            OffAirReason = if (-not $statusReceived -and $statusCode -eq 404) { 'device-not-found' } else { 'unreadable' }
             ActiveId = ''
             ActiveName = ''
             ActiveTemplateName = ''
@@ -408,7 +412,7 @@ function Get-TitlerLayerStatus {
             ClientConnected = $false
             ClientIdentity = ''
             ClientXml = ''
-            StatusCode = 0
+            StatusCode = $statusCode
             Error    = $_.Exception.Message
             Uri      = $uri
             Xml      = ''

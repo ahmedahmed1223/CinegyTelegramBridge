@@ -938,15 +938,70 @@ function Get-WebProgrammeBoardEditor {
     }
 }
 
+function Get-ProgrammeLoadedSceneKey {
+    param([int]$Layer, [string]$Stamp, $Store)
+    $shown = $script:LastSuccessfulLayerShows[$Layer]
+    if (-not $Stamp -or $Stamp -cne (Get-MojazRunSceneStamp -Playback $shown)) { return '' }
+    $key = [string](Get-JsonProp $shown 'Key')
+    $path = [string](Get-JsonProp (Get-JsonProp $Store.Map $key) 'Path')
+    $ticks = [long](Get-JsonProp $shown 'SceneWriteTicks')
+    if (-not $path -or -not $ticks -or $path -cne [string](Get-JsonProp $shown 'TemplatePath')) { return '' }
+    $file = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+    if (-not $file -or $file.LastWriteTimeUtc.Ticks -ne $ticks) { return '' }
+    return $key
+}
+
+function Test-ProgrammeBoardPostboxScope {
+    param([int]$Layer, [string[]]$Names, [long]$Deadline)
+    # Postbox is channel-wide. Treat an unidentified graphic or unreadable
+    # field list as a potential listener, and never let a deferred SHOW write
+    # overwrite a correction that the web already reported as accepted.
+    if (@($script:PostShowQueue | Where-Object {
+                [int]$_.Layer -eq $Layer -or @($_.Values.Keys | Where-Object { $_ -in $Names }).Count
+            }).Count) { return $false }
+    $store = Get-TemplateStore
+    # The documented Title devices are gfx_0…gfx_8 and gfx_logo. Include
+    # devices with no template in the registry as well as custom mappings.
+    $probes = @{}
+    foreach ($device in @((0..8); 'logo')) {
+        $probes["gfx_$device"] = @{ Layer = -1; Device = [string]$device }
+    }
+    $layers = @((Get-KnownLayers); $script:OnAir.Keys; (Get-SettingInt 'TemplateTestLayer' 0)) |
+        Where-Object { $_ -gt 0 } | Sort-Object -Unique
+    foreach ($knownLayer in $layers) {
+        $devicePath = (Resolve-AirGfxDevice -Layer $knownLayer).StatusPath
+        $probes[$devicePath] = @{ Layer = [int]$knownLayer; Device = '' }
+    }
+    $targetPath = (Resolve-AirGfxDevice -Layer $Layer).StatusPath
+    $timeout = Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1
+    foreach ($entry in $probes.GetEnumerator()) {
+        if ($entry.Key -eq $targetPath) { continue }
+        if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $false }
+        $probe = $entry.Value
+        $address = @{ AirServerAddress = $config.AirServerAddress; AirChannelNumber = $config.AirChannelNumber }
+        $otherStatus = Get-TitlerLayerStatus @address -Layer $probe.Layer -Device $probe.Device -TimeoutSec $timeout
+        if ($probe.Layer -lt 0 -and (Get-JsonProp $otherStatus 'OffAirReason') -eq 'device-not-found') { continue }
+        $otherStamp = Get-CinegyLayerReviewStamp -Status $otherStatus
+        if ($otherStamp -eq 'empty') { continue }
+        $otherKey = Get-ProgrammeLoadedSceneKey -Layer $probe.Layer -Stamp $otherStamp -Store $store
+        if (-not $otherKey) { return $false }
+        $otherFields = @(Get-MojazDesignFields -TemplateKey $otherKey)
+        if (-not $otherFields.Count -or @($otherFields | Where-Object { [string]$_.Name -in $Names }).Count) { return $false }
+    }
+    return $true
+}
+
 function Invoke-WebProgrammeBoardAir {
-    param([System.Collections.IDictionary]$Arguments)
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline = 0)
     $actor = [long](Get-JsonProp $Arguments 'actor')
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
     $action = [string](Get-JsonProp $Arguments 'action')
-    if ($action -cnotin @('show-preview', 'show', 'hide-preview', 'hide')) { return @{ ok = $false; error = 'board_invalid' } }
+    if ($action -cnotin @('show-preview', 'show', 'hide-preview', 'hide', 'update-preview', 'update')) { return @{ ok = $false; error = 'board_invalid' } }
     $preview = $action.EndsWith('-preview', [StringComparison]::Ordinal)
     $hiding = $action.StartsWith('hide', [StringComparison]::Ordinal)
+    $updating = $action.StartsWith('update', [StringComparison]::Ordinal)
+    $targetsLive = $hiding -or $updating
     $stale = @{ ok = $false; error = 'board_stale' }
     if (-not $preview) {
         $pending = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebProgrammeBoardAirReviews
@@ -972,14 +1027,49 @@ function Invoke-WebProgrammeBoardAir {
     if (-not $label) { $label = $key }
     $reviewData = @{ layer = $layer; template = Get-NewsScreenLine $label 100; fields = @() }
     $reviewParts = @($id, $rowId, $revision, $key, $layer)
-    if ($hiding) {
+    if ($targetsLive) {
+        if ($updating -and -not (Test-BoardEditAllowed -Board $board -ChatId $actor -UserId $actor)) {
+            return @{ ok = $false; error = 'forbidden' }
+        }
         if ((Get-ConfirmedBoardLiveRowId -BoardId $id -Key $key -Layer $layer) -cne $rowId) { return $stale }
-        # HIDE addresses the layer. The live read only verifies its primary
-        # item, while the Multi catalogue can retain other scenes on it.
+        # The status only identifies the primary item. It cannot prove whether
+        # other scenes in Multi will also receive this layer's HIDE or postbox.
         if ([string](Get-Setting 'SceneMode') -eq 'Multi') {
             return @{ ok = $false; error = 'board_air_multiple' }
         }
-        $reviewParts += 'hide'
+        if ($updating) {
+            $values = Get-JsonProp $Arguments 'values'
+            if ($values -isnot [System.Collections.IDictionary] -or -not $values.Count) { return @{ ok = $false; error = 'board_invalid' } }
+            $fields = @(Get-BoardTextFields -TemplateKey $key)
+            $selected = @{}
+            foreach ($name in $values.Keys) {
+                if ($name -cnotin $fields) { return @{ ok = $false; error = 'board_unknown_field' } }
+                if ($values[$name] -isnot [string]) { return @{ ok = $false; error = 'board_invalid' } }
+                $selected[$name] = $values[$name]
+            }
+            # Reuse the saved-row validation on an in-memory copy.
+            $limit = Get-SettingInt 'MaxFieldLength' 1
+            $edit = Set-BoardItemFields -Board $board -ItemId $rowId -TextFields $fields -Values $selected -UserId $actor -MaxFieldLength $limit
+            if (-not $edit.Success) { return @{ ok = $false; error = "board_$($edit.ErrorCode)" } }
+            $names = @($fields | Where-Object { $selected.ContainsKey($_) })
+            $item = Get-BoardItem -Board $edit.Value -ItemId $rowId
+            $variables = Get-BoardItemValues -Item $item -TextFields $names
+            $types = Get-TemplateFieldTypeOverrides -Template $template
+            $isolated = Test-ProgrammeBoardPostboxScope -Layer $layer -Names $names -Deadline $Deadline
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return @{ ok = $false; error = 'bridge_busy' }
+            }
+            if (-not $isolated) {
+                return @{ ok = $false; error = 'board_air_conflict' }
+            }
+            $reviewData.fields = @(foreach ($field in $names) {
+                    @{ label = Get-MojazFieldLabel -TemplateKey $key -FieldName $field; value = $variables[$field] }
+                })
+            $correctionRevision = [long](Get-JsonProp $script:BoardsLive[$layer] 'CorrectionRevision')
+            $reviewParts += @('update', $correctionRevision, $names, @($names | ForEach-Object { $variables[$_] }),
+                @($names | ForEach-Object { $types[$_] }))
+        }
+        else { $reviewParts += 'hide' }
     }
     else {
         $item = Get-BoardItem -Board $board -ItemId $rowId
@@ -1011,21 +1101,34 @@ function Invoke-WebProgrammeBoardAir {
     $stamp = Get-CinegyLayerReviewStamp -Status $status
     $engineTicks = Get-CinegyStatusStartTicks -Status $status
     if (-not $stamp) { return @{ ok = $false; error = 'board_air_unverified' } }
-    if ($hiding) {
+    if ($targetsLive) {
         $expected = Get-CinegyLayerReviewStamp -Status @{ Success = $true; IsOnAir = $true
             ActiveId = Get-JsonProp $script:OnAir[$layer] 'ActiveId' }
         $shownAtTicks = [long](Get-JsonProp $script:BoardsLive[$layer] 'EngineStartedAtTicks')
         if ($stamp -cne $expected -or ($shownAtTicks -gt 0 -and $shownAtTicks -ne $engineTicks)) { return $stale }
     }
-    $reviewData.replacesGraphic = -not $hiding -and $stamp -cne 'empty'
+    if ($updating -and $key -cne (Get-ProgrammeLoadedSceneKey -Layer $layer -Stamp $stamp -Store (Get-TemplateStore))) {
+        return @{ ok = $false; error = 'board_air_conflict' }
+    }
+    $reviewData.replacesGraphic = -not $targetsLive -and $stamp -cne 'empty'
     $reviewData.graphicName = Get-NewsScreenLine ([string](Get-JsonProp $status 'ActiveName')) 100
     $reviewParts += @($stamp, $engineTicks, (Get-LayerRemovalFingerprint -Layer $layer))
     $fingerprint = ConvertTo-Json -Compress -Depth 10 -InputObject $reviewParts
+    if ($updating -and $Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+        return @{ ok = $false; error = 'bridge_busy' }
+    }
     if ($preview) {
         $reviewData.review = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebProgrammeBoardAirReviews
         return @{ ok = $true; data = @{ preview = $reviewData } }
     }
     if ($pending.Fingerprint -cne $fingerprint) { return $stale }
+    if ($updating) {
+        if (-not (Invoke-SetValues -Values $variables -Types $types -ChatId $actor -UserId $actor -Quiet)) {
+            return @{ ok = $false; error = 'board_air_refused' }
+        }
+        Set-JsonProp $script:BoardsLive[$layer] 'CorrectionRevision' ($correctionRevision + 1)
+        return @{ ok = $true; data = @{ liveRowId = $rowId } }
+    }
     if ($hiding) {
         if (-not (Invoke-HideLayer -Layer $layer -ChatId $actor -UserId $actor -Quiet -ExpectedLayerStamp $stamp -ExpectedLayerStartedAtTicks $engineTicks)) {
             return @{ ok = $false; error = 'board_air_refused' }

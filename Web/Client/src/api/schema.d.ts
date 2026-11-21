@@ -4087,6 +4087,10 @@ export interface components {
             revision: number;
             rowId: string;
             review: string | null;
+            /** @default null */
+            values: {
+                [key: string]: string;
+            } | null;
         };
         ProgrammeBoardAirResult: {
             preview: components["schemas"]["ProgrammeBoardAirPreview"];

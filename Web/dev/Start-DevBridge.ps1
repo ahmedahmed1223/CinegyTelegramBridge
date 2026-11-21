@@ -168,6 +168,7 @@ $config | Add-Member -NotePropertyName 'AllowedUserIds' -NotePropertyValue @($Ow
 $script:UserAliases[[string]$OwnerId] = 'مدير المحطة'
 $script:UserAliases['1002'] = 'رئيس التحرير'
 $script:UserAliases['1003'] = 'مشغّل الفترة المسائية'
+$script:PendingApprovals[1004L] = @{ Name = 'محرّر جديد'; ChatId = 1004L; UserId = 1004L; RequestedAt = (Get-Date) }
 # Saving is the bridge's business on a station; here it would rewrite the
 # example config in the repository.
 function Save-Config { }
@@ -197,7 +198,8 @@ function Stop-RelayProcess {
 # commands here confines their effects to the simulated on-air state.
 function Invoke-ShowTemplateResult {
     param([string]$Key, [hashtable]$Variables, [long]$UserId, [int]$AutoHideSeconds, [string]$ExpectedLayerStamp,
-        [int]$ExpectedLayer, [string]$ExpectedTemplatePath, [long]$ExpectedLayerStartedAtTicks)
+        [int]$ExpectedLayer, [string]$ExpectedTemplatePath, [long]$ExpectedLayerStartedAtTicks, [long]$Deadline)
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ Success = $false } }
     $template = (Get-TemplateStore).Map[$Key]
     $layer = [int]$template.Layer
     $observed = Get-TitlerLayerStatus -Layer $layer
@@ -208,6 +210,9 @@ function Invoke-ShowTemplateResult {
         return @{ Success = $false }
     }
     $shownAt = Get-Date
+    $publicValues = Get-PublicTemplateValues -Template $template -Variables $Variables
+    $script:LastShow[$UserId] = @{ Key = $Key; Variables = $publicValues }
+    $script:LastShowAttempts[[string]$UserId] = @{ Key = $Key; Variables = $publicValues; AutoHideSeconds = $AutoHideSeconds }
     $activeId = [guid]::NewGuid().ToString()
     $script:OnAir[$layer] = @{
         Key = $Key; At = $shownAt; ActiveId = $activeId; ActiveIdConfirmed = $true

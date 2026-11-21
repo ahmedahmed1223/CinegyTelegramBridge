@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.119.0'; Items = @('Review and book a template using the station clock, manage Telegram access requests and roles, or review your last show or attempt from the web.') },
                 @{ Version = '8.118.0'; Items = @('Administrators can review edits and deletions of existing templates from the web library. The bridge rejects stale reviews and protects templates on air and scheduled templates from deletion.') },
                 @{ Version = '8.117.0'; Items = @('From the web library, administrators can browse the configured scenes folder, enter a template and its fields, and review it before saving to the catalogue shared with the bot.') },
                 @{ Version = '8.116.0'; Items = @('Administrators can review and run a template rehearsal with sample values from the web library. Cinegy must confirm the rehearsal item before automatic hide is armed.') },
@@ -359,6 +360,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.119.0'; Items = @('يمكنك مراجعة عرض قالب وجدولته بتوقيت المحطة، وإعادة تجهيز آخر عرض أو محاولة. ويمكن للمشرف مراجعة طلبات الوصول، وللمالك تغيير أدوار مستخدمي البوت من الويب.') },
                 @{ Version = '8.118.0'; Items = @('يستطيع المشرف مراجعة تعديل القالب المسجّل أو حذفه من مكتبة الويب. يرفض الجسر المراجعات القديمة ويحمي القوالب المعروضة أو المجدولة عند الحذف.') },
                 @{ Version = '8.117.0'; Items = @('يستطيع المشرف تصفّح مجلد المشاهد من مكتبة الويب واختيار ملف وإدخال حقوله وطبقته، ثم مراجعتها قبل حفظ القالب في السجل المشترك مع البوت.') },
                 @{ Version = '8.116.0'; Items = @('يستطيع المشرف مراجعة بروفة القالب بقيم تجريبية من مكتبة الويب وتشغيلها على طبقة التجربة. يُضبط الإخفاء التلقائي بعد تأكيد مشهد البروفة.') },

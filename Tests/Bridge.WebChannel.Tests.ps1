@@ -715,6 +715,25 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'routes the newsroom workflow requests with their own authorization and reports an empty operator history' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $false }
+        $savedHistory = $script:LastShow
+        $script:LastShow = @{}
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'telegram.access.requests' @{ actor = 4321; page = 0 }).error | Should -Be 'forbidden'
+            (& $call 'schedule.templates' @{ actor = 9876; action = 'list' }).error | Should -Be 'forbidden'
+            (& $call 'schedule.templates' @{ actor = 4321; action = 'list'; page = 0 }).ok | Should -BeTrue
+            (& $call 'air.rerun' @{ actor = 4321; kind = 'repeat'; action = 'inspect' }).error | Should -Be 'rerun_missing'
+        }
+        finally { $script:LastShow = $savedHistory }
+    }
+
     It 'rehearses a selected template with sample values only on the reviewed isolated device' {
         $templateFile = Join-Path $TestDrive 'web-rehearsal.cintitle'
         Set-Content -LiteralPath $templateFile -Value '<Scene />'

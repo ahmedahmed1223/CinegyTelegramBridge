@@ -152,3 +152,29 @@ public sealed record ChangePasswordRequest(string CurrentPassword, string NewPas
 public sealed record SessionInfoResponse(
     string Id, long UserId, string Name, string Method, string Address, string Agent,
     DateTimeOffset CreatedAt, DateTimeOffset LastSeenAt, bool Current);
+public sealed record TelegramAccessItem(long ChatId, long UserId, string Name, DateTimeOffset RequestedAt, DateTimeOffset ExpiresAt);
+public sealed record TelegramAccessPage(TelegramAccessItem[] Requests, int Page, int PageSize, int Total, bool RejectionBlocks);
+public sealed record TelegramAccessReview(TelegramAccessItem Request, string Decision, bool RejectionBlocks, string Review);
+public sealed record TelegramAccessDecision(long ChatId, long UserId, string Decision);
+public sealed record TelegramAccessReviewCommand(string Decision);
+public sealed record TelegramAccessDecisionCommand(string Decision, string Review);
+public sealed record TelegramAccessRoleCommand(string Role, string ExpectedRole);
+public sealed record TelegramAccessRole(long UserId, string Role);
+
+public sealed record PendingTemplateSchedule(string Id, string Key, int Layer, long ScheduledAtMs,
+    string StationTime, string StationTimeZone, string Recurrence, string RecurrenceUntil);
+public sealed record TemplateSchedulePage(PendingTemplateSchedule[] Items, int Page, int PageCount, int Total,
+    string StationTimeZone, int StationOffsetMinutes, string StationTime, bool ClockValid, bool Paused);
+public sealed record TemplateScheduleField(string Name, string Label, bool Sensitive, string? Value);
+public sealed record TemplateScheduleReview(string Review, string Key, int Layer, long ScheduledAtMs, string StationTime,
+    string StationTimeZone, string Recurrence, string RecurrenceUntil, int ConflictCount, PendingTemplateSchedule[] Conflicts,
+    TemplateScheduleField[] Fields);
+public sealed record TemplateScheduleReviewCommand(string Key, string Time, string Recurrence = "once",
+    string? RecurrenceUntil = null, Dictionary<string, string>? Variables = null);
+public sealed record TemplateScheduleConfirmCommand(string Review);
+
+public sealed record AirRerunCommand(string Kind, string Action, Dictionary<string, string>? Variables = null, string? Review = null);
+public sealed record AirRerunField(string Name, string Label, bool Required, bool Sensitive, int? MaxLength, string? Value, bool HasValue);
+public sealed record AirRerunPlan(string Key, int Layer, int AutoHideSeconds, AirRerunField[] Fields,
+    bool? ReplacesGraphic, string? GraphicName, string? Review);
+public sealed record AirRerunResult(AirRerunPlan? Rerun, bool? SceneConfirmed);

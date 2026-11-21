@@ -701,7 +701,8 @@ function Invoke-ShowTemplateResult {
         [string]$ExpectedTemplatePath = '',
         [switch]$RequireEventIdentity,
         [hashtable]$VariableTypes = @{},
-        [switch]$SkipPostboxWrites
+        [switch]$SkipPostboxWrites,
+        [long]$Deadline = 0
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     $AutoHideSeconds = Get-EffectiveAutoHideSeconds -Key $Key -RequestedSeconds $AutoHideSeconds
@@ -767,6 +768,13 @@ function Invoke-ShowTemplateResult {
     Update-OnAirStateFromCinegy -Reason 'before-show' -LayerStatuses @($layerStatus) `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -DiscoverExternal | Out-Null
     $previousSnapshot = Get-CorrelatedLayerSnapshot -Layer ([int]$template.Layer) -LiveStatus $layerStatus
+
+    # Clearing the outgoing layer or stopping its engine commits this action.
+    # A request that expires before admission must leave both untouched.
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+        Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Target $Key -ErrorText 'web request expired'
+        return [pscustomobject]@{ Success = $false; Error = 'bridge_busy' }
+    }
 
     # The urgent outranks the bulletin, whatever put it on air - a button, a
     # schedule, a rollback. Every SHOW passes here, so the rule is stated once.

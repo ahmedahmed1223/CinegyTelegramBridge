@@ -1,6 +1,6 @@
 import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBroadcast, IconDevices, IconDeviceTv, IconLayoutGrid, IconNews, IconUsersGroup } from '@tabler/icons-react'
+import { IconBroadcast, IconCalendarTime, IconDevices, IconDeviceTv, IconLayoutGrid, IconNews, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
 import { useState } from 'react'
 import { isAdmin, useSession } from '../api/session'
@@ -18,13 +18,15 @@ const navigation = [
   { to: '/air', label: 'لوحة الهواء', description: 'الطبقات وحالة المحرك', icon: IconBroadcast, admin: false },
   { to: '/live', label: 'البث المباشر', description: 'مشاهدة الخرج ومراقبة الإشارة', icon: IconDeviceTv, admin: false },
   { to: '/templates', label: 'القوالب', description: 'عرض الرسوم على الهواء', icon: IconLayoutGrid, admin: false },
+  { to: '/schedule', label: 'جدولة القوالب', description: 'مواعيد العرض القادمة', icon: IconCalendarTime, admin: false },
   { to: '/sessions', label: 'الجلسات', description: 'المتصفحات المسجّلة', icon: IconDevices, admin: false },
   { to: '/accounts', label: 'الحسابات', description: 'دخول الويب بكلمة مرور', icon: IconUsersGroup, admin: true },
+  { to: '/telegram-access', label: 'صلاحيات البوت', description: 'طلبات الوصول وأدوار Telegram', icon: IconUserCheck, admin: true },
 ]
 
 const sections = [
-  { label: 'التشغيل', links: navigation.slice(0, 4) },
-  { label: 'إدارة الوصول', links: navigation.slice(4) },
+  { label: 'التشغيل', links: navigation.slice(0, 5) },
+  { label: 'إدارة الوصول', links: navigation.slice(5) },
 ]
 
 export function Shell() {

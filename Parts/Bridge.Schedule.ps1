@@ -787,6 +787,19 @@ function Update-ScheduleQueue {
         # keeps its anchor metadata for the next tick.
         $effectiveAt = Resolve-ScheduleAnchorTime -ScheduleEntry $scheduleEntry -Items (Get-CachedMaterialSchedule)
         $scheduledAt = $effectiveAt
+        if (-not (Test-WebScheduledShowAccess -ScheduleEntry $scheduleEntry)) {
+            if ($scheduledAt -gt $Now) { continue }
+            $previousResult = Get-JsonProp $scheduleEntry 'LastResult'
+            $scheduleEntry.Status = 'cancelled'
+            $scheduleEntry.LastResult = 'not_authorized'
+            if (-not (Save-ScheduleEvents)) {
+                $scheduleEntry.Status = 'pending'
+                $scheduleEntry.LastResult = $previousResult
+                continue
+            }
+            Write-ScheduleExecutionEntry -ScheduleEntry $scheduleEntry -Result failed -DurationMs 0 -ErrorText 'not_authorized' | Out-Null
+            continue
+        }
         $occurrenceKey = "$($scheduleEntry.Id)|$($effectiveAt.ToString('o'))"
         $notifyMinutes = Get-SettingInt 'SchedulePreNotifyMinutes' 0
         $minutesUntil = ($scheduledAt - $Now).TotalMinutes

@@ -90,6 +90,28 @@ Describe 'Per-template and per-layer permission' {
         Should -Invoke Send-TelegramMessage -ParameterFilter { $Text -match 'مالك الجسر' }
     }
 
+    It 'leaves the current scene and engines intact when the reviewed show deadline has passed' {
+        Mock Get-TemplateStore { @{ Map = @{ Urgent = @{ Path = ''; Layer = 7 } } } }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
+        Mock Test-MaintenanceControl { $true }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = 'external' } }
+        Mock Update-OnAirStateFromCinegy {}
+        Mock Clear-MojazForUrgent {}
+        Mock Stop-UrgentBoardForManualUrgent {}
+        Mock Hide-TitlerTemplate {}
+        Mock Show-TitlerTemplate {}
+        Mock Write-AirOperationResult {}
+
+        $result = Invoke-ShowTemplateResult -Key 'Urgent' -ChatId 100 -UserId 101 -Deadline 1
+        $result.Success | Should -BeFalse
+        $result.Error | Should -Be 'bridge_busy'
+        Should -Invoke Clear-MojazForUrgent -Times 0 -Exactly
+        Should -Invoke Stop-UrgentBoardForManualUrgent -Times 0 -Exactly
+        Should -Invoke Hide-TitlerTemplate -Times 0 -Exactly
+        Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+    }
+
     It 'keeps an unreviewed replacement on air even when it changed after web confirmation' {
         Mock Get-TemplateStore { @{ Map = @{ Urgent = @{ Layer = 7 } } } }
         Mock Test-TemplateAccess { @{ Allowed = $true } }

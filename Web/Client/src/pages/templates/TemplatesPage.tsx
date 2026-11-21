@@ -23,6 +23,7 @@ import { ShowModal } from './ShowModal'
 import { TemplateRehearsal } from './TemplateRehearsal'
 import { TemplateRegistration } from './TemplateRegistration'
 import { TemplateDefinitionEditor } from './TemplateDefinitionEditor'
+import { TemplateRerun, type TemplateRerunKind } from './TemplateRerun'
 
 export function TemplatesPage() {
   const [search, setSearch] = useState('')
@@ -30,6 +31,7 @@ export function TemplatesPage() {
   const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
   const [registering, setRegistering] = useState(false)
   const [managingKey, setManagingKey] = useState<string | null>(null)
+  const [rerunKind, setRerunKind] = useState<TemplateRerunKind | null>(null)
   const session = useSession()
   const canRehearse = isAdmin(session.data)
   const { data: templates, error, isLoading, refetch, isFetching } = useQuery({
@@ -52,6 +54,8 @@ export function TemplatesPage() {
     <Stack gap="xl">
       <PageHeader title="مكتبة القوالب" description="ابحث عن القالب وجهّز حقوله قبل العرض." actions={
         <Group gap="xs">
+          <Button variant="default" onClick={() => setRerunKind('repeat')}>إعادة آخر عرض</Button>
+          <Button variant="default" onClick={() => setRerunKind('retry')}>إعادة آخر محاولة</Button>
           {canRehearse && <Button leftSection={<IconPlus size={17} />} onClick={() => setRegistering(true)}>تسجيل قالب</Button>}
           <ActionIcon
             variant="default"
@@ -66,6 +70,7 @@ export function TemplatesPage() {
         </Group>
       } />
       {registering && <TemplateRegistration onClose={() => setRegistering(false)} />}
+      {rerunKind && <TemplateRerun key={rerunKind} kind={rerunKind} onClose={() => setRerunKind(null)} />}
 
       <TextInput
         aria-label="بحث في القوالب"

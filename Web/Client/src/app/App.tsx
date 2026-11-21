@@ -6,6 +6,8 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router'
 import { RequireAdmin, RequireSession } from '../layout/guards'
 import { Shell } from '../layout/Shell'
 import { AccountsPage } from '../pages/accounts/AccountsPage'
+import { TelegramAccessPage } from '../pages/admin/TelegramAccessPage'
+import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
 import { LoginPage } from '../pages/login/LoginPage'
 import { NewsroomPage } from '../pages/newsroom/NewsroomPage'
 import { SessionsPage } from '../pages/sessions/SessionsPage'
@@ -32,8 +34,10 @@ const router = createBrowserRouter([
       { path: 'air', element: <StatusPage /> },
       { path: 'live', element: <></> },
       { path: 'templates', element: <TemplatesPage /> },
+      { path: 'schedule', element: <TemplateSchedulePage /> },
       { path: 'newsroom', element: <NewsroomPage /> },
       { path: 'sessions', element: <SessionsPage /> },
+      { path: 'telegram-access', element: <RequireAdmin><TelegramAccessPage /></RequireAdmin> },
       {
         path: 'accounts',
         element: (

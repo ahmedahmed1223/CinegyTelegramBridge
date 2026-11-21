@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.119.0
+
+The newsroom website adds reviewed template scheduling using the station clock and the shared Telegram schedule, administrator review of access requests, owner-only Telegram role changes, and reviewed repeat or retry of an operator's last show.
+
 ## Version 8.118.0
 
 The web template library offers reviewed edits and deletion of existing definitions in the shared catalogue. Edits include the display name, category, numeric layer and field settings. Reviews expire when the definition changes, and the bridge protects active or scheduled templates during deletion and keeps saved preset values aligned with their fields.

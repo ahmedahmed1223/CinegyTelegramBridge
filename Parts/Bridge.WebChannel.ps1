@@ -356,6 +356,12 @@ function Invoke-WebChannelOperation {
         'air.templates' { return Get-WebTemplates }
         'air.templateCatalogue' { return Start-WebSceneRequest -Arguments $arguments -Entry $Entry }
         'air.templateDefinition' { return Invoke-WebTemplateDefinition -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.rerun' { return Invoke-WebAirRerun -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'schedule.templates' { return Invoke-WebTemplateSchedule -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'telegram.access.requests' { return Get-WebTelegramAccessRequests -Arguments $arguments }
+        'telegram.access.review' { return New-WebTelegramAccessDecisionReview -Arguments $arguments }
+        'telegram.access.decide' { return Invoke-WebTelegramAccessDecision -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'telegram.access.role' { return Set-WebTelegramAccessRole -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.presets' { return Get-WebTemplatePresets -Arguments $arguments }
         'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
         'air.rehearsal' { return Invoke-WebTemplateRehearsal -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }

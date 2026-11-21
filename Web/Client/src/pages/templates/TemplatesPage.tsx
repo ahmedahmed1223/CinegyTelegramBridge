@@ -13,16 +13,21 @@ import {
   TextInput,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { IconPlayerPlay, IconRefresh, IconSearch } from '@tabler/icons-react'
+import { IconFlask, IconPlayerPlay, IconRefresh, IconSearch } from '@tabler/icons-react'
 import { useState } from 'react'
 import { getTemplates, type TemplateDto } from '../../api/air'
 import { messageFor } from '../../api/messages'
+import { isAdmin, useSession } from '../../api/session'
 import { PageHeader } from '../../components/PageHeader'
 import { ShowModal } from './ShowModal'
+import { TemplateRehearsal } from './TemplateRehearsal'
 
 export function TemplatesPage() {
   const [search, setSearch] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDto | null>(null)
+  const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
+  const session = useSession()
+  const canRehearse = isAdmin(session.data)
   const { data: templates, error, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['templates'],
     queryFn: getTemplates,
@@ -123,15 +128,12 @@ export function TemplatesPage() {
                   </Group>
                 </Stack>
 
-                <Button
-                  variant="light"
-                  leftSection={<IconPlayerPlay size={16} />}
-                  disabled={template.disabled}
-                  onClick={() => setSelectedTemplate(template)}
-                  fullWidth
-                >
-                  تجهيز للعرض
-                </Button>
+                <Group gap="xs" grow>
+                  <Button variant="light" leftSection={<IconPlayerPlay size={16} />} disabled={template.disabled}
+                    onClick={() => setSelectedTemplate(template)}>تجهيز للعرض</Button>
+                  {canRehearse && <Button variant="default" leftSection={<IconFlask size={16} />}
+                    onClick={() => setTrialTemplate(template)}>بروفة</Button>}
+                </Group>
               </Stack>
             </Card>
           ))}
@@ -139,6 +141,7 @@ export function TemplatesPage() {
       )}
 
       {selectedTemplate && <ShowModal template={selectedTemplate} onClose={() => setSelectedTemplate(null)} />}
+      {trialTemplate && <TemplateRehearsal template={trialTemplate} onClose={() => setTrialTemplate(null)} />}
     </Stack>
   )
 }

@@ -235,9 +235,10 @@ function Show-TitlerTemplate {
 }
 
 function Set-AutoHideTimer {
-    param([int]$Layer, [int]$Seconds)
+    param([int]$Layer, [int]$Seconds, [datetimeoffset]$Deadline = [datetimeoffset]::MinValue, [switch]$SingleSceneOnly)
+    if ($Deadline -eq [datetimeoffset]::MinValue) { $Deadline = [datetimeoffset]::Now.AddSeconds($Seconds) }
     $script:AutoHideQueue = @($script:AutoHideQueue | Where-Object { $_.Layer -ne $Layer })
-    $script:AutoHideQueue += @{ Layer = $Layer; At = (Get-Date).AddSeconds($Seconds) }
+    $script:AutoHideQueue += @{ Layer = $Layer; At = $Deadline; SingleSceneOnly = [bool]$SingleSceneOnly }
     return $true
 }
 

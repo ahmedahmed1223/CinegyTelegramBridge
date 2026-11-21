@@ -25,6 +25,7 @@ $script:WebTickerSheetRequest = $null
 $script:WebTickerTxtRequest = $null
 $script:WebBulletinPhotoRequest = $null
 $script:WebUrgentManualReviews = @{}
+$script:WebTemplateRehearsalReviews = @{}
 $script:WebProgrammeBoardAirReviews = @{}
 $script:WebBulletinPlaybackReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
@@ -349,6 +350,7 @@ function Invoke-WebChannelOperation {
         'air.templates' { return Get-WebTemplates }
         'air.presets' { return Get-WebTemplatePresets -Arguments $arguments }
         'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
+        'air.rehearsal' { return Invoke-WebTemplateRehearsal -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.show' { return Invoke-WebAirShow -Arguments $arguments }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
@@ -2645,17 +2647,89 @@ function Use-WebAirReview {
     if ($pending.ExpiresAt -gt [datetimeoffset]::UtcNow) { return $pending }
 }
 
-function Get-WebUrgentRehearsalLayer {
+function Get-WebTemplateRehearsalLayer {
     param([long]$Actor, [string]$Key)
     $layer = Get-SettingInt 'TemplateTestLayer' 0
     if ($layer -le 0 -or -not (Test-Admin -ChatId $Actor -UserId $Actor) -or
         -not (Get-Setting 'EnableFullTemplateManagement') -or
-        @(Get-KnownLayers) -contains $layer -or
+        [string](Get-Setting 'SceneMode') -eq 'Multi' -or
         (Test-PermanentGraphicAutoHideProtected -Layer $layer) -or
         -not (Test-TemplateAccess -Key $Key -Layer $layer -ChatId $Actor -UserId $Actor).Allowed) {
         return 0
     }
+    $testDevice = (Resolve-AirGfxDevice -Layer $layer).StatusPath
+    foreach ($knownLayer in @(Get-KnownLayers)) {
+        if ([int]$knownLayer -eq $layer -or (Resolve-AirGfxDevice -Layer $knownLayer).StatusPath -eq $testDevice) { return 0 }
+    }
     return $layer
+}
+
+function Invoke-WebTemplateRehearsal {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline = 0)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-Admin -ChatId $actor -UserId $actor) -or
+        -not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    $key = [string](Get-JsonProp $Arguments 'key')
+    if (-not $key -or $action -cnotin @('preview', 'start')) { return @{ ok = $false; error = 'rehearsal_invalid' } }
+    $stale = @{ ok = $false; error = 'rehearsal_stale' }
+    if ($action -eq 'start') {
+        $pending = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebTemplateRehearsalReviews
+        if (-not $pending) { return $stale }
+    }
+    $template = (Get-TemplateStore).Map[$key]
+    if (-not $template) { return $stale }
+    if (-not (Test-TemplateAccess -Key $template.Key -Layer ([int]$template.Layer) -ChatId $actor -UserId $actor).Allowed) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $layer = Get-WebTemplateRehearsalLayer -Actor $actor -Key $template.Key
+    if ($layer -le 0 -or $layer -eq [int]$template.Layer) {
+        $reason = if ([string](Get-Setting 'SceneMode') -eq 'Multi') { 'rehearsal_multi' } else { 'rehearsal_unavailable' }
+        return @{ ok = $false; error = $reason }
+    }
+    $path = [string](Get-JsonProp $template 'Path')
+    $file = if ($path) { Get-Item -LiteralPath $path -ErrorAction SilentlyContinue }
+    if (-not $file -or $file.PSIsContainer) { return @{ ok = $false; error = 'rehearsal_unavailable' } }
+
+    $seconds = [math]::Min(300, (Get-SettingInt 'TemplateTestAutoHideSeconds' 3))
+    $cap = Get-EffectiveAutoHideSeconds -Key $template.Key
+    if ($cap -gt 0) { $seconds = [math]::Min($seconds, $cap) }
+    $types = Get-TemplateFieldTypeOverrides -Template $template
+    $defaultType = [string](Get-Setting 'AirVariableType')
+    $media = @(Get-BoardMediaFields -TemplateKey $template.Key)
+    $variables = @{}
+    $reviewFields = @(foreach ($field in Get-WebTemplateFields -Template $template) {
+            if ($field.name -in $media) { continue }
+            $type = $types[$field.name] ?? $defaultType
+            $sample = switch ($type) {
+                'Bool' { 'false' }
+                'Float' { '0' }
+                default { if ($field.maxLength -and $field.maxLength -lt 4) { 'TEST'.Substring(0, $field.maxLength) } else { 'TEST' } }
+            }
+            $variables[$field.name] = $sample
+            @{ label = $field.label; value = $sample }
+        })
+    $device = (Resolve-AirGfxDevice -Layer $layer).StatusPath
+    $fingerprint = ConvertTo-Json -Compress -Depth 10 -InputObject @(
+        $template.Key, [int]$template.Layer, $path, $file.LastWriteTimeUtc.Ticks, $file.Length,
+        $layer, $device, $seconds, $defaultType, $types, $variables, $reviewFields
+    )
+    if ($action -eq 'start' -and $pending.Fingerprint -cne $fingerprint) { return $stale }
+    $stamp = Get-CinegyLayerReviewStamp -Status (Get-WebLayerStatus -Layer $layer)
+    if (-not $stamp) { return @{ ok = $false; error = 'rehearsal_unverified' } }
+    if ($stamp -cne 'empty') { return @{ ok = $false; error = 'rehearsal_busy' } }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+        return @{ ok = $false; error = 'bridge_busy' }
+    }
+    if ($action -eq 'preview') {
+        return @{ ok = $true; data = @{ preview = @{
+                    review = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebTemplateRehearsalReviews
+                    layer = $layer; autoHideSeconds = $seconds; fields = $reviewFields
+                } } }
+    }
+    return Invoke-WebIsolatedRehearsal -Template $template -Layer $layer -Variables $variables -Types $types -DefaultType $defaultType -Seconds $seconds -Actor $actor
 }
 
 function Invoke-WebUrgentRehearsal {
@@ -2679,7 +2753,7 @@ function Invoke-WebUrgentRehearsal {
     if (-not (Test-TemplateAccess -Key $template.Key -Layer ([int]$template.Layer) -ChatId $Actor -UserId $Actor).Allowed) {
         return @{ ok = $false; error = 'forbidden' }
     }
-    $layer = Get-WebUrgentRehearsalLayer -Actor $Actor -Key $template.Key
+    $layer = Get-WebTemplateRehearsalLayer -Actor $Actor -Key $template.Key
     if ($layer -le 0 -or $layer -eq [int]$template.Layer) {
         return @{ ok = $false; error = 'urgent_rehearsal_unavailable' }
     }
@@ -2703,32 +2777,42 @@ function Invoke-WebUrgentRehearsal {
         } } }
     }
     if ($pending.Fingerprint -cne $fingerprint) { return @{ ok = $false; error = 'urgent_stale' } }
-    # Unlike a programme show, the isolated test must never write the shared
-    # postbox or invoke the sequence and bulletin takeover policies.
-    $result = Show-TitlerTemplate -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-        -Layer $layer -TemplatePath ([string]$template.Path) -Variables $variables -Types (Get-TemplateFieldTypeOverrides -Template $template) `
-        -DefaultType ([string](Get-Setting 'AirVariableType')) -TimeoutSec (Get-AirTimeout)
-    if (-not (Get-JsonProp $result 'Success')) { return @{ ok = $false; error = 'urgent_rehearsal_failed' } }
+    $types = Get-TemplateFieldTypeOverrides -Template $template
+    $played = Invoke-WebIsolatedRehearsal -Template $template -Layer $layer -Variables $variables -Types $types -DefaultType ([string](Get-Setting 'AirVariableType')) -Seconds $seconds -Actor $Actor
+    if (-not $played.ok) { return @{ ok = $false; error = 'urgent_rehearsal_failed' } }
+    $played.data.rehearsalStarted = $true
+    return $played
+}
+
+function Invoke-WebIsolatedRehearsal {
+    param($Template, [int]$Layer, [hashtable]$Variables, [hashtable]$Types, [string]$DefaultType, [int]$Seconds, [long]$Actor)
+    # Only the direct SHOW addresses the test device without shared postbox
+    # writes or taking over the urgent and bulletin engines.
+    $address = @{ AirServerAddress = $config.AirServerAddress; AirChannelNumber = $config.AirChannelNumber }
+    $startedAt = [datetimeoffset]::Now
+    $result = Show-TitlerTemplate @address -Layer $Layer -TemplatePath ([string]$Template.Path) -Variables $Variables -Types $Types -DefaultType $DefaultType -TimeoutSec (Get-AirTimeout)
+    if (-not (Get-JsonProp $result 'Success')) { return @{ ok = $false; error = 'rehearsal_failed' } }
     $requestedId = [string](Get-JsonProp $result 'EventId')
-    $identity = Get-VerifiedCinegyShowIdentity -Key $template.Key -TemplatePath ([string]$template.Path) -Layer $layer `
-        -ExpectedActiveId $requestedId -AllowAnonymousActiveId
+    $identity = Get-VerifiedCinegyShowIdentity -Key $Template.Key -TemplatePath ([string]$Template.Path) -Layer $Layer `
+        -ExpectedActiveId $requestedId -RequireEventIdentity
     $timerSaved = $false
     # Another operator may have placed the same template after SHOW. A name
     # match alone must not give this rehearsal ownership of that scene.
     if ($identity.Success -and $requestedId -and
         ([string]$identity.ActiveId).Trim().Trim('{', '}') -eq $requestedId.Trim().Trim('{', '}')) {
-        $key = "[TEST] $($template.Key)"
-        Set-OnAirShownRecord -Layer $layer -Record @{
-            Key = $key; At = Get-Date; UserId = $Actor; ActiveId = [string]$identity.ActiveId
+        $key = "[TEST] $($Template.Key)"
+        Set-OnAirShownRecord -Layer $Layer -Record @{
+            Key = $key; At = $startedAt; UserId = $Actor; ActiveId = [string]$identity.ActiveId
             ActiveIdConfirmed = $true; Source = 'BotTest'
         }
         Save-OnAirState
-        $timerSaved = Set-AutoHideTimer -Layer $layer -Seconds $seconds -ChatId $Actor -UserId $Actor `
-            -TemplateKey $key -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true
+        # Allow an expired deadline to become due on the next tick once identity is verified.
+        $timerSaved = Set-AutoHideTimer -Layer $Layer -Seconds $Seconds -Deadline ($startedAt.AddSeconds($Seconds)) -ChatId $Actor -UserId $Actor `
+            -TemplateKey $key -ActiveId ([string]$identity.ActiveId) -ActiveIdConfirmed $true -SingleSceneOnly
     }
-    Add-AuditEntry (T 'cfg.templateTestAudit' $template.Key $layer $(Format-UserAuditActor -UserId $Actor))
+    Add-AuditEntry (T 'cfg.templateTestAudit' $Template.Key $Layer $(Format-UserAuditActor -UserId $Actor))
     Publish-WebChannelState -Force
-    return @{ ok = $true; data = @{ rehearsalStarted = $true; autoHideFailed = -not $timerSaved } }
+    return @{ ok = $true; data = @{ autoHideFailed = -not $timerSaved } }
 }
 
 function Invoke-WebUrgentManual {
@@ -2779,7 +2863,7 @@ function Invoke-WebUrgentManual {
         $choices = @(Get-AutoHideChoices) + @([int][math]::Ceiling($timing.HoldSeconds))
         return @{ ok = $true; data = @{
             durations = @($choices | Where-Object { $_ -gt 0 -and $_ -le 86400 } | Sort-Object -Unique)
-            canRehearse = (Get-WebUrgentRehearsalLayer -Actor $actor -Key $template.Key) -gt 0
+            canRehearse = (Get-WebTemplateRehearsalLayer -Actor $actor -Key $template.Key) -gt 0
         } }
     }
     $policy = Test-TemplateShowPolicy -Key $template.Key -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)

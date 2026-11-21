@@ -171,6 +171,7 @@ function Save-AutoHideQueue {
                     TemplateKey = [string](Get-JsonProp $_ 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $_ 'ActiveId')
                     ActiveIdConfirmed = [bool](Get-JsonProp $_ 'ActiveIdConfirmed')
+                    SingleSceneOnly = [bool](Get-JsonProp $_ 'SingleSceneOnly')
                     Stage = [string](Get-JsonProp $_ 'Stage')
                     Token = [string](Get-JsonProp $_ 'Token')
                     ShowAt = [string](Get-JsonProp $_ 'ShowAt')
@@ -210,6 +211,7 @@ function Import-AutoHideQueue {
                     TemplateKey = [string](Get-JsonProp $raw 'TemplateKey')
                     ActiveId    = [string](Get-JsonProp $raw 'ActiveId')
                     ActiveIdConfirmed = [bool](Get-JsonProp $raw 'ActiveIdConfirmed')
+                    SingleSceneOnly = [bool](Get-JsonProp $raw 'SingleSceneOnly')
                     Stage = [string](Get-JsonProp $raw 'Stage')
                     Token = [string](Get-JsonProp $raw 'Token')
                     ShowAt = [string](Get-JsonProp $raw 'ShowAt')
@@ -248,11 +250,13 @@ function Set-AutoHideTimer {
         [long]$UserId = 0,
         [string]$TemplateKey = '',
         [string]$ActiveId = '',
-        [bool]$ActiveIdConfirmed = $false
+        [bool]$ActiveIdConfirmed = $false,
+        [datetimeoffset]$Deadline = [datetimeoffset]::MinValue,
+        [switch]$SingleSceneOnly
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($Seconds -le 0) { return $false }
-    $deadline = [datetimeoffset]::Now.AddSeconds($Seconds)
+    if ($Deadline -eq [datetimeoffset]::MinValue) { $Deadline = [datetimeoffset]::Now.AddSeconds($Seconds) }
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $key = if ($current) { [string](Get-JsonProp $current 'Key') } else { $TemplateKey }
     $maximum = if ($key) { Get-EffectiveAutoHideSeconds -Key $key } else { 0 }
@@ -278,6 +282,7 @@ function Set-AutoHideTimer {
             TemplateKey = $TemplateKey
             ActiveId    = $ActiveId
             ActiveIdConfirmed = $ActiveIdConfirmed
+            SingleSceneOnly = [bool]$SingleSceneOnly
         }
     $script:AutoHideQueue.Add($timer)
     if (Save-AutoHideQueue) { return $true }
@@ -292,6 +297,10 @@ function Get-AutoHideTargetDecision {
         [AllowNull()]$LiveStatus = $null
     )
     $layer = [int](Get-JsonProp $Timer 'Layer')
+    # The layer-wide HIDE can remove a second scene that status cannot see.
+    if ((Get-JsonProp $Timer 'SingleSceneOnly') -and (Get-Setting 'SceneMode') -eq 'Multi') {
+        return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.rehearsalMulti' $layer) }
+    }
     if (-not $script:OnAir.ContainsKey($layer)) {
         return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.layerNotOnAir' $layer) }
     }

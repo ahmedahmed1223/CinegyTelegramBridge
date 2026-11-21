@@ -10,6 +10,10 @@ public sealed record TemplatePresetItem(int Index, string Name, Dictionary<strin
 public sealed record TemplatePresetPage(TemplatePresetItem[] Items, TemplateFieldDto[] Fields, int Page, int PageCount, string Revision, bool CanManage);
 public sealed record TemplatePresetRequest(string Action, string Revision, int? Index = null, string? Name = null,
     Dictionary<string, string>? Values = null, int? Page = null);
+public sealed record TemplateRehearsalRequest(string Key, string Action, string? Review = null);
+public sealed record TemplateRehearsalField(string Label, string Value);
+public sealed record TemplateRehearsalPreview(string Review, int Layer, int AutoHideSeconds, TemplateRehearsalField[] Fields);
+public sealed record TemplateRehearsalResult(TemplateRehearsalPreview? Preview, bool AutoHideFailed = false);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);

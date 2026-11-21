@@ -536,6 +536,107 @@ Describe 'Web channel: the pipe' {
         Should -Invoke Invoke-ExitLayer -Times 1
     }
 
+    It 'rehearses a selected template with sample values only on the reviewed isolated device' {
+        $templateFile = Join-Path $TestDrive 'web-rehearsal.cintitle'
+        Set-Content -LiteralPath $templateFile -Value '<Scene />'
+        $script:WebTemplateTrialPath = $templateFile
+        $script:WebTemplateTrialOccupied = $false
+        $script:WebTemplateTrialMaintenance = $true
+        $script:WebTemplateTrialAlias = $false
+        $script:WebTemplateTrialMode = 'Single'
+        $script:WebTemplateRehearsalReviews = @{}
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-MaintenanceControl { $script:WebTemplateTrialMaintenance }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Get-TemplateStore {
+            @{ Map = @{ Programme = @{
+                        Key = 'Programme'; Layer = 5; Path = $script:WebTemplateTrialPath; Description = 'بطاقة البرنامج'
+                        Fields = @('title', 'enabled', 'picture'); FieldLabels = @('العنوان', 'التفعيل', 'الصورة')
+                        FieldLimits = @(2, 0, 0); FieldRequired = @($true, $false, $false)
+                        FieldTypes = @{ enabled = 'Bool' }
+                    } } }
+        }
+        Mock Get-MojazDesignFields { @{ Name = 'picture'; Kind = 'media' } }
+        Mock Resolve-AirGfxDevice {
+            $actualLayer = if ($Layer -eq 5 -and $script:WebTemplateTrialAlias) { 9 } else { $Layer }
+            @{ StatusPath = "gfx_$actualLayer" }
+        }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableFullTemplateManagement' }
+        Mock Get-Setting { $script:WebTemplateTrialMode } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Get-SettingInt { Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum }
+        Mock Get-SettingInt { 9 } -ParameterFilter { $Name -eq 'TemplateTestLayer' }
+        Mock Get-SettingInt { 10 } -ParameterFilter { $Name -eq 'TemplateTestAutoHideSeconds' }
+        Mock Get-WebLayerStatus {
+            @{ Success = $true; IsOnAir = $script:WebTemplateTrialOccupied; ActiveId = '{foreign}' }
+        }
+        Mock Show-TitlerTemplate {
+            $script:WebTemplateTrialLatestDeadline = [datetimeoffset]::Now.AddSeconds(10)
+            @{ Success = $true; EventId = '{our-rehearsal}' }
+        }
+        Mock Get-VerifiedCinegyShowIdentity { @{ Success = $true; ActiveId = '{our-rehearsal}' } }
+        Mock Save-OnAirState {}
+        Mock Set-AutoHideTimer { $true }
+        Mock Invoke-ShowTemplateResult {}
+        Mock Send-PostboxValues {}
+        Mock Publish-WebChannelState {}
+        $sendRehearsal = {
+            param($payload)
+            $line = @{ op = 'air.rehearsal'; args = $payload } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            $request = @{ actor = 4322; action = 'preview'; key = 'Programme' }
+            (& $sendRehearsal $request).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $script:WebTemplateTrialMode = 'Multi'
+            (& $sendRehearsal $request).error | Should -Be 'rehearsal_multi'
+            $script:WebTemplateTrialMode = 'Single'
+            $script:WebTemplateTrialAlias = $true
+            (& $sendRehearsal $request).error | Should -Be 'rehearsal_unavailable'
+            $script:WebTemplateTrialAlias = $false
+            $first = (& $sendRehearsal $request).data.preview
+            $first.layer | Should -Be 9
+            $first.fields.value | Should -Be @('TE', 'false')
+            $request.action = 'start'
+            $request.review = $first.review
+            $script:WebTemplateTrialOccupied = $true
+            (& $sendRehearsal $request).error | Should -Be 'rehearsal_busy'
+            $script:WebTemplateTrialOccupied = $false
+            Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+
+            $request.action = 'preview'
+            $second = (& $sendRehearsal $request).data.preview
+            Add-Content -LiteralPath $templateFile -Value '<!-- edited after review -->'
+            $request.action = 'start'
+            $request.review = $second.review
+            (& $sendRehearsal $request).error | Should -Be 'rehearsal_stale'
+            Should -Invoke Show-TitlerTemplate -Times 0 -Exactly
+
+            $request.action = 'preview'
+            $confirmed = (& $sendRehearsal $request).data.preview
+            $request.action = 'start'
+            $request.review = $confirmed.review
+            (& $sendRehearsal $request).data.autoHideFailed | Should -BeFalse
+            (& $sendRehearsal $request).error | Should -Be 'rehearsal_stale'
+            Should -Invoke Show-TitlerTemplate -Times 1 -Exactly -ParameterFilter {
+                $Layer -eq 9 -and $Variables.title -eq 'TE' -and $Variables.enabled -eq 'false' -and -not $Variables.ContainsKey('picture')
+            }
+            Should -Invoke Set-AutoHideTimer -Times 1 -Exactly -ParameterFilter {
+                $Layer -eq 9 -and $ActiveId -eq '{our-rehearsal}' -and $ActiveIdConfirmed -and
+                    $SingleSceneOnly -and $null -ne $Deadline -and $Deadline -le $script:WebTemplateTrialLatestDeadline
+            }
+            Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            Should -Invoke Send-PostboxValues -Times 0 -Exactly
+        }
+        finally {
+            $script:OnAir.Remove(9)
+            $script:WebTemplateRehearsalReviews.Clear()
+        }
+    }
+
     It 'runs a reviewed urgent rehearsal only on an isolated empty test layer' {
         $oldBoard = $script:UrgentBoard
         $oldReviews = $script:WebUrgentManualReviews

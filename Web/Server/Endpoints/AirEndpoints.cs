@@ -36,6 +36,10 @@ public static class AirEndpoints
             .Produces<TemplatePresetPage>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        api.MapPost("/rehearsal", Rehearse)
+            .Produces<TemplateRehearsalResult>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
         api.MapPost("/hide/{layer:int}", Hide)
             .Produces(StatusCodes.Status204NoContent)
@@ -92,6 +96,17 @@ public static class AirEndpoints
         return PresetResult(reply, http);
     }
 
+    private static async Task<IResult> Rehearse(TemplateRehearsalRequest request, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("air.rehearsal", new
+        {
+            actor = http.User.UserId(), request.Key, request.Action, request.Review
+        }, http.RequestAborted);
+        if (!reply.Ok) return AirResult(reply);
+        http.Response.Headers.CacheControl = "no-store";
+        return TypedResults.Ok(reply.Data.Deserialize<TemplateRehearsalResult>(JsonDefaults.Options));
+    }
+
     private static IResult PresetResult(BridgeReply reply, HttpContext http)
     {
         if (!reply.Ok) return AirResult(reply);
@@ -122,6 +137,10 @@ public static class AirEndpoints
         "preset_stale" or "preset_duplicate" => ApiErrors.Of(409, reply.Error),
         "preset_invalid" or "preset_invalid_name" or "preset_too_long" => ApiErrors.Of(400, reply.Error),
         "preset_save_failed" => ApiErrors.Of(503, reply.Error),
+        "rehearsal_invalid" => ApiErrors.Of(400, reply.Error),
+        "rehearsal_unavailable" => ApiErrors.Of(404, reply.Error),
+        "rehearsal_busy" or "rehearsal_stale" or "rehearsal_multi" => ApiErrors.Of(409, reply.Error),
+        "rehearsal_failed" or "rehearsal_unverified" => ApiErrors.Of(503, reply.Error),
         "bad_duration" => ApiErrors.Of(400, reply.Error),
         "refused" => ApiErrors.Of(400, reply.Error, reply.Data.ValueKind == JsonValueKind.String ? reply.Data.GetString() : null),
         _ => ApiErrors.BridgeUnavailable()

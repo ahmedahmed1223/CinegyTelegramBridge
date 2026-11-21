@@ -1524,6 +1524,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/air/rehearsal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateRehearsalRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateRehearsalResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/air/hide/{layer}": {
         parameters: {
             query?: never;
@@ -4487,6 +4571,29 @@ export interface components {
              * @default null
              */
             page: number | null;
+        };
+        TemplateRehearsalField: {
+            label: string;
+            value: string;
+        };
+        TemplateRehearsalPreview: {
+            review: string;
+            /** Format: int32 */
+            layer: number;
+            /** Format: int32 */
+            autoHideSeconds: number;
+            fields: components["schemas"]["TemplateRehearsalField"][];
+        } | null;
+        TemplateRehearsalRequest: {
+            key: string;
+            action: string;
+            /** @default null */
+            review: string | null;
+        };
+        TemplateRehearsalResult: {
+            preview: components["schemas"]["TemplateRehearsalPreview"];
+            /** @default false */
+            autoHideFailed: boolean;
         };
         TickerBackupItem: {
             id: string;

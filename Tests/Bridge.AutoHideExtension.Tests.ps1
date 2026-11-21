@@ -133,4 +133,20 @@ Describe 'Durable auto-hide and one-time extension' {
         Update-AutoHideQueue -Now $script:testNow.AddMinutes(1)
         $script:AutoHideQueue.Count | Should -Be 0
     }
+
+    It 'does not hide a rehearsal if the scene mode changes while its timer is pending' {
+        $script:AutoHideQueue.Add(@{
+            Layer = 7; At = $script:testNow.AddSeconds(-1); ChatId = 100; UserId = 101
+            TemplateKey = 'urgent'; ActiveId = 'scene'; ActiveIdConfirmed = $true; SingleSceneOnly = $true
+        })
+        Save-AutoHideQueue | Should -BeTrue
+        $script:AutoHideQueue.Clear()
+        Import-AutoHideQueue
+        $config.Settings | Add-Member SceneMode 'Multi' -Force
+
+        Update-AutoHideQueue -Now $script:testNow
+
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        $script:AutoHideQueue.Count | Should -Be 0
+    }
 }

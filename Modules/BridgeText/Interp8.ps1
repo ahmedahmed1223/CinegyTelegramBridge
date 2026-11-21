@@ -18,6 +18,7 @@ function Add-BridgeTextInterp8 {
     $catalogue['tick.layerChanged'] = @{ ar = 'الطبقة {0} تغيّرت منذ ضبط المؤقت.'; en = 'Layer {0} changed since the timer was set.' }
     $catalogue['tick.templateChanged'] = @{ ar = 'القالب على الطبقة {0} تغيّر منذ ضبط المؤقت.'; en = 'The template on layer {0} changed since the timer was set.' }
     $catalogue['tick.layerUnverifiable'] = @{ ar = 'تعذّر التحقق من حالة Cinegy للطبقة {0}.'; en = 'The Cinegy state of layer {0} could not be checked.' }
+    $catalogue['tick.rehearsalMulti'] = @{ ar = 'تغيّر وضع المشاهد. تحقّق من البروفة على الطبقة {0} مباشرةً في Cinegy.'; en = 'The scene mode changed. Check the rehearsal on layer {0} directly in Cinegy.' }
     $catalogue['tick.layerGone'] = @{ ar = 'الطبقة {0} لم تعد على الهواء.'; en = 'Layer {0} is no longer on air.' }
     $catalogue['tick.extendedOnce'] = @{ ar = '⏱ تم التمديد مرة واحدة؛ الإخفاء عند {0}.'; en = '⏱ It was extended once; it hides at {0}.' }
     $catalogue['tick.reachedCeiling'] = @{ ar = "⏱ بلغ القالب {0} حدّه على الهواء.`nتمديد واحد فقط. إذا لم تؤكّد قبل {1} فسيُخفى تلقائيًا."; en = "⏱ The template {0} has reached its ceiling on air.`nOne extension only. If you do not confirm before {1} it hides by itself." }

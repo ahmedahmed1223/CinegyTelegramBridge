@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.116.0
+
+Administrators can review and rehearse a template from the web library using sample values. Rehearsal requires single-scene mode and an empty test device separate from registered graphics. Automatic hide uses the reviewed duration from the show request and requires confirmation of the rehearsal event.
+
 ## Version 8.115.0
 
 The web template editor can load a saved preset before playout. Administrators can create, edit, rename and delete the same presets the bot uses. Sensitive saved values stay on the bridge, and an outdated review cannot act on a replacement preset.

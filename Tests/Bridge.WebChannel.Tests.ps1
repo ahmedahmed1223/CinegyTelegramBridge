@@ -1594,6 +1594,105 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'shares programme boards with the bot and applies its row permissions and revision checks' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-BoardsAvailable { $true }
+        Mock Get-BoardsDirectory { Join-Path $TestDrive 'programme-boards' }
+        Mock Get-BoardTextFields { 'programme.title'; 'programme.guest[1]' }
+        Mock Get-BoardMediaFields { 'programme.logo' }
+        Mock Get-MojazFieldLabel { $FieldName }
+        Mock Write-BridgeValidatedJson { $true }
+        $board = (New-ContentBoard -Name 'لقاء المساء' -TemplateKey 'Programme' -EditRole 'admin').Value
+        $boardId = $board.Id
+        try {
+            Save-ContentBoard -Board $board | Should -BeTrue
+            $sendBoard = {
+                param($operation, $payload)
+                $line = @{ op = $operation; args = $payload } | ConvertTo-Json -Compress -Depth 5
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            $list = & $sendBoard 'board.list' @{ actor = 4322 }
+            $list.ok | Should -BeTrue
+            $list.data.items.Id | Should -Contain $boardId
+            $read = & $sendBoard 'board.edit' @{ actor = 4322; action = 'read'; id = $boardId }
+            $read.data.canEdit | Should -BeFalse
+            $read.data.fields.name | Should -Be @('programme.title', 'programme.guest[1]')
+            $read.data.sceneMedia | Should -Be @('programme.logo')
+            $inputRow = @{ actor = 4322; action = 'add'; id = $boardId; revision = $board.Revision
+                values = @{ 'programme.title' = 'لقاء المساء'; 'programme.guest[1]' = 'الضيف الأول' } }
+            (& $sendBoard 'board.edit' $inputRow).error | Should -Be 'forbidden'
+            $inputRow.actor = 4321
+            $added = & $sendBoard 'board.edit' $inputRow
+            $added.ok | Should -BeTrue
+            $rowId = $added.data.rows[0].id
+            $added.data.rows[0].values.'programme.guest[1]' | Should -Be 'الضيف الأول'
+            (& $sendBoard 'board.edit' $inputRow).error | Should -Be 'board_stale'
+            $inputRow.action = 'update'
+            $inputRow.revision = $added.data.revision
+            $inputRow.rowId = $rowId
+            $inputRow.values['programme.title'] = 'اللقاء المباشر'
+            $inputRow.values['programme.guest[1]'] = 'الضيف الثاني'
+            $inputRow.values['programme.logo'] = 'untrusted.png'
+            (& $sendBoard 'board.edit' $inputRow).error | Should -Be 'board_unknown_field'
+            (Get-BoardItem -Board (Get-ContentBoard -BoardId $boardId) -ItemId $rowId).Values.'programme.title' | Should -Be 'لقاء المساء'
+            $inputRow.values.Remove('programme.logo')
+            $inputRow.values['programme.title'] = "نص معطوب`0"
+            (& $sendBoard 'board.edit' $inputRow).error | Should -Be 'board_invalid_text'
+            $inputRow.values['programme.title'] = 'اللقاء المباشر'
+            $edited = & $sendBoard 'board.edit' $inputRow
+            $edited.data.revision | Should -Be ($added.data.revision + 1)
+            $edited.data.rows[0].values.'programme.title' | Should -Be 'اللقاء المباشر'
+            $edited.data.rows[0].values.'programme.guest[1]' | Should -Be 'الضيف الثاني'
+            $disabled = & $sendBoard 'board.edit' @{ actor = 4322; action = 'disable'; id = $boardId
+                revision = $edited.data.revision; rowId = $rowId }
+            $disabled.ok | Should -BeTrue
+            $disabled.data.rows[0].enabled | Should -BeFalse
+        }
+        finally { Remove-ContentBoardFile -BoardId $boardId }
+    }
+
+    It 'creates a programme board only for an administrator using an eligible template' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-BoardsAvailable { $true }
+        Mock Get-BoardsDirectory { Join-Path $TestDrive 'programme-boards' }
+        Mock Get-BoardEligibleTemplates {
+            [pscustomobject]@{ Key = 'Programme'; Layer = 7; Usable = $true; Reason = '' }
+            [pscustomobject]@{ Key = 'NoText'; Layer = 8; Usable = $false; Reason = 'لا حقول نصية' }
+        }
+        Mock Get-BoardTextFields { 'programme.host' }
+        Mock Get-MojazFieldLabel { 'المقدّم' }
+        Mock Write-BridgeValidatedJson { $true }
+        $request = @{ actor = 4322; action = 'create'; template = 'Programme'; name = 'موعد مع الثقافة' }
+        $sendBoard = {
+            $line = @{ op = 'board.edit'; args = $request } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        $initial = @(Get-ContentBoards).Count
+        $createdId = ''
+        try {
+            (& $sendBoard).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $request.template = 'NoText'
+            (& $sendBoard).error | Should -Be 'board_invalid_template'
+            @(Get-ContentBoards).Count | Should -Be $initial
+            $request.template = 'Programme'
+            $created = & $sendBoard
+            $createdId = $created.data.id
+            $created.ok | Should -BeTrue
+            (Get-ContentBoard -BoardId $createdId).Name | Should -Be 'موعد مع الثقافة'
+            $request = @{ actor = 4322; action = 'role'; id = $createdId; revision = $created.data.revision; role = 'owner' }
+            (& $sendBoard).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $locked = & $sendBoard
+            $locked.ok | Should -BeTrue
+            $locked.data.editRole | Should -Be 'owner'
+            $locked.data.canEdit | Should -BeFalse
+        }
+        finally { if ($createdId) { Remove-ContentBoardFile -BoardId $createdId } }
+    }
+
     It 'uploads a photo only to the selected custom bulletin media field' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-MojazAvailable { $true }

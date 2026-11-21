@@ -797,3 +797,124 @@ function Invoke-BoardEdit {
     else { Show-BoardScreen -BoardId $BoardId -ChatId $ChatId -UserId $UserId -MessageId $MessageId }
     return $true
 }
+
+function Get-WebProgrammeBoards {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $boards = @(Get-ContentBoards | Sort-Object Name, Id)
+    $window = Get-BridgePageWindow -ItemCount $boards.Count -Page ([int](Get-JsonProp $Arguments 'page'))
+    $items = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
+            $board = $boards[$index]
+            @{ id = [string](Get-BoardProperty $board 'Id'); name = [string](Get-BoardProperty $board 'Name')
+                rows = @(Get-BoardProperty $board 'Items' @()).Count }
+        })
+    return @{ ok = $true; data = @{ items = $items; total = $boards.Count; page = $window.Page; pageCount = $window.PageCount
+            canCreate = (Test-Admin -ChatId $actor -UserId $actor) } }
+}
+
+function Get-WebProgrammeBoardEditor {
+    param($Board, [long]$Actor, [int]$Page)
+    $template = [string](Get-BoardProperty $Board 'TemplateKey' '')
+    $textFields = @(Get-BoardTextFields -TemplateKey $template)
+    $sceneMedia = @(foreach ($name in @(Get-BoardMediaFields -TemplateKey $template)) {
+            Get-MojazFieldLabel -TemplateKey $template -FieldName $name
+        })
+    $fields = @(foreach ($name in $textFields) { @{ name = $name; label = Get-MojazFieldLabel -TemplateKey $template -FieldName $name } })
+    $items = @(Get-BoardProperty $Board 'Items' @())
+    $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page
+    $rows = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
+            $item = $items[$index]
+            $values = if ($textFields.Count) { Get-BoardItemValues -Item $item -TextFields $textFields } else { @{} }
+            @{ id = [string](Get-BoardProperty $item 'Id'); number = $index + 1; values = $values
+                enabled = [bool](Get-BoardProperty $item 'Enabled' $true) }
+        })
+    return @{
+        id = [string](Get-BoardProperty $Board 'Id'); name = [string](Get-BoardProperty $Board 'Name')
+        revision = [int](Get-BoardProperty $Board 'Revision'); canEdit = (Test-BoardEditAllowed -Board $Board -ChatId $Actor -UserId $Actor)
+        editRole = [string](Get-BoardProperty $Board 'EditRole' 'all'); canManage = (Test-Admin -ChatId $Actor -UserId $Actor)
+        fields = $fields; sceneMedia = $sceneMedia; rows = $rows; total = $items.Count; page = $window.Page; pageCount = $window.PageCount
+    }
+}
+
+function New-WebProgrammeBoard {
+    param([System.Collections.IDictionary]$Arguments, [long]$Actor)
+    $key = [string](Get-JsonProp $Arguments 'template')
+    if (-not ($key -and (Get-BoardEligibleTemplates | Where-Object { $_.Usable -and $_.Key -ceq $key } | Select-Object -First 1))) {
+        return @{ ok = $false; error = 'board_invalid_template' }
+    }
+    if (@(Get-ContentBoards).Count -ge (Get-SettingInt 'MaxContentBoards' 1)) {
+        return @{ ok = $false; error = 'board_capacity' }
+    }
+    $result = New-ContentBoard -Name ([string](Get-JsonProp $Arguments 'name')) -TemplateKey $key -UserId $Actor
+    if (-not $result.Success) { return @{ ok = $false; error = "board_$($result.ErrorCode)" } }
+    if (-not (Save-ContentBoard -Board $result.Value)) { return @{ ok = $false; error = 'board_save_failed' } }
+    Add-AuditEntry "Web programme board created by $(Format-UserAuditActor -UserId $Actor) ($($result.Value.Id))"
+    return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $result.Value -Actor $Actor -Page 0 }
+}
+
+function Invoke-WebProgrammeBoardEdit {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -in @('create', 'options', 'role') -and -not (Test-Admin -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    if ($action -eq 'create') { return New-WebProgrammeBoard -Arguments $Arguments -Actor $actor }
+    if ($action -eq 'options') {
+        $store = Get-TemplateStore
+        $options = @(foreach ($candidate in @(Get-BoardEligibleTemplates | Where-Object Usable)) {
+                $label = [string](Get-JsonProp $store.Map[$candidate.Key] 'Description')
+                if (-not $label) { $label = [string]$candidate.Key }
+                @{ key = [string]$candidate.Key; label = $label; layer = [int]$candidate.Layer }
+            })
+        return @{ ok = $true; data = @{ templates = $options } }
+    }
+    $boardId = [string](Get-JsonProp $Arguments 'id')
+    if (-not $boardId) { return @{ ok = $false; error = 'not_found' } }
+    $board = Get-ContentBoard -BoardId $boardId
+    if (-not $board) { return @{ ok = $false; error = 'not_found' } }
+    $page = [int](Get-JsonProp $Arguments 'page')
+    if ($action -eq 'read') { return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $board -Actor $actor -Page $page } }
+    if ($action -notin @('add', 'update', 'remove', 'up', 'down', 'enable', 'disable', 'role')) { return @{ ok = $false; error = 'board_invalid' } }
+    if ($action -in @('add', 'update', 'remove') -and -not (Test-BoardEditAllowed -Board $board -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    if ((Get-JsonProp $Arguments 'revision') -ne (Get-BoardProperty $board 'Revision')) { return @{ ok = $false; error = 'board_stale' } }
+    $rowId = [string](Get-JsonProp $Arguments 'rowId')
+    if ($action -notin @('add', 'role') -and (-not $rowId -or -not (Get-BoardItem -Board $board -ItemId $rowId))) {
+        return @{ ok = $false; error = 'not_found' }
+    }
+    $edit = @{ Board = $board; UserId = $actor }
+    if ($action -in @('add', 'update')) {
+        $textFields = @(Get-BoardTextFields -TemplateKey ([string](Get-BoardProperty $board 'TemplateKey' '')))
+        $values = Get-JsonProp $Arguments 'values'
+        if ($values -isnot [System.Collections.IDictionary] -or -not $values.Count) { return @{ ok = $false; error = 'board_invalid' } }
+        $rowValues = @{}
+        foreach ($name in $values.Keys) {
+            if ($name -cnotin $textFields) { return @{ ok = $false; error = 'board_unknown_field' } }
+            if ($values[$name] -isnot [string]) { return @{ ok = $false; error = 'board_invalid' } }
+            $rowValues[$name] = $values[$name]
+        }
+        $edit.Values = $rowValues
+        $edit.TextFields = $textFields
+    }
+    $result = switch ($action) {
+        'add' { Add-BoardItem @edit -MaxItems (Get-SettingInt 'BoardMaxItems' 100) }
+        'update' { Set-BoardItemFields @edit -ItemId $rowId }
+        'remove' { Remove-BoardItem @edit -ItemId $rowId }
+        'up' { Move-BoardItem @edit -ItemId $rowId -Delta -1 }
+        'down' { Move-BoardItem @edit -ItemId $rowId -Delta 1 }
+        'enable' { Set-BoardItemEnabled @edit -ItemId $rowId -Enabled $true }
+        'disable' { Set-BoardItemEnabled @edit -ItemId $rowId -Enabled $false }
+        'role' { Set-BoardEditRole @edit -Role ([string](Get-JsonProp $Arguments 'role')) }
+    }
+    if (-not $result.Success) { return @{ ok = $false; error = "board_$($result.ErrorCode)" } }
+    if (-not (Save-ContentBoard -Board $result.Value)) { return @{ ok = $false; error = 'board_save_failed' } }
+    Add-AuditEntry "Web programme board $action by $(Format-UserAuditActor -UserId $actor) ($boardId)"
+    if ($action -eq 'add') { $page = [int][math]::Floor((@(Get-BoardProperty $result.Value 'Items' @()).Count - 1) / 20) }
+    return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $result.Value -Actor $actor -Page $page }
+}

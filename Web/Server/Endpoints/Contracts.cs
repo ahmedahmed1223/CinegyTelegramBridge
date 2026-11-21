@@ -10,6 +10,16 @@ public sealed record OutputCapture(string Id, string State, string Kind, string 
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);
 public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
+public sealed record ProgrammeBoardSummary(string Id, string Name, int Rows);
+public sealed record ProgrammeBoardList(ProgrammeBoardSummary[] Items, int Total, int Page, int PageCount, bool CanCreate);
+public sealed record ProgrammeBoardTemplate(string Key, string Label, int Layer);
+public sealed record ProgrammeBoardTemplates(ProgrammeBoardTemplate[] Templates);
+public sealed record ProgrammeBoardField(string Name, string Label);
+public sealed record ProgrammeBoardRow(string Id, int Number, Dictionary<string, string> Values, bool Enabled);
+public sealed record ProgrammeBoardEditor(string Id, string Name, int Revision, bool CanEdit, bool CanManage, string EditRole, ProgrammeBoardField[] Fields,
+    string[] SceneMedia, ProgrammeBoardRow[] Rows, int Total, int Page, int PageCount);
+public sealed record ProgrammeBoardEditRequest(string Action, string? Id = null, int? Revision = null, int? Page = null,
+    string? RowId = null, Dictionary<string, string>? Values = null, string? Name = null, string? Template = null, string? Role = null);
 public sealed record BulletinField(string Name, string Label, string Kind);
 public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped, string? ImageMode = null);
 public sealed record BulletinImageChoice(string RowId, int RowNumber);

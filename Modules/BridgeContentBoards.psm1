@@ -37,7 +37,8 @@ function Get-BoardProperty {
         if ($Object.Contains($Name)) { return $Object[$Name] }
         return $Default
     }
-    if ($Object.PSObject.Properties.Match($Name).Count -gt 0) { return $Object.$Name }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
     return $Default
 }
 
@@ -64,6 +65,15 @@ function ConvertTo-BoardText {
     # the invisible characters a paste carries are dropped here, once.
     param([string]$Text)
     return ((Remove-BridgeInvisibleText -Text ([string]$Text)) -replace '\s+', ' ').Trim()
+}
+
+function Test-BoardXmlText {
+    param([string]$Text)
+    try {
+        [void][System.Xml.XmlConvert]::VerifyXmlChars($Text)
+        return $true
+    }
+    catch [System.Xml.XmlException] { return $false }
 }
 
 function Test-BoardEditRole {
@@ -206,6 +216,9 @@ function Add-BoardItem {
     $filled = 0
     foreach ($field in $TextFields) {
         $raw = if ($Values.ContainsKey($field)) { ConvertTo-BoardText -Text ([string]$Values[$field]) } else { '' }
+        if (-not (Test-BoardXmlText -Text $raw)) {
+            return (New-BoardResult $false $null 'invalid_text' 'يحتوي النص على أحرف لا يقبلها القالب.')
+        }
         if ($raw.Length -gt $MaxFieldLength) {
             return (New-BoardResult $false $null 'too_long' "قيمة «$field» أطول من $MaxFieldLength حرفًا.")
         }
@@ -239,12 +252,26 @@ function Set-BoardItemField {
         [long]$UserId = 0,
         [int]$MaxFieldLength = 500
     )
-    if ($TextFields -notcontains $Field) {
-        return (New-BoardResult $false $null 'unknown_field' 'هذا الحقل لم يعد في المشهد.')
-    }
-    $clean = ConvertTo-BoardText -Text $Value
-    if ($clean.Length -gt $MaxFieldLength) {
-        return (New-BoardResult $false $null 'too_long' "القيمة أطول من $MaxFieldLength حرفًا.")
+    return (Set-BoardItemFields -Board $Board -ItemId $ItemId -Values @{ $Field = $Value } -TextFields $TextFields `
+            -UserId $UserId -MaxFieldLength $MaxFieldLength)
+}
+
+function Set-BoardItemFields {
+    param([Parameter(Mandatory)]$Board, [Parameter(Mandatory)][string]$ItemId, [Parameter(Mandatory)][hashtable]$Values,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$TextFields, [long]$UserId = 0, [int]$MaxFieldLength = 500)
+    $cleanFields = @{}
+    foreach ($fieldName in $Values.Keys) {
+        if ($TextFields -notcontains $fieldName) {
+            return (New-BoardResult $false $null 'unknown_field' 'هذا الحقل لم يعد في المشهد.')
+        }
+        $clean = ConvertTo-BoardText -Text ([string]$Values[$fieldName])
+        if (-not (Test-BoardXmlText -Text $clean)) {
+            return (New-BoardResult $false $null 'invalid_text' 'يحتوي النص على أحرف لا يقبلها القالب.')
+        }
+        if ($clean.Length -gt $MaxFieldLength) {
+            return (New-BoardResult $false $null 'too_long' "القيمة أطول من $MaxFieldLength حرفًا.")
+        }
+        $cleanFields[$fieldName] = $clean
     }
     if (-not (Get-BoardItem -Board $Board -ItemId $ItemId)) {
         return (New-BoardResult $false $null 'missing_item' 'الصفّ غير موجود.')
@@ -253,7 +280,9 @@ function Set-BoardItemField {
             param($board)
             foreach ($item in @($board.Items)) {
                 if ([string]$item.Id -ne $ItemId) { continue }
-                $item.Values | Add-Member -NotePropertyName $Field -NotePropertyValue $clean -Force
+                foreach ($cell in $cleanFields.GetEnumerator()) {
+                    $item.Values | Add-Member -NotePropertyName $cell.Key -NotePropertyValue $cell.Value -Force
+                }
                 $item.UpdatedAt = [datetimeoffset]::Now.ToString('o')
                 $item.UpdatedByUserId = [long]$UserId
             }
@@ -385,5 +414,5 @@ function ConvertFrom-BoardPasteText {
 
 Export-ModuleMember -Function New-BoardResult, Get-BoardProperty, Copy-BoardValue, New-BoardId,
 New-BoardItemId, ConvertTo-BoardText, Test-BoardEditRole, New-ContentBoard, Get-BoardItem,
-Get-BoardItemPosition, Update-ContentBoard, Set-BoardEditRole, Add-BoardItem, Set-BoardItemField, Set-BoardItemEnabled,
+Get-BoardItemPosition, Update-ContentBoard, Set-BoardEditRole, Add-BoardItem, Set-BoardItemField, Set-BoardItemFields, Set-BoardItemEnabled,
 Move-BoardItem, Remove-BoardItem, Get-BoardItemValues, Get-BoardOrphanFields, ConvertFrom-BoardPasteText

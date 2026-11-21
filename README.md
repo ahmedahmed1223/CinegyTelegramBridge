@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.109.0
+
+Programme boards are available in the web newsroom when enabled in bridge settings. They use the same template-backed columns and saved rows as the bot. Administrators can create boards and set who edits their text. Authorized operators can reorder, enable, and disable rows. The bridge rejects edits made against a stale revision.
+
 ## Version 8.108.0
 
 Use Add row with a photo in the web bulletin editor to start a row in a selected picture column, including in designs without text fields. The bridge validates and converts the image before committing the row, and rejects a stale revision without creating a duplicate.

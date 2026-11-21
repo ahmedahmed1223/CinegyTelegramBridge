@@ -1,6 +1,22 @@
 // What each server error code means to the person in front of the screen.
 // Codes come from the server (ErrorResponse.error) and the bridge.
 const messages: Record<string, string> = {
+  board_invalid: 'تعذّر قراءة طلب تعديل لوحة البرامج.',
+  board_stale: 'تغيّرت اللوحة منذ فتحها. ألغِ التحرير وحدّث اللوحة ثم أعد المحاولة.',
+  board_unknown_field: 'تغيّرت حقول القالب. حدّث اللوحة ثم راجع الأعمدة.',
+  board_no_fields: 'لا يحتوي القالب على حقول نصية.',
+  board_too_long: 'أحد الحقول يتجاوز 500 حرف.',
+  board_invalid_text: 'أحد الحقول يحتوي على أحرف لا يقبلها قالب البث.',
+  board_empty: 'اكتب نصًا في حقل واحد على الأقل.',
+  board_full: 'وصلت اللوحة إلى الحدّ الأقصى لعدد الصفوف.',
+  board_capacity: 'وصلت المحطة إلى الحدّ الأقصى لعدد لوحات البرامج.',
+  board_at_edge: 'الصف في طرف الجدول بالفعل.',
+  board_missing_item: 'لم يعد هذا الصف موجودًا.',
+  board_invalid_template: 'القالب المختار غير متاح للوحات البرامج.',
+  board_invalid_name: 'اكتب اسمًا للوحة.',
+  board_name_too_long: 'الحدّ الأقصى لاسم اللوحة 60 حرفًا.',
+  board_invalid_role: 'اختر صلاحية تحرير صالحة.',
+  board_save_failed: 'تعذّر حفظ اللوحة. أعد المحاولة أو راجع سجل الجسر.',
   capture_disabled: 'الالتقاط معطّل في إعدادات الجسر.',
   capture_busy: 'هناك التقاط قيد التنفيذ. أعد المحاولة بعد انتهائه.',
   capture_capacity: 'امتلأت مساحة الالتقاط المؤقتة. حاول بعد بضع دقائق.',

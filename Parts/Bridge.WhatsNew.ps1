@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.109.0'; Items = @('Open Programme boards in the web newsroom to prepare the same rows as in the bot. Administrators can create boards and set who may edit their text.') },
                 @{ Version = '8.108.0'; Items = @('Use Add row with a photo in the web bulletin editor to start a row in any available picture column, including designs without text fields.') },
                 @{ Version = '8.107.0'; Items = @('Upload a photo directly into a picture column in the web bulletin editor. Each column in a saved row keeps its own image.') },
                 @{ Version = '8.106.0'; Items = @('Start or schedule an alternate bulletin design from the web. A scheduled alternate uses the latest saved rows on its booked layer when the layer is free.') },
@@ -349,6 +350,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.109.0'; Items = @('افتح «لوحات البرامج» في غرفة الأخبار على الويب لإعداد الصفوف نفسها التي تظهر في البوت. يمكن للمشرف إنشاء اللوحة وتحديد من يحرّر نصوصها.') },
                 @{ Version = '8.108.0'; Items = @('يمكن إنشاء صف من زر «إضافة صف بصورة» واختيار عمود الصورة مباشرة، حتى في قوالب الموجز التي لا تحتوي على حقول نصية.') },
                 @{ Version = '8.107.0'; Items = @('يمكن رفع صورة مباشرة في عمود الصور من جدول الموجز على الويب. يحتفظ كل عمود في الصف المحفوظ بصورته الخاصة.') },
                 @{ Version = '8.106.0'; Items = @('يمكن تشغيل قالب الموجز البديل أو جدولته من الويب. يستخدم الموعد أحدث الصفوف المحفوظة عندما تكون طبقة القالب المحجوزة خالية.') },

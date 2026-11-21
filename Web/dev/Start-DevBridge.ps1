@@ -59,6 +59,8 @@ Set-JsonProp $config.Settings 'EnableLiveRelay' $true
 Set-JsonProp $config.Settings 'EnableSnapshot' ([bool]$CaptureFixtureDirectory)
 Set-JsonProp $config.Settings 'NewsItemSeparator' '|'
 Set-JsonProp $config.Settings 'MojazMultiDesign' $true
+Set-JsonProp $config.Settings 'EnableContentBoards' $true
+Set-JsonProp $config.Settings 'MaxContentBoards' 12
 @{
     Urgent = @{
         path = Join-Path $runtime 'urgent.cintitle'; layer = 3; description = 'شريط الأخبار العاجلة'; category = 'الأخبار'
@@ -90,6 +92,11 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
         path = Join-Path $runtime 'guest.cintitle'; layer = 5; description = 'اسم الضيف'; category = 'الأسماء'
         fields = @(@{ name = 'name'; label = 'اسم الضيف'; required = $true; maxLength = 40 }, @{ name = 'role'; label = 'الصفة' })
     }
+    EveningProgramme = @{
+        path = Join-Path $runtime 'evening-programme.cintitle'; layer = 7; description = 'بطاقة البرنامج'; category = 'البرامج'
+        fields = @(@{ name = 'programme.title'; label = 'عنوان الفقرة' }, @{ name = 'programme.guest'; label = 'اسم الضيف' },
+            @{ name = 'programme.logo'; label = 'شعار البرنامج' })
+    }
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $fixtureRegistry
 @'
 <CinegyTitler><Scene Fps="25" Duration="125" LoopStartFrame="25" LoopEndFrame="100">
@@ -113,6 +120,13 @@ Set-JsonProp $config.Settings 'MojazMultiDesign' $true
   <Var Name="photo.detail" Type="File" /><Plate File="${photo.detail}" Size="160;90" />
 </Scene>
 '@ | Set-Content -LiteralPath (Join-Path $runtime 'photo-bulletin.cintitle')
+@'
+<Scene Fps="50" Duration="300">
+  <Var Name="programme.title" Type="String" /><Title Text="${programme.title}" />
+  <Var Name="programme.guest" Type="String" /><Title Text="${programme.guest}" />
+  <Var Name="programme.logo" Type="File" /><Plate File="${programme.logo}" Size="160;90" />
+</Scene>
+'@ | Set-Content -LiteralPath (Join-Path $runtime 'evening-programme.cintitle')
 'نافذة على أبرز الأخبار اليوم|متابعة مباشرة في النشرة المسائية|برنامج خاص مساء الخميس' |
     Set-Content -LiteralPath $fixtureTicker
 $script:UrgentBoard = New-UrgentBoard
@@ -134,6 +148,12 @@ if ($CaptureFixtureDirectory) {
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'أبرز العناوين' -Text 'العناوين الرئيسية في النشرة المسائية.' -Image $demoPicture).Value
 $script:MojazLibrary = (Add-MojazBulletinRow -Library $script:MojazLibrary -BulletinId $demoBulletinId -Title 'تقرير اليوم' -Text 'متابعة من غرفة الأخبار.').Value
 $script:MojazLibrary = (Add-MojazBulletin -Library $script:MojazLibrary -Name 'موجز الصور' -TemplateKey 'PhotoBulletin').Value
+$programme = (New-ContentBoard -Name 'برنامج نافذة المساء' -TemplateKey 'EveningProgramme' -UserId $OwnerId).Value
+$programmeFields = @('programme.title', 'programme.guest')
+$programme = (Add-BoardItem -Board $programme -TextFields $programmeFields -UserId $OwnerId -Values @{
+        'programme.title' = 'افتتاحية البرنامج'; 'programme.guest' = 'فريق التحرير'
+    }).Value
+if (-not (Save-ContentBoard -Board $programme)) { throw 'Could not create the programme-board fixture.' }
 
 $config | Add-Member -NotePropertyName 'OwnerUserIds' -NotePropertyValue @($OwnerId) -Force
 $config | Add-Member -NotePropertyName 'AdminUserIds' -NotePropertyValue @($OwnerId, 1002) -Force

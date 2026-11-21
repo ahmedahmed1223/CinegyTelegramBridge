@@ -10,12 +10,14 @@ import { UrgentTiming } from './UrgentTiming'
 import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
 import { BulletinEditor, BulletinNameForm } from './BulletinEditor'
+import { ProgrammeBoards } from './ProgrammeBoards'
 import classes from './NewsroomPage.module.css'
 
 const views = {
   urgent: { label: 'العواجل', title: 'إدارة العواجل', empty: 'لا توجد عواجل في الجدول.' },
   bulletins: { label: 'الموجز', title: 'مكتبة الموجز', empty: 'لا توجد موجزات محفوظة.' },
   ticker: { label: 'الشريط', title: 'إدارة شريط الأخبار', empty: 'لا توجد أخبار منشورة في الشريط.' },
+  boards: { label: 'لوحات البرامج', title: 'لوحات البرامج', empty: 'لا توجد لوحات برامج.' },
 } as const
 type View = keyof typeof views
 
@@ -36,6 +38,7 @@ export function NewsroomPage() {
   const [creatingBulletin, setCreatingBulletin] = useState(false)
   const content = useQuery({
     queryKey: ['newsroom', view, page],
+    enabled: view !== 'boards',
     queryFn: async ({ signal }) => {
       const { data, error, response } = await api.GET('/api/content/{view}', {
         params: { path: { view }, query: { page } },
@@ -52,13 +55,13 @@ export function NewsroomPage() {
 
   return (
     <Stack gap="xl" className={classes.page}>
-      <PageHeader title="غرفة الأخبار" description="حرّر العواجل والموجز وشريط الأخبار." />
+      <PageHeader title="غرفة الأخبار" description="حرّر العواجل والموجز وشريط الأخبار ولوحات البرامج." />
 
       <Tabs
         value={view}
         variant="pills"
         onChange={(next) => {
-          if (next === 'urgent' || next === 'bulletins' || next === 'ticker') {
+          if (next === 'urgent' || next === 'bulletins' || next === 'ticker' || next === 'boards') {
             setView(next)
             setPage(0)
           }
@@ -69,7 +72,7 @@ export function NewsroomPage() {
           {Object.entries(views).map(([key, { label }]) => <Tabs.Tab key={key} value={key}>{label}</Tabs.Tab>)}
         </Tabs.List>
         <Tabs.Panel value={view} pt="lg">
-          {view === 'bulletins' && bulletinId ? (
+          {view === 'boards' ? <ProgrammeBoards /> : view === 'bulletins' && bulletinId ? (
             <BulletinEditor key={bulletinId} id={bulletinId} onBack={() => setBulletinId(null)} onSaved={(value) => {
               setBulletinId(value.id)
               void content.refetch()

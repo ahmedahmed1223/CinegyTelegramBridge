@@ -605,6 +605,116 @@ Describe 'Web channel: the pipe' {
         @(Get-TemplateBackupFiles -Path $script:WebSceneTestRegistry).Count | Should -Be 1
     }
 
+    It 'reviews catalogue edits and deletion against the same definition and active schedule used by Telegram' {
+        $script:WebDefinitionTestRegistry = Join-Path $TestDrive 'definition-catalogue.json'
+        Set-Content -LiteralPath $script:WebDefinitionTestRegistry -Value @'
+{"Evening":{"path":"C:/station/old.cintitle","layer":8,"description":"Before","category":"News","fields":[{"name":"Title","label":"Title","type":"Text","maxLength":90},"Guest"],"presets":[{"name":"Standard","values":["fixture sensitive value","Host"]}]}}
+'@
+        $script:WebDefinitionTestLive = $false
+        $script:WebDefinitionTestScheduled = $false
+        $script:WebDefinitionTestLinked = $false
+        Mock Get-TemplateRegistryFilePath { $script:WebDefinitionTestRegistry }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -eq 'EnableFullTemplateManagement' }
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Get-UpcomingScheduleEvents {
+            if ($script:WebDefinitionTestScheduled) { @{ TemplateKey = 'Evening' } }
+        }
+        Mock Get-ContentBoards {
+            if ($script:WebDefinitionTestLinked) { @{ TemplateKey = 'Evening' } }
+        }
+        Mock Add-AuditEntry {}
+        Mock Send-TelegramMessage {}
+        $definitionCall = {
+            param($payload)
+            $line = @{ op = 'air.templateDefinition'; args = $payload } | ConvertTo-Json -Depth 8 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line
+        }
+        $request = @{ actor = 4322; action = 'inspect'; key = 'Evening' }
+        ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'forbidden'
+        $request.actor = 4321
+        $loaded = & $definitionCall $request
+        $loaded | Should -Not -Match 'fixture sensitive value|C:/station/'
+        $original = ($loaded | ConvertFrom-Json).data.definition
+        $original.fields.name | Should -Be @('Title', 'Guest')
+        $request.revision = $original.revision
+        $request.action = 'review-edit'
+        $request.changes = @{ description = 'Evening news'; category = 'Programmes'; layer = 8
+            fields = @(@{ name = 'Title'; label = 'Headline'; required = $true; maxLength = 70 }, @{ name = 'Guest'; label = 'Guest' }) }
+        $request.changes.fields[1].name = 'Presenter'
+        ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_preset_fields'
+        $request.changes.fields[1].name = 'Guest'
+        $script:WebDefinitionTestScheduled = $true
+        $request.changes.layer = 11
+        ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_scheduled'
+        $request.changes.layer = 8
+        $preview = ((& $definitionCall $request) | ConvertFrom-Json).data.preview
+        $script:WebDefinitionTestScheduled = $false
+        $preview.after.description | Should -Be 'Evening news'
+        (Get-TemplateStore).Map['Evening'].Description | Should -Be 'Before'
+        $request.review = $preview.review
+        $request.action = 'edit'
+        # An edit made in the bot uses the same registry writer.
+        (Save-TemplateDefinitionChange -TemplateKey Evening -Action edit -Definition @{ path = 'C:/station/old.cintitle'; layer = 8; description = 'Bot edit'; fields = @(@{ name = 'Title'; type = 'Text'; maxLength = 90 }, 'Guest') }).Success | Should -BeTrue
+        ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_registry_stale'
+        $request.action = 'inspect'
+        $request.revision = ((& $definitionCall $request) | ConvertFrom-Json).data.definition.revision
+        Start-TemplateDefinitionPrompt -Action delete -TemplateIndex 0 -ChatId 4321 -UserId 4321
+        $olderReview = [string](Get-JsonProp (Get-PendingState -ChatId 4321) 'DefinitionNonce')
+        Start-TemplateDefinitionPrompt -Action delete -TemplateIndex 0 -ChatId 4321 -UserId 4321
+        $latestReview = [string](Get-JsonProp (Get-PendingState -ChatId 4321) 'DefinitionNonce')
+        $olderReview | Should -Not -BeNullOrEmpty
+        $latestReview | Should -Not -Be $olderReview
+        Confirm-TemplateDefinitionChange -ChatId 4321 -UserId 4321 -Nonce $olderReview
+        (Get-TemplateStore).Map.ContainsKey('Evening') | Should -BeTrue
+        (Get-JsonProp (Get-PendingState -ChatId 4321) 'DefinitionNonce') | Should -Be $latestReview
+        $request.action = 'review-edit'
+        $request.review = ((& $definitionCall $request) | ConvertFrom-Json).data.preview.review
+        $request.action = 'edit'
+        ((& $definitionCall $request) | ConvertFrom-Json).ok | Should -BeTrue
+        Confirm-TemplateDefinitionChange -ChatId 4321 -UserId 4321 -Nonce $latestReview
+        $shared = (Get-Content -LiteralPath $script:WebDefinitionTestRegistry -Raw | ConvertFrom-Json).Evening
+        $shared.description | Should -Be 'Evening news'
+        $shared.fields[0].type | Should -Be 'Text'
+        $shared.fields[0].required | Should -BeTrue
+        $shared.presets[0].values | Should -Be @('fixture sensitive value', 'Host')
+        $request.action = 'inspect'
+        $request.revision = ((& $definitionCall $request) | ConvertFrom-Json).data.definition.revision
+        $request.action = 'review-delete'
+        $request.review = ((& $definitionCall $request) | ConvertFrom-Json).data.preview.review
+        $request.action = 'delete'
+        $oldOnAir = $script:OnAir
+        $oldLibrary = $script:MojazLibrary
+        $oldSchedules = $script:MojazSchedules
+        try {
+            $script:OnAir = @{ 8 = @{ Key = 'Evening' } }
+            ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_live'
+            $script:OnAir.Clear()
+            $script:WebDefinitionTestScheduled = $true
+            ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_scheduled'
+            $script:WebDefinitionTestScheduled = $false
+            $script:WebDefinitionTestLinked = $true
+            ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_linked'
+            $script:WebDefinitionTestLinked = $false
+            $script:MojazSchedules = @(@{ Status = 'queued'; DesignKey = 'Evening' })
+            ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_scheduled'
+            $script:MojazSchedules = @()
+            $script:MojazLibrary = @{ Bulletins = @(@{ TemplateKey = 'Evening' }) }
+            ((& $definitionCall $request) | ConvertFrom-Json).error | Should -Be 'scene_definition_linked'
+            $script:MojazLibrary = $oldLibrary
+            $request.action = 'review-delete'
+            $request.review = ((& $definitionCall $request) | ConvertFrom-Json).data.preview.review
+            $request.action = 'delete'
+            ((& $definitionCall $request) | ConvertFrom-Json).ok | Should -BeTrue
+            (Get-TemplateStore).Map.ContainsKey('Evening') | Should -BeFalse
+        }
+        finally {
+            $script:OnAir = $oldOnAir
+            $script:MojazLibrary = $oldLibrary
+            $script:MojazSchedules = $oldSchedules
+        }
+    }
+
     It 'rehearses a selected template with sample values only on the reviewed isolated device' {
         $templateFile = Join-Path $TestDrive 'web-rehearsal.cintitle'
         Set-Content -LiteralPath $templateFile -Value '<Scene />'

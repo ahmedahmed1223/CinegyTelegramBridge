@@ -13,7 +13,7 @@ import {
   TextInput,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { IconFlask, IconPlayerPlay, IconPlus, IconRefresh, IconSearch } from '@tabler/icons-react'
+import { IconFlask, IconPlayerPlay, IconPlus, IconRefresh, IconSearch, IconSettings } from '@tabler/icons-react'
 import { useState } from 'react'
 import { getTemplates, type TemplateDto } from '../../api/air'
 import { messageFor } from '../../api/messages'
@@ -22,12 +22,14 @@ import { PageHeader } from '../../components/PageHeader'
 import { ShowModal } from './ShowModal'
 import { TemplateRehearsal } from './TemplateRehearsal'
 import { TemplateRegistration } from './TemplateRegistration'
+import { TemplateDefinitionEditor } from './TemplateDefinitionEditor'
 
 export function TemplatesPage() {
   const [search, setSearch] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDto | null>(null)
   const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
   const [registering, setRegistering] = useState(false)
+  const [managingKey, setManagingKey] = useState<string | null>(null)
   const session = useSession()
   const canRehearse = isAdmin(session.data)
   const { data: templates, error, isLoading, refetch, isFetching } = useQuery({
@@ -115,6 +117,10 @@ export function TemplatesPage() {
                     <Badge color="blue" variant="light" size="sm" radius="sm" style={{ flexShrink: 0 }}>
                       طبقة {template.layer}
                     </Badge>
+                    {canRehearse && <ActionIcon variant="subtle" color="gray" style={{ flexShrink: 0 }}
+                      aria-label={`إدارة قالب ${template.name}`} onClick={() => setManagingKey(template.key)}>
+                      <IconSettings size={18} />
+                    </ActionIcon>}
                   </Group>
 
                   <Group gap={6} mt={4}>
@@ -148,6 +154,7 @@ export function TemplatesPage() {
 
       {selectedTemplate && <ShowModal template={selectedTemplate} onClose={() => setSelectedTemplate(null)} />}
       {trialTemplate && <TemplateRehearsal template={trialTemplate} onClose={() => setTrialTemplate(null)} />}
+      {managingKey && <TemplateDefinitionEditor templateKey={managingKey} onClose={() => setManagingKey(null)} />}
     </Stack>
   )
 }

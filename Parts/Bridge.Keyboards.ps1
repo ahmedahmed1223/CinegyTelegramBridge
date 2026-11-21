@@ -2234,8 +2234,9 @@ function Get-TemplateAdminDetailKeyboard {
 }
 
 function Get-TemplateDefinitionReviewKeyboard {
+    param([Parameter(Mandatory)][string]$Nonce)
     return @{ inline_keyboard = @(
-        , @( (New-Button (T 'common.saveChange') 'tadm:confirm' -Style success), (New-Button (T 'common.cancel') 'menu:templatesadmin') )
+        , @( (New-Button (T 'common.saveChange') "tadm:confirm:$Nonce" -Style success), (New-Button (T 'common.cancel') 'menu:templatesadmin') )
     ) }
 }
 

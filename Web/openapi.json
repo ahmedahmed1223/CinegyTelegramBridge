@@ -1448,6 +1448,95 @@
         }
       }
     },
+    "/api/air/templates/{key}/definition": {
+      "post": {
+        "tags": [
+          "Air"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateDefinitionCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateDefinitionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/air/hide/{layer}": {
       "post": {
         "tags": [
@@ -5815,6 +5904,249 @@
           },
           "preview": {
             "$ref": "#/components/schemas/TemplateCataloguePreview"
+          }
+        }
+      },
+      "TemplateDefinitionChanges": {
+        "required": [
+          "description",
+          "category",
+          "layer",
+          "fields"
+        ],
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateDefinitionFieldChange"
+            }
+          }
+        },
+        "default": null,
+        "nullable": true
+      },
+      "TemplateDefinitionCommand": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string",
+            "default": ""
+          },
+          "review": {
+            "type": "string",
+            "default": ""
+          },
+          "changes": {
+            "$ref": "#/components/schemas/TemplateDefinitionChanges"
+          }
+        }
+      },
+      "TemplateDefinitionField": {
+        "required": [
+          "name",
+          "label",
+          "type",
+          "maxLength",
+          "required",
+          "sensitive"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "maxLength": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "sensitive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TemplateDefinitionFieldChange": {
+        "required": [
+          "name",
+          "label",
+          "maxLength",
+          "required",
+          "sensitive"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "maxLength": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "sensitive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TemplateDefinitionPreview": {
+        "required": [
+          "review",
+          "before",
+          "after"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          },
+          "before": {
+            "$ref": "#/components/schemas/TemplateDefinitionView2"
+          },
+          "after": {
+            "$ref": "#/components/schemas/TemplateDefinitionView"
+          }
+        },
+        "nullable": true
+      },
+      "TemplateDefinitionResult": {
+        "required": [
+          "definition",
+          "preview"
+        ],
+        "type": "object",
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/TemplateDefinitionView"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TemplateDefinitionPreview"
+          }
+        }
+      },
+      "TemplateDefinitionView": {
+        "required": [
+          "key",
+          "revision",
+          "file",
+          "layer",
+          "device",
+          "description",
+          "category",
+          "presetCount",
+          "fields"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "device": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "presetCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateDefinitionField"
+            }
+          }
+        },
+        "nullable": true
+      },
+      "TemplateDefinitionView2": {
+        "required": [
+          "key",
+          "revision",
+          "file",
+          "layer",
+          "device",
+          "description",
+          "category",
+          "presetCount",
+          "fields"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "device": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "presetCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateDefinitionField"
+            }
           }
         }
       },

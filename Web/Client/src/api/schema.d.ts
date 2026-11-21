@@ -1692,6 +1692,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/air/templates/{key}/definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateDefinitionCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateDefinitionResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/air/hide/{layer}": {
         parameters: {
             query?: never;
@@ -4633,6 +4719,74 @@ export interface components {
             /** Format: int32 */
             pageCount: number | null;
             preview: components["schemas"]["TemplateCataloguePreview"];
+        };
+        /** @default null */
+        TemplateDefinitionChanges: {
+            description: string;
+            category: string;
+            /** Format: int32 */
+            layer: number;
+            fields: components["schemas"]["TemplateDefinitionFieldChange"][];
+        } | null;
+        TemplateDefinitionCommand: {
+            action: string;
+            /** @default  */
+            revision: string;
+            /** @default  */
+            review: string;
+            changes?: components["schemas"]["TemplateDefinitionChanges"];
+        };
+        TemplateDefinitionField: {
+            name: string;
+            label: string;
+            type: string;
+            /** Format: int32 */
+            maxLength: number;
+            required: boolean;
+            sensitive: boolean;
+        };
+        TemplateDefinitionFieldChange: {
+            name: string;
+            label: string;
+            /** Format: int32 */
+            maxLength: number;
+            required: boolean;
+            sensitive: boolean;
+        };
+        TemplateDefinitionPreview: {
+            review: string;
+            before: components["schemas"]["TemplateDefinitionView2"];
+            after: components["schemas"]["TemplateDefinitionView"];
+        } | null;
+        TemplateDefinitionResult: {
+            definition: components["schemas"]["TemplateDefinitionView"];
+            preview: components["schemas"]["TemplateDefinitionPreview"];
+        };
+        TemplateDefinitionView: {
+            key: string;
+            revision: string;
+            file: string;
+            /** Format: int32 */
+            layer: number;
+            device: string;
+            description: string;
+            category: string;
+            /** Format: int32 */
+            presetCount: number;
+            fields: components["schemas"]["TemplateDefinitionField"][];
+        } | null;
+        TemplateDefinitionView2: {
+            key: string;
+            revision: string;
+            file: string;
+            /** Format: int32 */
+            layer: number;
+            device: string;
+            description: string;
+            category: string;
+            /** Format: int32 */
+            presetCount: number;
+            fields: components["schemas"]["TemplateDefinitionField"][];
         };
         TemplateDto: {
             key: string;

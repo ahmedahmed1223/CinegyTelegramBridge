@@ -74,6 +74,15 @@ function Show-InvalidTemplatesScreen {
     Send-TelegramPagedText -ChatId $ChatId -Text ($lines -join "`n") -ReplyMarkup @{ inline_keyboard = $rows } -ParseMode HTML
 }
 
+function Set-TemplateDefinitionReviewState {
+    param([long]$ChatId, [hashtable]$State)
+    $nonce = [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $State.Mode = 'template_definition_review'
+    $State.DefinitionNonce = $nonce
+    Set-PendingState -ChatId $ChatId -State $State | Out-Null
+    return $nonce
+}
+
 function Start-TemplateDefinitionPrompt {
     param([Parameter(Mandatory)][ValidateSet('create', 'edit', 'delete')][string]$Action, [int]$TemplateIndex = -1, [Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
     if (-not (Get-Setting 'EnableFullTemplateManagement')) {
@@ -82,13 +91,14 @@ function Start-TemplateDefinitionPrompt {
     }
     $template = if ($TemplateIndex -ge 0) { Get-TemplateByIndex -Index $TemplateIndex } else { $null }
     if ($Action -ne 'create' -and -not $template) { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.templateGone') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard); return }
+    $revision = if ($template) { [string](Get-JsonProp $template 'PresetRevision') } else { '' }
     if ($Action -eq 'delete') {
-        Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_review'; Action='delete'; TemplateKey=$template.Key; Definition=@{}; UserId=$UserId }
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.deleteReview' $($template.Key)) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+        $nonce = Set-TemplateDefinitionReviewState -ChatId $ChatId -State @{ Action='delete'; TemplateKey=$template.Key; Definition=@{}; UserId=$UserId; DefinitionRevision=$revision }
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.deleteReview' $($template.Key)) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard -Nonce $nonce)
         return
     }
     $example = if ($Action -eq 'create') { '{"key":"new-template","path":"titles/new.cintitle","layer":4,"fields":["Headline.Text"]}' } else { "{`"path`":`"$($template.Path)`",`"layer`":$($template.Layer),`"fields`":[]}" }
-    Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_json'; Action=$Action; TemplateKey=if ($template) { $template.Key } else { '' }; UserId=$UserId }
+    Set-PendingState -ChatId $ChatId -State @{ Mode='template_definition_json'; Action=$Action; TemplateKey=if ($template) { $template.Key } else { '' }; UserId=$UserId; DefinitionRevision=$revision }
     Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.sendJson' $example) -ReplyMarkup (Get-CancelKeyboard)
 }
 
@@ -258,10 +268,10 @@ function Complete-TemplateCreateWizardStep {
                 if ($parts[0]) { $definition['description'] = $parts[0] }
                 if ($parts.Count -gt 1 -and $parts[1]) { $definition['category'] = $parts[1] }
             }
-            $state.Mode = 'template_definition_review'; $state.Action = 'create'
+            $state.Action = 'create'
             $state.TemplateKey = [string]$definition['key']; $state.Definition = $definition
-            Set-PendingState -ChatId $ChatId -State $state
-            Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateWizardReviewText -Definition $definition) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+            $nonce = Set-TemplateDefinitionReviewState -ChatId $ChatId -State $state
+            Send-TelegramMessage -ChatId $ChatId -Text (Get-TemplateWizardReviewText -Definition $definition) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard -Nonce $nonce)
         }
     }
 }
@@ -294,19 +304,32 @@ function Complete-TemplateDefinitionJson {
     $key = [string]$state.TemplateKey
     if ($state.Action -eq 'create') { $key = [string](Get-JsonProp $definition 'key'); $definition.Remove('key') }
     if ([string]::IsNullOrWhiteSpace($key)) { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.needKey') -ReplyMarkup (Get-CancelKeyboard); return }
-    $state.Mode = 'template_definition_review'; $state.TemplateKey = $key; $state.Definition = $definition
-    Set-PendingState -ChatId $ChatId -State $state
+    $state.TemplateKey = $key; $state.Definition = $definition
+    $nonce = Set-TemplateDefinitionReviewState -ChatId $ChatId -State $state
     $existing = if ($state.Action -eq 'edit') { Get-JsonProp (Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw | ConvertFrom-Json) $key } else { $null }
     $comparison = Get-TemplateDefinitionComparisonText -Existing $existing -Definition $definition
-    Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.reviewChange' $($state.Action) $key $($definition.path) $($definition.layer) $comparison) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard)
+    Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.reviewChange' $($state.Action) $key $($definition.path) $($definition.layer) $comparison) -ReplyMarkup (Get-TemplateDefinitionReviewKeyboard -Nonce $nonce)
 }
 
 function Confirm-TemplateDefinitionChange {
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [Parameter(Mandatory)][string]$Nonce)
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or $state.Mode -ne 'template_definition_review' -or [long]$state.UserId -ne $UserId) { return }
+    if ($Nonce -cne [string](Get-JsonProp $state 'DefinitionNonce')) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tpl.definitionChanged')
+        return
+    }
     Clear-PendingState -ChatId $ChatId
-    $result = Save-TemplateDefinitionChange -TemplateKey ([string]$state.TemplateKey) -Action ([string]$state.Action) -Definition ([hashtable]$state.Definition)
+    if (-not (Get-Setting 'EnableFullTemplateManagement')) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.fullControlOff') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $revision = [string](Get-JsonProp $state 'DefinitionRevision')
+    if ($state.Action -ne 'create' -and -not $revision) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'tpl.definitionChanged') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard)
+        return
+    }
+    $result = Save-TemplateDefinitionChange -TemplateKey ([string]$state.TemplateKey) -Action ([string]$state.Action) -Definition ([hashtable]$state.Definition) -ExpectedRevision $revision
     if ($result.Success) { Add-AuditEntry (T 'atpl.savedAudit' $($state.Action) $($state.TemplateKey) $(Format-UserAuditActor -UserId $UserId)); Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.savedWithBackup') -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
     else { Send-TelegramMessage -ChatId $ChatId -Text (T 'atpl.saveFailed' $($result.Error)) -ReplyMarkup (Get-TemplateAdminCatalogueKeyboard) }
 }

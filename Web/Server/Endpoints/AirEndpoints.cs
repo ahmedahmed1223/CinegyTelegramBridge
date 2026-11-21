@@ -45,6 +45,11 @@ public static class AirEndpoints
             .Produces<TemplateCatalogueResult>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        api.MapPost("/templates/{key}/definition", TemplateDefinition)
+            .RequireAuthorization(AccountEndpoints.AdminPolicy)
+            .Produces<TemplateDefinitionResult>()
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
+            .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
 
         api.MapPost("/hide/{layer:int}", Hide)
             .Produces(StatusCodes.Status204NoContent)
@@ -130,6 +135,26 @@ public static class AirEndpoints
             _ => AirResult(reply)
         };
         return TypedResults.Ok(reply.Data.Deserialize<TemplateCatalogueResult>(JsonDefaults.Options));
+    }
+
+    private static async Task<IResult> TemplateDefinition(string key, TemplateDefinitionCommand request, IBridgeChannel bridge, HttpContext http)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        var reply = await bridge.SendAsync("air.templateDefinition", new
+        {
+            actor = http.User.UserId(), key, request.Action, request.Revision, request.Review, request.Changes
+        }, http.RequestAborted);
+        if (reply.IsUnavailable) return ApiErrors.BridgeUnavailable();
+        if (!reply.Ok) return reply.Error switch
+        {
+            "scene_definition_invalid" => ApiErrors.Of(400, reply.Error),
+            "scene_not_found" => ApiErrors.Of(404, reply.Error),
+            "scene_registry_stale" or "scene_definition_live" or "scene_definition_scheduled" or
+                "scene_definition_linked" or "scene_definition_alias" or "scene_definition_preset_fields" => ApiErrors.Of(409, reply.Error),
+            "scene_registry_failed" => ApiErrors.Of(503, reply.Error),
+            _ => AirResult(reply)
+        };
+        return TypedResults.Ok(reply.Data.Deserialize<TemplateDefinitionResult>(JsonDefaults.Options));
     }
 
     private static IResult PresetResult(BridgeReply reply, HttpContext http)

@@ -58,6 +58,10 @@ function Add-BridgeTextAir {
     $catalogue['tpl.neverAired'] = @{ ar = 'لم يُبث بعد'; en = 'never aired yet' }
     $catalogue['tpl.cannotDeleteOnAir'] = @{ ar = 'لا يمكن حذف قالب على الهواء.'; en = 'A template that is on air cannot be deleted.' }
     $catalogue['tpl.cannotDeleteScheduled'] = @{ ar = 'لا يمكن حذف قالب مرتبط بجدولة قادمة.'; en = 'A template tied to an upcoming schedule cannot be deleted.' }
+    $catalogue['tpl.cannotMoveScheduled'] = @{ ar = 'لا يمكن تغيير طبقة قالب مرتبط بجدولة قادمة.'; en = 'The layer of a scheduled template cannot be changed.' }
+    $catalogue['tpl.cannotDeleteLinked'] = @{ ar = 'لا يمكن حذف قالب تستخدمه لوحة برنامج أو موجز.'; en = 'A programme board or bulletin still uses this template.' }
+    $catalogue['tpl.cannotDeleteAlias'] = @{ ar = 'تستخدم قوالب أخرى جهاز الطبقة المعرّف في هذا القالب.'; en = 'Other templates use the layer device defined by this template.' }
+    $catalogue['tpl.definitionChanged'] = @{ ar = 'تغيّر تعريف القالب منذ المراجعة. افتح تعريفه الحالي وأعد المحاولة.'; en = 'The template changed after review. Open its current definition and try again.' }
     $catalogue['tpl.pathEmpty'] = @{ ar = 'مسار القالب فارغ.'; en = 'The template path is empty.' }
     $catalogue['tpl.layerPositive'] = @{ ar = 'رقم الطبقة يجب أن يكون موجبًا.'; en = 'The layer number must be positive.' }
     $catalogue['tpl.pathInsideProject'] = @{ ar = 'مسار القالب يجب أن يكون داخل مجلد المشروع.'; en = 'The template path must sit inside the project folder.' }

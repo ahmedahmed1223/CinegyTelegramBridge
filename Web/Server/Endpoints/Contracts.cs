@@ -22,6 +22,14 @@ public sealed record TemplateCataloguePreview(string Review, string Key, string 
     string Category, string[] Fields, string[] SharedTemplates);
 public sealed record TemplateCatalogueResult(string? Folder, TemplateSceneEntry[]? Entries, int? Page, int? PageCount,
     TemplateCataloguePreview? Preview);
+public sealed record TemplateDefinitionFieldChange(string Name, string Label, int MaxLength, bool Required, bool Sensitive);
+public sealed record TemplateDefinitionField(string Name, string Label, string Type, int MaxLength, bool Required, bool Sensitive);
+public sealed record TemplateDefinitionChanges(string Description, string Category, int Layer, TemplateDefinitionFieldChange[] Fields);
+public sealed record TemplateDefinitionCommand(string Action, string Revision = "", string Review = "", TemplateDefinitionChanges? Changes = null);
+public sealed record TemplateDefinitionView(string Key, string Revision, string File, int Layer, string Device,
+    string Description, string Category, int PresetCount, TemplateDefinitionField[] Fields);
+public sealed record TemplateDefinitionPreview(string Review, TemplateDefinitionView Before, TemplateDefinitionView? After);
+public sealed record TemplateDefinitionResult(TemplateDefinitionView? Definition, TemplateDefinitionPreview? Preview);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
 public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);

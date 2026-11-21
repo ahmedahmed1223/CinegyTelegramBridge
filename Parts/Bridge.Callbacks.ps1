@@ -2400,7 +2400,8 @@ function Invoke-CallbackQuery {
             elseif (Test-CallbackAdmin -ChatId $chatId -UserId $userId) {
                 if ($token -eq 'create') { Start-TemplateCreateWizard -ChatId $chatId -UserId $userId }
                 elseif ($token -eq 'createjson') { Start-TemplateDefinitionPrompt -Action create -ChatId $chatId -UserId $userId }
-                elseif ($token -eq 'confirm') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId }
+                elseif ($token -match '^confirm:([0-9a-f]{12})$') { Confirm-TemplateDefinitionChange -ChatId $chatId -UserId $userId -Nonce $Matches[1] }
+                elseif ($token -eq 'confirm') { Send-TelegramMessage -ChatId $chatId -Text (T 'tpl.definitionChanged') }
                 elseif ($token -eq 'testconfirm') { Confirm-TemplateTest -ChatId $chatId -UserId $userId }
                 elseif ($token -match '^test:(\d+)$') { Start-TemplateTestReview -TemplateIndex ([int]$Matches[1]) -ChatId $chatId -UserId $userId }
                 elseif ($token -match '^(edit|delete):(\d+)$') { Start-TemplateDefinitionPrompt -Action $Matches[1] -TemplateIndex ([int]$Matches[2]) -ChatId $chatId -UserId $userId }

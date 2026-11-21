@@ -576,6 +576,14 @@ Describe 'Template definition storage' {
         $result.Error | Should -Match 'على الهواء'
     }
 
+    It 'keeps a named device while another template shares its numeric layer' {
+        Set-Content -LiteralPath $script:DefinitionRegistryPathForTest -Value @'
+{"logo":{"path":"C:/station/logo.cintitle","layer":9,"device":"gfx_logo"},"status":{"path":"C:/station/status.cintitle","layer":9}}
+'@
+        (Save-TemplateDefinitionChange -TemplateKey logo -Action delete).Code | Should -Be 'scene_definition_alias'
+        (Get-TemplateStore).Map.ContainsKey('logo') | Should -BeTrue
+    }
+
     It 'does not register a relative scene outside the configured scene directory' {
         $script:TemplateDefinitionSceneRoot = Join-Path $TestDrive 'scenes'
         Mock Get-Setting { $script:TemplateDefinitionSceneRoot } -ParameterFilter { $Name -eq 'TemplateBasePath' }

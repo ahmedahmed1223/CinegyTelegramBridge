@@ -595,40 +595,94 @@ function Get-KnownLayers {
     return $layers
 }
 
+function Get-TemplateDefinitionBlocker {
+    param([string]$TemplateKey, [switch]$Delete, [switch]$CheckSchedules)
+    if (@($script:OnAir.Values | Where-Object { [string](Get-JsonProp $_ 'Key') -in $TemplateKey, "[TEST] $TemplateKey" }).Count -gt 0) {
+        return 'scene_definition_live'
+    }
+    if ($Delete -or $CheckSchedules) {
+        if (@(Get-UpcomingScheduleEvents | Where-Object { [string](Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0 -or
+            @($script:MojazSchedules | Where-Object {
+                (Get-JsonProp $_ 'Status') -in 'scheduled', 'queued', 'running' -and (Get-MojazRunDesignKey -Playback $_) -eq $TemplateKey
+            }).Count -gt 0) { return 'scene_definition_scheduled' }
+    }
+    if ($Delete) {
+        if (@(Get-ContentBoards | Where-Object { (Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0 -or
+            @(Get-JsonProp $script:MojazLibrary 'Bulletins' | Where-Object {
+                $_ -and (Get-MojazBulletinDesignKey -Bulletin $_) -eq $TemplateKey
+            }).Count -gt 0) { return 'scene_definition_linked' }
+
+        $registered = (Get-TemplateStore).Map
+        $item = Get-JsonProp $registered $TemplateKey
+        $device = [string](Get-JsonProp $item 'Device')
+        if ($device) {
+            $layer = [int](Get-JsonProp $item 'Layer')
+            $peers = @($registered.Values | Where-Object {
+                [string](Get-JsonProp $_ 'Key') -ne $TemplateKey -and [int](Get-JsonProp $_ 'Layer') -eq $layer
+            })
+            $otherAliases = @($peers | ForEach-Object { [string](Get-JsonProp $_ 'Device') } | Where-Object { $_ } | Sort-Object -Unique)
+            if ($peers.Count -gt 0 -and ($otherAliases.Count -ne 1 -or $otherAliases[0] -ne $device)) {
+                return 'scene_definition_alias'
+            }
+        }
+    }
+    return ''
+}
+
 function Save-TemplateDefinitionChange {
     param(
         [Parameter(Mandatory)][string]$TemplateKey,
         [Parameter(Mandatory)][ValidateSet('edit', 'create', 'delete')][string]$Action,
-        [hashtable]$Definition = @{}
+        [hashtable]$Definition = @{},
+        [string]$ExpectedRevision = ''
     )
     $path = Get-TemplateRegistryFilePath
     try {
         $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         $existing = Get-JsonProp $raw $TemplateKey
+        if ($ExpectedRevision -and $ExpectedRevision -cne (Get-TemplatePresetRevision -TemplateKey $TemplateKey -Entry $existing)) {
+            return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = (T 'tpl.definitionChanged'); BackupPath = '' }
+        }
         if ($Action -eq 'create' -and $existing) { throw (T 'tpl.keyExists' $TemplateKey) }
         if ($Action -ne 'create' -and -not $existing) { throw (T 'tpl.notFound' $TemplateKey) }
+        $movesLayer = $Action -eq 'edit' -and $Definition.ContainsKey('layer') -and
+            [string]$Definition['layer'] -ne [string](Get-JsonProp $existing 'layer')
+        if ($Action -eq 'delete' -or ($Action -eq 'edit' -and ($ExpectedRevision -or $movesLayer))) {
+            $blocker = Get-TemplateDefinitionBlocker -TemplateKey $TemplateKey -Delete:($Action -eq 'delete') -CheckSchedules:$movesLayer
+            if ($blocker) {
+                $key = switch ($blocker) {
+                    'scene_definition_live' { 'tpl.cannotDeleteOnAir' }
+                    'scene_definition_scheduled' { if ($movesLayer) { 'tpl.cannotMoveScheduled' } else { 'tpl.cannotDeleteScheduled' } }
+                    'scene_definition_linked' { 'tpl.cannotDeleteLinked' }
+                    'scene_definition_alias' { 'tpl.cannotDeleteAlias' }
+                }
+                return [pscustomobject]@{ Success = $false; Code = $blocker; Error = (T $key); BackupPath = '' }
+            }
+        }
         if ($Action -eq 'delete') {
-            if (@($script:OnAir.Values | Where-Object { [string](Get-JsonProp $_ 'Key') -eq $TemplateKey }).Count -gt 0) { throw (T 'tpl.cannotDeleteOnAir') }
-            if (@(Get-UpcomingScheduleEvents | Where-Object { [string](Get-JsonProp $_ 'TemplateKey') -eq $TemplateKey }).Count -gt 0) { throw (T 'tpl.cannotDeleteScheduled') }
             $raw.PSObject.Properties.Remove($TemplateKey)
         }
         else {
-            $templatePath = [string](Get-JsonProp $Definition 'path')
             $layer = 0
-            if ([string]::IsNullOrWhiteSpace($templatePath)) { throw (T 'tpl.pathEmpty') }
-            if (-not [int]::TryParse([string](Get-JsonProp $Definition 'layer'), [ref]$layer) -or $layer -le 0) { throw (T 'tpl.layerPositive') }
-            $expanded = [Environment]::ExpandEnvironmentVariables($templatePath.Trim())
-            if ([IO.Path]::GetExtension($expanded) -ne '.cintitle') { throw (T 'tpl.notCintitle' $TemplateKey) }
-            if (-not [IO.Path]::IsPathFullyQualified($expanded)) {
-                if ([IO.Path]::IsPathRooted($expanded)) { throw (T 'tpl.pathInsideProject') }
-                $base = [Environment]::ExpandEnvironmentVariables([string](Get-Setting 'TemplateBasePath')).Trim()
-                # Preserve edits to older definitions that stored a project-relative path.
-                if (-not [IO.Path]::IsPathFullyQualified($base)) { $base = $scriptRoot }
-                $root = [IO.Path]::GetFullPath($base).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-                $resolved = [IO.Path]::GetFullPath($expanded, $root)
-                if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw (T 'tpl.pathInsideProject') }
+            if ($Action -eq 'create' -or $Definition.ContainsKey('layer')) {
+                if (-not [int]::TryParse([string](Get-JsonProp $Definition 'layer'), [ref]$layer) -or $layer -le 0) { throw (T 'tpl.layerPositive') }
             }
-            $fields = @(Get-JsonProp $Definition 'fields')
+            if ($Action -eq 'create' -or $Definition.ContainsKey('path')) {
+                $templatePath = [string](Get-JsonProp $Definition 'path')
+                if ([string]::IsNullOrWhiteSpace($templatePath)) { throw (T 'tpl.pathEmpty') }
+                $expanded = [Environment]::ExpandEnvironmentVariables($templatePath.Trim())
+                if ([IO.Path]::GetExtension($expanded) -ne '.cintitle') { throw (T 'tpl.notCintitle' $TemplateKey) }
+                if (-not [IO.Path]::IsPathFullyQualified($expanded)) {
+                    if ([IO.Path]::IsPathRooted($expanded)) { throw (T 'tpl.pathInsideProject') }
+                    $base = [Environment]::ExpandEnvironmentVariables([string](Get-Setting 'TemplateBasePath')).Trim()
+                    # Preserve edits to older definitions that stored a project-relative path.
+                    if (-not [IO.Path]::IsPathFullyQualified($base)) { $base = $scriptRoot }
+                    $root = [IO.Path]::GetFullPath($base).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+                    $resolved = [IO.Path]::GetFullPath($expanded, $root)
+                    if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw (T 'tpl.pathInsideProject') }
+                }
+            }
+            $fields = @(Get-JsonProp $Definition 'fields' | Where-Object { $null -ne $_ })
             foreach ($field in $fields) {
                 $fieldName = if ($field -is [string]) { $field } else { [string](Get-JsonProp $field 'name') }
                 if ([string]::IsNullOrWhiteSpace([string]$fieldName)) { throw (T 'tpl.fieldNoName') }

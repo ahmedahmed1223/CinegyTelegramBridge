@@ -28,6 +28,7 @@ $script:WebSceneRequest = $null
 $script:WebUrgentManualReviews = @{}
 $script:WebTemplateRehearsalReviews = @{}
 $script:WebTemplateCatalogueReviews = @{}
+$script:WebTemplateManagementReviews = @{}
 $script:WebProgrammeBoardAirReviews = @{}
 $script:WebBulletinPlaybackReviews = @{}
 $script:WebTickerTxtModule = Join-Path $PSScriptRoot '..\Modules\BridgeNewsTicker.psm1'
@@ -354,6 +355,7 @@ function Invoke-WebChannelOperation {
         'account.revoke' { return Revoke-WebOnlyAccount -Arguments $arguments }
         'air.templates' { return Get-WebTemplates }
         'air.templateCatalogue' { return Start-WebSceneRequest -Arguments $arguments -Entry $Entry }
+        'air.templateDefinition' { return Invoke-WebTemplateDefinition -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.presets' { return Get-WebTemplatePresets -Arguments $arguments }
         'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
         'air.rehearsal' { return Invoke-WebTemplateRehearsal -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -905,6 +907,134 @@ function Complete-WebTemplateRegistration {
     }
     if (-not $written.Success) { return @{ ok = $false; error = 'scene_registry_failed' } }
     Add-AuditEntry (T 'atpl.savedAudit' 'create' $key (Format-UserAuditActor -UserId $actor))
+    return @{ ok = $true; data = @{} }
+}
+
+function Get-WebTemplateDefinitionView {
+    param([string]$Key, $Entry, [string]$Revision)
+    $fields = @(foreach ($field in @(Get-JsonProp $Entry 'fields' | Where-Object { $null -ne $_ })) {
+        $name = if ($field -is [string]) { $field } else { [string](Get-JsonProp $field 'name') }
+        $limit = 0
+        [int]::TryParse([string](Get-JsonProp $field 'maxLength'), [ref]$limit) | Out-Null
+        @{
+            name = $name; label = [string](Get-JsonProp $field 'label'); type = [string](Get-JsonProp $field 'type')
+            required = (Get-JsonProp $field 'required') -eq $true; sensitive = (Get-JsonProp $field 'sensitive') -eq $true
+            maxLength = $limit
+        }
+    })
+    $layer = 0
+    [int]::TryParse([string](Get-JsonProp $Entry 'layer'), [ref]$layer) | Out-Null
+    return @{
+        key = $Key; revision = $Revision; file = [IO.Path]::GetFileName([string](Get-JsonProp $Entry 'path'))
+        layer = $layer; device = [string](Get-JsonProp $Entry 'device')
+        description = [string](Get-JsonProp $Entry 'description'); category = [string](Get-JsonProp $Entry 'category')
+        presetCount = @(Get-JsonProp $Entry 'presets' | Where-Object { $null -ne $_ }).Count; fields = $fields
+    }
+}
+
+function ConvertTo-WebTemplateDefinitionChanges {
+    param($Requested, $Current, $Existing)
+    $invalid = @{ error = 'scene_definition_invalid' }
+    if ($Requested -isnot [System.Collections.IDictionary]) { return $invalid }
+    $description = ([string](Get-JsonProp $Requested 'description')).Trim()
+    $category = ([string](Get-JsonProp $Requested 'category')).Trim()
+    $layer = 0
+    if ($description.Length -gt [math]::Max(120, $Current.description.Length) -or
+        $category.Length -gt [math]::Max(60, $Current.category.Length) -or
+        -not [int]::TryParse([string](Get-JsonProp $Requested 'layer'), [ref]$layer) -or
+        ($layer -ne $Current.layer -and ($layer -le 0 -or $Current.device))) { return $invalid }
+
+    $fields = @(Get-JsonProp $Requested 'fields' | Where-Object { $null -ne $_ })
+    if ($fields.Count -gt [math]::Max(40, $Current.fields.Count)) { return $invalid }
+    $names = @($fields | ForEach-Object { ([string](Get-JsonProp $_ 'name')).Trim() })
+    if (@($names | Sort-Object -Unique).Count -ne $names.Count) { return $invalid }
+    if ($Current.presetCount -gt 0 -and ($names -join "`n") -cne (@($Current.fields | ForEach-Object { $_.name }) -join "`n")) {
+        return @{ error = 'scene_definition_preset_fields' }
+    }
+
+    $oldByName = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    foreach ($field in @(Get-JsonProp $Existing 'fields' | Where-Object { $null -ne $_ })) {
+        $oldName = if ($field -is [string]) { $field } else { [string](Get-JsonProp $field 'name') }
+        if ($oldName) { $oldByName[$oldName] = $field }
+    }
+    $updatedFields = @(for ($index = 0; $index -lt $fields.Count; $index++) {
+        $field = $fields[$index]
+        $name = $names[$index]
+        $label = ([string](Get-JsonProp $field 'label')).Trim()
+        $limit = 0
+        $rawLimit = Get-JsonProp $field 'maxLength'
+        if (-not $name -or $name -match '[\r\n]' -or ($name.Length -gt 100 -and -not $oldByName.ContainsKey($name)) -or
+            $label.Length -gt 120 -or ($null -ne $rawLimit -and -not [int]::TryParse([string]$rawLimit, [ref]$limit)) -or $limit -lt 0) { return $invalid }
+        # Keep field types and any other properties supplied by the registry.
+        $updated = [ordered]@{ name = $name }
+        if ($oldByName.ContainsKey($name) -and $oldByName[$name] -isnot [string]) {
+            foreach ($property in $oldByName[$name].PSObject.Properties) { $updated[$property.Name] = $property.Value }
+        }
+        $updated['label'] = $label
+        $updated['maxLength'] = $limit
+        $updated['required'] = (Get-JsonProp $field 'required') -eq $true
+        $updated['sensitive'] = (Get-JsonProp $field 'sensitive') -eq $true
+        $updated
+    })
+    $changes = @{ description = $description; category = $category; fields = $updatedFields }
+    if ($layer -ne $Current.layer) { $changes.layer = $layer }
+    $view = @{
+        path = Get-JsonProp $Existing 'path'; device = $Current.device; layer = $layer
+        description = $description; category = $category; fields = $updatedFields; presets = Get-JsonProp $Existing 'presets'
+    }
+    return @{ changes = $changes; after = (Get-WebTemplateDefinitionView -Key $Current.key -Entry $view -Revision $Current.revision) }
+}
+
+function Invoke-WebTemplateDefinition {
+    param([System.Collections.IDictionary]$Arguments, [long]$Deadline)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-WebSceneCatalogueAccess -Actor $actor)) { return @{ ok = $false; error = 'forbidden' } }
+    $key = [string](Get-JsonProp $Arguments 'key')
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if (-not $key -or $action -cnotin 'inspect', 'review-edit', 'edit', 'review-delete', 'delete') {
+        return @{ ok = $false; error = 'scene_definition_invalid' }
+    }
+    try {
+        $raw = Get-Content -LiteralPath (Get-TemplateRegistryFilePath) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $item = Get-JsonProp $raw $key
+    }
+    catch { return @{ ok = $false; error = 'scene_registry_failed' } }
+    if (-not $item) { return @{ ok = $false; error = 'scene_not_found' } }
+    $revision = Get-TemplatePresetRevision -TemplateKey $key -Entry $item
+    $definition = Get-WebTemplateDefinitionView -Key $key -Entry $item -Revision $revision
+    if ($action -ceq 'inspect') { return @{ ok = $true; data = @{ definition = $definition } } }
+    $stale = @{ ok = $false; error = 'scene_registry_stale' }
+    if ([string](Get-JsonProp $Arguments 'revision') -cne $revision) { return $stale }
+    $mode = if ($action -clike '*delete') { 'delete' } else { 'edit' }
+    $blocker = Get-TemplateDefinitionBlocker -TemplateKey $key -Delete:($mode -eq 'delete')
+    if ($blocker) { return @{ ok = $false; error = $blocker } }
+    $changes = @{}
+    $after = $null
+    if ($mode -eq 'edit') {
+        $submission = ConvertTo-WebTemplateDefinitionChanges -Requested (Get-JsonProp $Arguments 'changes') -Current $definition -Existing $item
+        $errorCode = [string](Get-JsonProp $submission 'error')
+        if ($errorCode) { return @{ ok = $false; error = $errorCode } }
+        $changes = $submission.changes
+        $after = $submission.after
+        if ($changes.ContainsKey('layer')) {
+            $blocker = Get-TemplateDefinitionBlocker -TemplateKey $key -CheckSchedules
+            if ($blocker) { return @{ ok = $false; error = $blocker } }
+        }
+    }
+    $fingerprint = ConvertTo-Json -InputObject @($key, $revision, $mode, $after) -Depth 8 -Compress
+    if ($action -clike 'review-*') {
+        $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebTemplateManagementReviews
+        return @{ ok = $true; data = @{ preview = @{ review = $token; before = $definition; after = $after } } }
+    }
+    $approved = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebTemplateManagementReviews
+    if (-not $approved -or $approved.Fingerprint -cne $fingerprint) { return $stale }
+    if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
+    $saved = Save-TemplateDefinitionChange -TemplateKey $key -Action $mode -Definition $changes -ExpectedRevision $revision
+    if (-not $saved.Success) {
+        $code = [string](Get-JsonProp $saved 'Code')
+        return @{ ok = $false; error = ($code ? $code : 'scene_registry_failed') }
+    }
+    Add-AuditEntry (T 'atpl.savedAudit' $mode $key (Format-UserAuditActor -UserId $actor))
     return @{ ok = $true; data = @{} }
 }
 

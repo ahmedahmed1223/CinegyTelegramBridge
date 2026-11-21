@@ -15,6 +15,16 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.125.0
+
+Web administration adds the Bot shift readiness checks, notification coverage counts, and a bounded Telegram delivery quarantine list. An administrator can review and clear a private chat quarantine. The existing sender resumes normal delivery after persistence succeeds.
+
+Shift History now links to station-wide weekly and handover reports. The shared template definition editor supports per-template reminders.
+
+## Version 8.124.0
+
+The web template library adds reviewed backup restoration and safe management of invalid entries. Shift History links to scoped template, bulletin and ticker reports with bounded HTML exports. Telegram administration adds reviewed working-name edits and a read-only activity view. Shared schedule mutations preserve existing entry references after persisting the new state.
+
 ## Version 8.123.0
 
 Web Hide and Exit support a reviewed scene, device and start time. Bulletin editors can select an approved existing image from the scene directory. Telegram administration shows previous access decisions and supports reviewed temporary operator suspension and restoration.

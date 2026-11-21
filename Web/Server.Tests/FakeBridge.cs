@@ -67,6 +67,26 @@ public sealed class FakeBridge : IBridgeChannel
                     Reply("""{"id":"morning","name":"Morning","design":"bulletin","revision":4,"fields":[],"rows":[],"pageCount":1}"""),
                 _ => new BridgeReply(false, default, "bulletin_scene_image_stale")
             },
+            "reports.bulletins" when a.GetProperty("scope").GetString() == "all" && a.GetProperty("actor").GetInt64() == WebApp.Operator =>
+                new BridgeReply(false, default, "forbidden"),
+            "reports.bulletins" when a.GetProperty("action").GetString() == "export" =>
+                Reply("""{"html":"<!doctype html><p>Fixture bulletin</p>","count":1,"total":1,"truncated":false}"""),
+            "reports.ticker" when a.GetProperty("scope").GetString() == "all" && a.GetProperty("actor").GetInt64() == WebApp.Operator =>
+                new BridgeReply(false, default, "forbidden"),
+            "reports.ticker" when a.GetProperty("action").GetString() == "export" =>
+                Reply("""{"html":"<!doctype html><p>Fixture ticker</p>","days":1,"publishes":2,"truncated":false}"""),
+            "reports.weekly" => Reply("""{"from":"2026-03-04 00:00:00 +02:00","through":"2026-03-10 09:00:00 +02:00","tickerPublishes":2,"tickerLast":"","urgentRuns":1,"urgentStories":1,"nearLimit":false,"peakScreen":"","peakPercent":0,"idleCount":0,"idle":[],"repeatCounts":[2],"changedCount":0,"changed":[],"truncated":false}"""),
+            "reports.handover" => Reply("""{"hours":4,"truncated":false,"connection":"Cinegy: healthy","activeCount":0,"active":[],"showCount":2,"hiddenGroups":0,"shows":[],"removalCount":1,"lastRemoval":"","failureCount":0,"blockedCount":0,"notableCount":0,"recentFailures":[]}"""),
+            "reports.templates" when a.GetProperty("scope").GetString() == "all" && a.GetProperty("actor").GetInt64() == WebApp.Operator =>
+                new BridgeReply(false, default, "forbidden"),
+            "reports.templates" when a.GetProperty("action").GetString() == "export" =>
+                Reply("""{"html":"<!doctype html><p>Fixture banner</p>","count":1,"total":1,"truncated":false}"""),
+            "reports.templates" =>
+                Reply("""{"period":"today","scope":"mine","total":1,"operators":1,"withoutEnd":0,"truncated":false,"page":0,"pageCount":1,"items":[{"name":"Fixture banner","operatorName":"Operator desk","layer":4,"started":"2026-03-10 08:00:00 +02:00","ended":"2026-03-10 08:02:00 +02:00","duration":"2 min","endedBy":"Replacement"}]}"""),
+            "reports.ticker" =>
+                Reply("""{"period":"today","scope":"mine","publishes":2,"items":11,"silentDays":0,"lastPublishedAt":"2026-03-10 08:05:00 +02:00","truncated":false,"days":[{"date":"2026-03-10","publishes":2,"items":11,"first":"2026-03-10 08:00:00 +02:00","last":"2026-03-10 08:05:00 +02:00","range":"8–11","edits":"8 ← 11","operators":"Ticker desk"}]}"""),
+            "reports.bulletins" =>
+                Reply("""{"period":"today","scope":"mine","total":1,"rows":3,"operators":1,"scheduled":1,"truncated":false,"page":0,"pageCount":1,"items":[{"name":"Fixture bulletin","operatorName":"Fixture operator","started":"2026-03-10 08:00:00 +02:00","ended":"","duration":"","rows":3,"scheduled":true}]}"""),
             "bulletin.management" => a.GetProperty("action").GetString() switch
             {
                 "review" => Reply("""{"id":"morning","revision":3,"operation":"delete","name":"Morning","rowCount":4,"pendingCount":2,"referenceCount":3,"review":"management-ticket"}"""),

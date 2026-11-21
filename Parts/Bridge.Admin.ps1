@@ -212,7 +212,7 @@ function Get-HandoverAutoSummary {
     return @($found | Select-Object -First 3)
 }
 
-function Get-DisabledGuardLines {
+function Get-ShiftReadinessProtectionFinding {
     <#
         Which protections are switched off right now, each said as its
         consequence rather than its setting name.
@@ -239,30 +239,55 @@ function Get-DisabledGuardLines {
         cannot grow with station data the way a template or user table can,
         and so needs no trim note.
     #>
-    $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($guard in @(
-            @{ Name = 'MaintenanceMode'; WeakWhen = $true; Text = (T 'adm.maintenanceOn') }
-            @{ Name = 'SchedulePaused'; WeakWhen = $true; Text = (T 'adm.schedulePaused') }
-            @{ Name = 'EnableSafeRollback'; WeakWhen = $false; Text = (T 'adm.noRollback') }
-            @{ Name = 'ConfirmLayerRemoval'; WeakWhen = $false; Text = (T 'adm.hideNoConfirm') }
-            @{ Name = 'RequireUserLevelAuth'; WeakWhen = $false; Text = (T 'adm.chatLevelAuth') }
-            @{ Name = 'EnableFullTemplateManagement'; WeakWhen = $true; Text = (T 'adm.templateEditOpen') }
-            @{ Name = 'BlockRejectedRequesters'; WeakWhen = $false; Text = (T 'adm.rejectedCanRetry') }
-            @{ Name = 'LeaveUnknownGroups'; WeakWhen = $false; Text = (T 'adm.staysInGroups') }
-            @{ Name = 'EnableDpapiSecrets'; WeakWhen = $false; Text = (T 'adm.tokenPlaintext') }
-            @{ Name = 'NotifyAdminsOnMissingGraphic'; WeakWhen = $false; Text = (T 'adm.noMissingGraphicAlert') }
-            @{ Name = 'EnableTextChecks'; WeakWhen = $false; Text = (T 'adm.noSpellWarnings') }
+            @{ Name = 'MaintenanceMode'; WeakWhen = $true; MessageKey = 'adm.maintenanceOn' }
+            @{ Name = 'SchedulePaused'; WeakWhen = $true; MessageKey = 'adm.schedulePaused' }
+            @{ Name = 'EnableSafeRollback'; WeakWhen = $false; MessageKey = 'adm.noRollback' }
+            @{ Name = 'ConfirmLayerRemoval'; WeakWhen = $false; MessageKey = 'adm.hideNoConfirm' }
+            @{ Name = 'RequireUserLevelAuth'; WeakWhen = $false; MessageKey = 'adm.chatLevelAuth' }
+            @{ Name = 'EnableFullTemplateManagement'; WeakWhen = $true; MessageKey = 'adm.templateEditOpen' }
+            @{ Name = 'BlockRejectedRequesters'; WeakWhen = $false; MessageKey = 'adm.rejectedCanRetry' }
+            @{ Name = 'LeaveUnknownGroups'; WeakWhen = $false; MessageKey = 'adm.staysInGroups' }
+            @{ Name = 'EnableDpapiSecrets'; WeakWhen = $false; MessageKey = 'adm.tokenPlaintext' }
+            @{ Name = 'NotifyAdminsOnMissingGraphic'; WeakWhen = $false; MessageKey = 'adm.noMissingGraphicAlert' }
+            @{ Name = 'EnableTextChecks'; WeakWhen = $false; MessageKey = 'adm.noSpellWarnings' }
         )) {
         if ([bool](Get-Setting $guard.Name) -eq [bool]$guard.WeakWhen) {
-            $lines.Add("• $($guard.Text) <code>$($guard.Name)</code>")
+            @{ Name = $guard.Name; MessageKey = $guard.MessageKey }
         }
     }
-    # The one number in the list: 0 disables template testing entirely, so
-    # there is nowhere to try a template outside the programme.
     if ((Get-SettingInt 'TemplateTestLayer') -le 0) {
-        $lines.Add((T 'adm.noTestLayer'))
+        @{ Name = 'TemplateTestLayer'; MessageKey = 'adm.noTestLayer' }
     }
-    return $lines.ToArray()
+}
+
+function Get-DisabledGuardLines {
+    foreach ($finding in Get-ShiftReadinessProtectionFinding) {
+        $text = T $finding.MessageKey
+        if ($finding.Name -eq 'TemplateTestLayer') { $text }
+        else { "• $text <code>$($finding.Name)</code>" }
+    }
+}
+
+function Get-ShiftReadinessSnapshot {
+    # Read only in-memory shift state. The independent live path check still
+    # belongs to self-test and is never triggered by rendering readiness.
+    $onAir = @($script:OnAir.Keys).Count
+    $pending = @($script:PendingState.Keys).Count
+    $draft = $script:NewsTickerDraft
+    $draftState = if (Test-NewsTickerDraftOpen -Draft $draft) { 'open' }
+    elseif ($draft) { 'locked' } else { 'none' }
+    $dead = @($script:DeadChats.Keys).Count
+    $pins = @($script:PinnedRecurrences.Keys).Count
+    return @{
+        OnAirLayers = $onAir
+        PendingOperations = $pending
+        TickerDraft = $draftState
+        QuarantinedChats = $dead
+        PinnedFaults = $pins
+        QuietHours = [bool](Test-QuietHoursActive)
+        Ready = $onAir -eq 0 -and $pending -eq 0 -and -not $draft -and $dead -eq 0 -and $pins -eq 0
+    }
 }
 
 function Show-ShiftReadinessScreen {
@@ -277,23 +302,19 @@ function Show-ShiftReadinessScreen {
     if ($UserId -eq 0) { $UserId = $ChatId }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add((T 'adm.readinessTitle'))
-    $onAir = @($script:OnAir.Keys).Count
-    $lines.Add($(if ($onAir -gt 0) { (T 'adm.layersOnAirNow' $onAir) } else { (T 'adm.nothingOnAirGreen') }))
-    $pending = @($script:PendingState.Keys).Count
-    $lines.Add($(if ($pending -gt 0) { (T 'adm.pendingOps' $pending) } else { (T 'adm.noPending') }))
+    $snapshot = Get-ShiftReadinessSnapshot
+    $lines.Add($(if ($snapshot.OnAirLayers -gt 0) { (T 'adm.layersOnAirNow' $snapshot.OnAirLayers) } else { (T 'adm.nothingOnAirGreen') }))
+    $lines.Add($(if ($snapshot.PendingOperations -gt 0) { (T 'adm.pendingOps' $snapshot.PendingOperations) } else { (T 'adm.noPending') }))
     $lines.Add($(
-            if (Test-NewsTickerDraftOpen -Draft $script:NewsTickerDraft) { (T 'adm.draftUnowned') }
-            elseif ($script:NewsTickerDraft) { (T 'adm.openDraft' $(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId')))) }
+            if ($snapshot.TickerDraft -eq 'open') { (T 'adm.draftUnowned') }
+            elseif ($snapshot.TickerDraft -eq 'locked') { (T 'adm.openDraft' $(Format-UserAuditActor -UserId ([long](Get-JsonProp $script:NewsTickerDraft 'OwnerUserId')))) }
             else { (T 'adm.noDraft') }))
-    $dead = @($script:DeadChats.Keys).Count
-    $lines.Add($(if ($dead -gt 0) { (T 'adm.quarantined' $dead) } else { (T 'adm.noQuarantined') }))
-    $pins = @($script:PinnedRecurrences.Keys).Count
-    $lines.Add($(if ($pins -gt 0) { (T 'adm.pinnedFaults' $pins) } else { (T 'adm.noStandingFaults') }))
-    $lines.Add($(if (Test-QuietHoursActive) { (T 'adm.quietOn') } else { (T 'adm.alertsDirect') }))
-    $ready = ($onAir -eq 0 -and $pending -eq 0 -and -not $script:NewsTickerDraft -and $dead -eq 0 -and $pins -eq 0)
+    $lines.Add($(if ($snapshot.QuarantinedChats -gt 0) { (T 'adm.quarantined' $snapshot.QuarantinedChats) } else { (T 'adm.noQuarantined') }))
+    $lines.Add($(if ($snapshot.PinnedFaults -gt 0) { (T 'adm.pinnedFaults' $snapshot.PinnedFaults) } else { (T 'adm.noStandingFaults') }))
+    $lines.Add($(if ($snapshot.QuietHours) { (T 'adm.quietOn') } else { (T 'adm.alertsDirect') }))
     $lines.Add('')
-    $lines.Add($(if ($ready) { (T 'adm.readyVerdict') } else { (T 'adm.notCleanVerdict') }))
-    # Kept out of $ready on purpose: a switched-off guard is a standing
+    $lines.Add($(if ($snapshot.Ready) { (T 'adm.readyVerdict') } else { (T 'adm.notCleanVerdict') }))
+    # Kept out of the readiness verdict on purpose: a switched-off guard is a standing
     # choice about how this station is configured, not dirt left by the
     # outgoing shift. Folding it into the verdict would mean a bridge running
     # its own defaults never reads clean, and a verdict that is never green

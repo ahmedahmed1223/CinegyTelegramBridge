@@ -16,6 +16,7 @@ function Add-BridgeTextScreens2 {
     $catalogue['usr.fileInfoRefused'] = @{ ar = 'Telegram رفض طلب معلومات الملف.'; en = 'Telegram refused the file information request.' }
     $catalogue['usr.badFilePath'] = @{ ar = 'Telegram أعاد مسار ملف غير صالح.'; en = 'Telegram returned an invalid file path.' }
     $catalogue['usr.reEnable'] = @{ ar = '✅ إعادة تفعيل'; en = '✅ Enable again' }
+    $catalogue['usr.quarantineSaveFailed'] = @{ ar = 'تعذّر حفظ رفع تعليق التسليم. ما زالت المحادثة معلّقة.'; en = 'The release could not be saved. The chat remains quarantined.' }
     $catalogue['usr.notQuarantined'] = @{ ar = 'هذه المحادثة ليست محجورة الآن.'; en = 'This chat is not quarantined right now.' }
     $catalogue['usr.deliveryTest'] = @{ ar = '🔔 اختبار استلام من البوت — تجاهل هذه الرسالة.'; en = '🔔 A delivery test from the bot — ignore this message.' }
     $catalogue['usr.backToUsers'] = @{ ar = '⬅️ المستخدمون'; en = '⬅️ The users' }

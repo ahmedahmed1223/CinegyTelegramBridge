@@ -1100,17 +1100,21 @@ function Complete-UserAliasEdit {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne 'user_alias_edit' -or [long]$state.UserId -ne $AdminUserId) { return $false }
     $target = [long]$state.TargetUserId
-    $alias = $Value.Trim()
-    if ($alias -eq '-') { $alias = '' }
-    if ([string]::IsNullOrWhiteSpace($alias)) { $alias = '' }
-    if (-not (Set-UserAlias -TargetUserId $target -Alias $alias)) {
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.nameNotSaved') -ReplyMarkup (Get-UsersAdminKeyboard)
+    $edit = Set-UserWorkingName -TargetUserId $target -Value $Value
+    if (-not $edit.ok) {
+        if ($edit.error -eq 'telegram_alias_too_long') {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.workingNameLimit' $script:UserWorkingNameLimit) -ReplyMarkup (Get-CancelKeyboard)
+        }
+        elseif ($edit.error -eq 'telegram_alias_multiline') {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.workingNameSingleLine') -ReplyMarkup (Get-CancelKeyboard)
+        }
+        else {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'kb.nameNotSaved') -ReplyMarkup (Get-UsersAdminKeyboard)
+        }
         return $false
     }
     Clear-PendingState -ChatId $ChatId
-    $action = if ($alias) { (T 'kb.aliasSet' $alias) } else { (T 'kb.clearAlias') }
-    Write-BridgeLog "Admin $AdminUserId updated alias for user ${target}: $action"
-    Add-AuditEntry (T 'kb.userAudit' $action $(Format-UserAuditActor -UserId ([long]$target)) $(Format-UserAuditActor -UserId $AdminUserId))
+    Write-UserWorkingNameAudit -TargetUserId $target -AdminUserId $AdminUserId -Alias $edit.alias
     Show-UsersAdminScreen -ChatId $ChatId
     return $true
 }

@@ -243,6 +243,84 @@
         }
       }
     },
+    "/api/admin/readiness": {
+      "get": {
+        "tags": [
+          "Administration"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShiftReadinessReport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/notifications/coverage": {
+      "get": {
+        "tags": [
+          "Administration"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNotificationCoverage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/air/rollback": {
       "post": {
         "tags": [
@@ -455,6 +533,76 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram-access/users/{userId}/activity": {
+      "get": {
+        "tags": [
+          "Telegram access"
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramOperatorActivity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -855,6 +1003,144 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AirLayerRemovalResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/air/template-backups": {
+      "post": {
+        "tags": [
+          "Air"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateBackupCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateBackupResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/air/template-issues": {
+      "post": {
+        "tags": [
+          "Air"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateIssueCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateIssueResult"
                 }
               }
             }
@@ -4405,6 +4691,383 @@
         }
       }
     },
+    "/api/telegram-access/users/{userId}/alias/review": {
+      "post": {
+        "tags": [
+          "Telegram access"
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramAliasReviewCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramAliasPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram-access/users/{userId}/alias/confirm": {
+      "post": {
+        "tags": [
+          "Telegram access"
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramAliasConfirmCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramAliasResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram-access/delivery-quarantine": {
+      "get": {
+        "tags": [
+          "Telegram access"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramDeliveryQuarantinePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram-access/delivery-quarantine/{chatId}/reset/review": {
+      "post": {
+        "tags": [
+          "Telegram access"
+        ],
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramDeliveryQuarantineReview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram-access/delivery-quarantine/{chatId}/reset/confirm": {
+      "post": {
+        "tags": [
+          "Telegram access"
+        ],
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramDeliveryQuarantineConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramDeliveryQuarantineReset"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/announcements": {
       "get": {
         "tags": [
@@ -4727,6 +5390,490 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/bulletins": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulletinReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/bulletins/export": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulletinReportExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/ticker": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/ticker/export": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerReportExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/templates": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/templates/export": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateReportExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/weekly": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeeklyReport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/handover": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShiftHandoverReport"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
             "content": {
               "application/json": {
                 "schema": {
@@ -7715,6 +8862,33 @@
           }
         }
       },
+      "AdminNotificationCoverage": {
+        "required": [
+          "checkedAt",
+          "matched",
+          "withoutPersonalChat",
+          "withoutAdminRights"
+        ],
+        "type": "object",
+        "properties": {
+          "checkedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "matched": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "withoutPersonalChat": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "withoutAdminRights": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "AdminOverview": {
         "required": [
           "version",
@@ -9572,6 +10746,123 @@
           }
         }
       },
+      "BulletinReportExport": {
+        "required": [
+          "html",
+          "count",
+          "total",
+          "truncated"
+        ],
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BulletinReportPage": {
+        "required": [
+          "period",
+          "scope",
+          "total",
+          "rows",
+          "operators",
+          "scheduled",
+          "truncated",
+          "page",
+          "pageCount",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "operators": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scheduled": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BulletinReportRun"
+            }
+          }
+        }
+      },
+      "BulletinReportRun": {
+        "required": [
+          "name",
+          "operatorName",
+          "started",
+          "ended",
+          "duration",
+          "rows",
+          "scheduled"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "operatorName": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scheduled": {
+            "type": "boolean"
+          }
+        }
+      },
       "BulletinRow": {
         "required": [
           "id",
@@ -10272,6 +11563,65 @@
           }
         },
         "nullable": true
+      },
+      "HandoverActiveLayer": {
+        "required": [
+          "layer",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "HandoverFailure": {
+        "required": [
+          "when",
+          "action",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "when": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "HandoverShow": {
+        "required": [
+          "name",
+          "count",
+          "last",
+          "operators"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last": {
+            "type": "string"
+          },
+          "operators": {
+            "type": "string"
+          }
+        }
       },
       "LayerStatus": {
         "required": [
@@ -11287,6 +12637,86 @@
           }
         }
       },
+      "ShiftHandoverReport": {
+        "required": [
+          "hours",
+          "truncated",
+          "connection",
+          "activeCount",
+          "active",
+          "showCount",
+          "hiddenGroups",
+          "shows",
+          "removalCount",
+          "lastRemoval",
+          "failureCount",
+          "blockedCount",
+          "notableCount",
+          "recentFailures"
+        ],
+        "type": "object",
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "connection": {
+            "type": "string"
+          },
+          "activeCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "active": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandoverActiveLayer"
+            }
+          },
+          "showCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hiddenGroups": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "shows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandoverShow"
+            }
+          },
+          "removalCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastRemoval": {
+            "type": "string"
+          },
+          "failureCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "blockedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "notableCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recentFailures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandoverFailure"
+            }
+          }
+        }
+      },
       "ShiftHistoryEventOption": {
         "required": [
           "value",
@@ -11486,6 +12916,57 @@
           "hiddenOperators": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "ShiftReadinessReport": {
+        "required": [
+          "checkedAt",
+          "ready",
+          "onAirLayers",
+          "pendingOperations",
+          "tickerDraft",
+          "quarantinedChats",
+          "pinnedFaults",
+          "quietHours",
+          "protectionFindings"
+        ],
+        "type": "object",
+        "properties": {
+          "checkedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "onAirLayers": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pendingOperations": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tickerDraft": {
+            "type": "string"
+          },
+          "quarantinedChats": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pinnedFaults": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "quietHours": {
+            "type": "boolean"
+          },
+          "protectionFindings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -11734,6 +13215,259 @@
           },
           "expectedRole": {
             "type": "string"
+          }
+        }
+      },
+      "TelegramAliasConfirmCommand": {
+        "required": [
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          }
+        }
+      },
+      "TelegramAliasPreview": {
+        "required": [
+          "target",
+          "alias",
+          "review",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/TelegramAliasTarget"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "review": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TelegramAliasResult": {
+        "required": [
+          "userId",
+          "name",
+          "alias"
+        ],
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          }
+        }
+      },
+      "TelegramAliasReviewCommand": {
+        "required": [
+          "alias"
+        ],
+        "type": "object",
+        "properties": {
+          "alias": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "TelegramAliasTarget": {
+        "required": [
+          "id",
+          "name",
+          "alias"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          }
+        }
+      },
+      "TelegramDeliveryQuarantineConfirm": {
+        "required": [
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "review": {
+            "type": "string"
+          }
+        }
+      },
+      "TelegramDeliveryQuarantinePage": {
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TelegramDeliveryQuarantineRow"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "TelegramDeliveryQuarantineReset": {
+        "required": [
+          "chatId"
+        ],
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "TelegramDeliveryQuarantineReview": {
+        "required": [
+          "target",
+          "review",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/TelegramDeliveryQuarantineRow"
+          },
+          "review": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TelegramDeliveryQuarantineRow": {
+        "required": [
+          "chatId",
+          "since",
+          "strikes",
+          "canReset"
+        ],
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "strikes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "canReset": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TelegramOperatorActivity": {
+        "required": [
+          "userId",
+          "state",
+          "ageMinutes",
+          "recentMinutes",
+          "today"
+        ],
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "type": "string"
+          },
+          "ageMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "recentMinutes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "today": {
+            "$ref": "#/components/schemas/TelegramOperatorActivityTotals"
+          }
+        }
+      },
+      "TelegramOperatorActivityTotals": {
+        "required": [
+          "operations",
+          "successful",
+          "blocked",
+          "failed",
+          "shows",
+          "truncated"
+        ],
+        "type": "object",
+        "properties": {
+          "operations": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "successful": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "blocked": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "shows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
           }
         }
       },
@@ -12001,6 +13735,114 @@
           }
         }
       },
+      "TemplateBackupCommand": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "TemplateBackupPreview": {
+        "required": [
+          "id",
+          "added",
+          "changed",
+          "removed",
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "review": {
+            "type": "string"
+          }
+        },
+        "nullable": true
+      },
+      "TemplateBackupResult": {
+        "required": [
+          "backups",
+          "truncated",
+          "preview",
+          "restored"
+        ],
+        "type": "object",
+        "properties": {
+          "backups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateBackupSummary"
+            },
+            "nullable": true
+          },
+          "truncated": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TemplateBackupPreview"
+          },
+          "restored": {
+            "type": "boolean",
+            "nullable": true
+          }
+        }
+      },
+      "TemplateBackupSummary": {
+        "required": [
+          "id",
+          "savedAt",
+          "bytes"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "savedAt": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "TemplateCataloguePreview": {
         "required": [
           "review",
@@ -12143,6 +13985,11 @@
             "items": {
               "$ref": "#/components/schemas/TemplateDefinitionFieldChange"
             }
+          },
+          "reminderMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "default": null,
@@ -12275,7 +14122,8 @@
           "description",
           "category",
           "presetCount",
-          "fields"
+          "fields",
+          "reminderMinutes"
         ],
         "type": "object",
         "properties": {
@@ -12310,6 +14158,10 @@
             "items": {
               "$ref": "#/components/schemas/TemplateDefinitionField"
             }
+          },
+          "reminderMinutes": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "nullable": true
@@ -12324,7 +14176,8 @@
           "description",
           "category",
           "presetCount",
-          "fields"
+          "fields",
+          "reminderMinutes"
         ],
         "type": "object",
         "properties": {
@@ -12359,6 +14212,10 @@
             "items": {
               "$ref": "#/components/schemas/TemplateDefinitionField"
             }
+          },
+          "reminderMinutes": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },
@@ -12424,6 +14281,100 @@
           "sensitive": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "TemplateIssueCommand": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "review": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          }
+        }
+      },
+      "TemplateIssueItem": {
+        "required": [
+          "id",
+          "name",
+          "reason",
+          "layer",
+          "canReview"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "canReview": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TemplateIssuePreview": {
+        "required": [
+          "issue",
+          "review"
+        ],
+        "type": "object",
+        "properties": {
+          "issue": {
+            "$ref": "#/components/schemas/TemplateIssueItem"
+          },
+          "review": {
+            "type": "string"
+          }
+        },
+        "nullable": true
+      },
+      "TemplateIssueResult": {
+        "required": [
+          "items",
+          "truncated",
+          "preview",
+          "deleted"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateIssueItem"
+            },
+            "nullable": true
+          },
+          "truncated": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TemplateIssuePreview"
+          },
+          "deleted": {
+            "type": "boolean",
+            "nullable": true
           }
         }
       },
@@ -12612,6 +14563,118 @@
           "autoHideFailed": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "TemplateReportExport": {
+        "required": [
+          "html",
+          "count",
+          "total",
+          "truncated"
+        ],
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TemplateReportPage": {
+        "required": [
+          "period",
+          "scope",
+          "total",
+          "operators",
+          "withoutEnd",
+          "truncated",
+          "page",
+          "pageCount",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "operators": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "withoutEnd": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateReportRun"
+            }
+          }
+        }
+      },
+      "TemplateReportRun": {
+        "required": [
+          "name",
+          "operatorName",
+          "layer",
+          "started",
+          "ended",
+          "duration",
+          "endedBy"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "operatorName": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "started": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "string"
+          },
+          "endedBy": {
+            "type": "string"
           }
         }
       },
@@ -13444,6 +15507,117 @@
           }
         }
       },
+      "TickerReportDay": {
+        "required": [
+          "date",
+          "publishes",
+          "items",
+          "first",
+          "last",
+          "range",
+          "edits",
+          "operators"
+        ],
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "publishes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "first": {
+            "type": "string"
+          },
+          "last": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string"
+          },
+          "edits": {
+            "type": "string"
+          },
+          "operators": {
+            "type": "string"
+          }
+        }
+      },
+      "TickerReportExport": {
+        "required": [
+          "html",
+          "days",
+          "publishes",
+          "truncated"
+        ],
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "publishes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TickerReportResponse": {
+        "required": [
+          "period",
+          "scope",
+          "publishes",
+          "items",
+          "silentDays",
+          "lastPublishedAt",
+          "truncated",
+          "days"
+        ],
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "publishes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "silentDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastPublishedAt": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TickerReportDay"
+            }
+          }
+        }
+      },
       "TickerSavedSet": {
         "required": [
           "index",
@@ -14152,6 +16326,89 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          }
+        }
+      },
+      "WeeklyReport": {
+        "required": [
+          "from",
+          "through",
+          "tickerPublishes",
+          "tickerLast",
+          "urgentRuns",
+          "urgentStories",
+          "nearLimit",
+          "peakScreen",
+          "peakPercent",
+          "idleCount",
+          "idle",
+          "repeatCounts",
+          "changedCount",
+          "changed",
+          "truncated"
+        ],
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "through": {
+            "type": "string"
+          },
+          "tickerPublishes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tickerLast": {
+            "type": "string"
+          },
+          "urgentRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "urgentStories": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nearLimit": {
+            "type": "boolean"
+          },
+          "peakScreen": {
+            "type": "string"
+          },
+          "peakPercent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idleCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idle": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "repeatCounts": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "changedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
           }
         }
       },

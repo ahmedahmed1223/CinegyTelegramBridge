@@ -173,13 +173,25 @@ function Restore-DeadChat {
         the block is still there, three fresh failures re-quarantine it and
         say so again, rather than trusting a button press over Telegram.
     #>
-    param([Parameter(Mandatory)][long]$ChatId)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$ActorUserId = 0, [switch]$PassThru)
     $id = [string]$ChatId
+    if (-not (Test-DeadChat -ChatId $ChatId)) {
+        if ($PassThru) { return $false }
+        return
+    }
+    $entry = $script:DeadChats[$id]
     $script:DeadChats.Remove($id) | Out-Null
+    if (-not (Save-DeadChats)) {
+        $script:DeadChats[$id] = $entry
+        if ($PassThru) { return $false }
+        return
+    }
+    # The strike counter is runtime-only. Keep it until the release is durable.
     $script:DeadChatStrikes.Remove($id) | Out-Null
-    Save-DeadChats | Out-Null
-    Write-BridgeLog "Chat $ChatId released from dead-chat quarantine by administrator"
-    Add-AuditEntry (T 'usr.chatReEnabled' $ChatId)
+    $actor = if ($ActorUserId -gt 0) { " $ActorUserId" } else { '' }
+    Write-BridgeLog "Chat $ChatId released from dead-chat quarantine by administrator$actor"
+    Add-AuditEntry (T 'usr.chatReEnabled' $ChatId) | Out-Null
+    if ($PassThru) { return $true }
 }
 
 function Test-DeadChatDelivery {
@@ -202,9 +214,11 @@ function Test-DeadChatDelivery {
         -Body @{ chat_id = $TargetChatId; text = (T 'usr.deliveryTest') } `
         -TimeoutSec (Get-SettingInt 'TelegramRequestTimeoutSeconds' 1) -MaxAttempts 1
     if ($probe.Success) {
-        Restore-DeadChat -ChatId $TargetChatId
-        Add-AuditEntry (T 'usr.testPassed' $TargetChatId $(Format-UserAuditActor -UserId $UserId))
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'usr.chatReceives' $TargetChatId)
+        if (Restore-DeadChat -ChatId $TargetChatId -ActorUserId $UserId -PassThru) {
+            Add-AuditEntry (T 'usr.testPassed' $TargetChatId $(Format-UserAuditActor -UserId $UserId))
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'usr.chatReceives' $TargetChatId)
+        }
+        else { Send-TelegramMessage -ChatId $ChatId -Text (T 'usr.quarantineSaveFailed') }
     }
     else {
         $short = ([string]$probe.Error).Trim()

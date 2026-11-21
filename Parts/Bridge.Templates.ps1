@@ -33,15 +33,18 @@ function Backup-TemplateRegistryFile {
     $backupDirectory = "$Path.backups"
     New-Item -ItemType Directory -Path $backupDirectory -Force -ErrorAction Stop | Out-Null
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-    $backupPath = Join-Path $backupDirectory "templates-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+    $backupPath = [IO.Path]::GetFullPath((Join-Path $backupDirectory "templates-$stamp-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"))
     Copy-Item -LiteralPath $Path -Destination $backupPath -Force -ErrorAction Stop
     # Shares ConfigBackupKeepFiles rather than adding a setting of its own:
     # both answer the same operator question - how many undo steps this
     # bridge keeps - and a second number would only ever be set wrong.
     $keep = Get-SettingInt 'ConfigBackupKeepFiles' 1
     if ($keep -gt 0) {
+        # Copy-Item preserves the registry's write time, which can predate
+        # another backup. Always retain the newly created undo copy.
         foreach ($old in @(Get-ChildItem -LiteralPath $backupDirectory -Filter '*.json' -File -ErrorAction SilentlyContinue |
-                    Sort-Object LastWriteTimeUtc, Name -Descending | Select-Object -Skip $keep)) {
+                    Where-Object { $_.FullName -ne $backupPath } |
+                    Sort-Object LastWriteTimeUtc, Name -Descending | Select-Object -Skip ($keep - 1))) {
             Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
         }
     }
@@ -135,6 +138,33 @@ function Save-TemplatePresetChange {
     }
 }
 
+function Read-TemplateRegistryBackupBytes {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Bound the same handle used for the actual read. A file supplied by
+    # station tooling may have been replaced since the list was displayed.
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        if ($stream.Length -le 0 -or $stream.Length -gt $script:TemplateRegistryImportMaximumBytes) {
+            throw 'Registry backup size is outside the supported range.'
+        }
+        $bytes = [byte[]]::new([int]$stream.Length)
+        $stream.ReadExactly($bytes)
+        return ,$bytes
+    }
+    finally { $stream.Dispose() }
+}
+
+function ConvertFrom-TemplateRegistryBackupBytes {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    $text = [Text.UTF8Encoding]::new($false, $true).GetString($Bytes)
+    $document = ConvertFrom-Json -InputObject $text.TrimStart([char]0xFEFF) -NoEnumerate -ErrorAction Stop
+    if ($document -isnot [System.Management.Automation.PSCustomObject] -or -not @($document.PSObject.Properties).Count) {
+        throw 'Registry backup must contain template definitions.'
+    }
+    return $document
+}
+
 function Restore-TemplateRegistryBackup {
     <#
         Puts a saved templates.json back, refusing the cases that would take
@@ -155,16 +185,31 @@ function Restore-TemplateRegistryBackup {
     #>
     param(
         [Parameter(Mandatory)][string]$BackupPath,
-        [string]$Path = (Get-TemplateRegistryFilePath)
+        [string]$Path = (Get-TemplateRegistryFilePath),
+        [byte[]]$ReviewedBytes,
+        [string]$ExpectedRegistryHash = '',
+        [long]$Deadline = 0
     )
-    $restoreTemporary = "$Path.restore.tmp"
+    $restoreTemporary = "$Path.restore-$([guid]::NewGuid().ToString('N')).tmp"
     try {
-        if (-not (Test-Path -LiteralPath $BackupPath)) { throw (T 'tpl.backupFileMissing') }
-        $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if (-not $candidate -or @($candidate.PSObject.Properties.Name).Count -eq 0) {
-            throw (T 'tpl.backupEmpty')
+        $hasReview = $PSBoundParameters.ContainsKey('ReviewedBytes')
+        if ($hasReview) {
+            $candidate = ConvertFrom-TemplateRegistryBackupBytes -Bytes $ReviewedBytes
+            $currentBytes = Read-TemplateRegistryBackupBytes -Path $Path
+            if (-not $ExpectedRegistryHash -or
+                [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($currentBytes)) -cne $ExpectedRegistryHash) {
+                return [pscustomobject]@{ Success = $false; Error = ''; Code = 'template_backup_stale'; Comparison = $null }
+            }
+            $current = ConvertFrom-TemplateRegistryBackupBytes -Bytes $currentBytes
+            $blocker = Get-WebTemplateBackupBlocker -Current $current -Candidate $candidate
+            if ($blocker) { return [pscustomobject]@{ Success = $false; Error = ''; Code = $blocker; Comparison = $null } }
         }
-        $current = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        else {
+            if (-not (Test-Path -LiteralPath $BackupPath)) { throw (T 'tpl.backupFileMissing') }
+            $candidate = Get-Content -LiteralPath $BackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if (-not $candidate -or @($candidate.PSObject.Properties.Name).Count -eq 0) { throw (T 'tpl.backupEmpty') }
+            $current = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        }
         $comparison = Get-TemplateRegistryImportComparison -Current $current -Imported $candidate
         $unsafeKeys = @(@($comparison.Removed) + @($comparison.Changed) | Sort-Object -Unique)
         $liveKeys = @($script:OnAir.Values | ForEach-Object { [string](Get-JsonProp $_ 'Key') })
@@ -175,15 +220,30 @@ function Restore-TemplateRegistryBackup {
         }
         # The registry as it stands becomes a backup of its own first, so the
         # restore itself is undoable. A one-way undo is a trap.
-        Backup-TemplateRegistryFile -Path $Path | Out-Null
-        Copy-Item -LiteralPath $BackupPath -Destination $restoreTemporary -Force -ErrorAction Stop
-        Move-Item -LiteralPath $restoreTemporary -Destination $Path -Force -ErrorAction Stop
+        # Stage the selected bytes before retention can prune the source file.
+        if ($hasReview) { [IO.File]::WriteAllBytes($restoreTemporary, $ReviewedBytes) }
+        else { Copy-Item -LiteralPath $BackupPath -Destination $restoreTemporary -ErrorAction Stop }
+        $previousBackup = Backup-TemplateRegistryFile -Path $Path
+        if ($hasReview) {
+            $finalBytes = Read-TemplateRegistryBackupBytes -Path $Path
+            $preservedBytes = Read-TemplateRegistryBackupBytes -Path $previousBackup
+            if ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($finalBytes)) -cne $ExpectedRegistryHash -or
+                [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($preservedBytes)) -cne $ExpectedRegistryHash) {
+                return [pscustomobject]@{ Success = $false; Error = ''; Code = 'template_backup_stale'; Comparison = $null }
+            }
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return [pscustomobject]@{ Success = $false; Error = ''; Code = 'bridge_busy'; Comparison = $null }
+            }
+        }
+        [IO.File]::Move($restoreTemporary, $Path, $true)
         $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
         return [pscustomobject]@{ Success = $true; Error = ''; Comparison = $comparison }
     }
     catch {
-        Remove-Item -LiteralPath $restoreTemporary -Force -ErrorAction SilentlyContinue
         return [pscustomobject]@{ Success = $false; Error = Protect-SensitiveText $_.Exception.Message; Comparison = $null }
+    }
+    finally {
+        Remove-Item -LiteralPath $restoreTemporary -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -228,6 +288,19 @@ function Resolve-TemplateScenePath {
     return [IO.Path]::Combine($base, $resolved)
 }
 
+function Get-TemplateRegistryEntryIssue {
+    param($Entry)
+
+    $templatePath = [string](Get-JsonProp $Entry 'path')
+    if ([string]::IsNullOrWhiteSpace($templatePath)) { return @{ Code = 'missing_path' } }
+    $resolved = Resolve-TemplateScenePath -Path $templatePath
+    if (-not [IO.Path]::IsPathRooted($resolved)) { return @{ Code = 'unresolved_path'; Path = $resolved } }
+    if ([IO.Path]::GetExtension($resolved) -ine '.cintitle') { return @{ Code = 'invalid_extension' } }
+    $layer = 0
+    if (-not [int]::TryParse([string](Get-JsonProp $Entry 'layer'), [ref]$layer)) { return @{ Code = 'invalid_layer' } }
+    return @{ Code = ''; Path = $resolved; Layer = $layer }
+}
+
 function Get-TemplateStoreParsed {
     <# The parse and cache half of Get-TemplateStore, split out only so the
        path resolver above could sit between them as its own function. #>
@@ -261,30 +334,20 @@ function Get-TemplateStoreParsed {
     foreach ($prop in $raw.PSObject.Properties) {
         $key = $prop.Name
         $entry = $prop.Value
-        $tplPath = Get-JsonProp $entry 'path'
-        $layerRaw = Get-JsonProp $entry 'layer'
-        $layer = 0
-        if ([string]::IsNullOrWhiteSpace([string]$tplPath)) {
-            $errors.Add((T 'tpl.noPath' $key))
+        $issue = Get-TemplateRegistryEntryIssue -Entry $entry
+        if ($issue.Code) {
+            $reason = switch ($issue.Code) {
+                'missing_path' { T 'tpl.noPath' $key }
+                'unresolved_path' { T 'tpl.pathNotAbsolute' $key $issue.Path }
+                'invalid_extension' { T 'tpl.notCintitle' $key }
+                'invalid_layer' { T 'tpl.noLayer' $key }
+            }
+            $errors.Add($reason)
             $invalidKeys.Add($key)
             continue
         }
-        $tplPath = Resolve-TemplateScenePath -Path ([string]$tplPath)
-        if (-not [IO.Path]::IsPathRooted([string]$tplPath)) {
-            $errors.Add((T 'tpl.pathNotAbsolute' $key $tplPath))
-            $invalidKeys.Add($key)
-            continue
-        }
-        if (-not [IO.Path]::GetExtension([string]$tplPath).Equals('.cintitle', [StringComparison]::OrdinalIgnoreCase)) {
-            $errors.Add((T 'tpl.notCintitle' $key))
-            $invalidKeys.Add($key)
-            continue
-        }
-        if (-not [int]::TryParse([string]$layerRaw, [ref]$layer)) {
-            $errors.Add((T 'tpl.noLayer' $key))
-            $invalidKeys.Add($key)
-            continue
-        }
+        $tplPath = $issue.Path
+        $layer = $issue.Layer
         $order = 1000
         $parsedOrder = 0
         if ([int]::TryParse([string](Get-JsonProp $entry 'order'), [ref]$parsedOrder)) { $order = $parsedOrder }
@@ -362,10 +425,10 @@ function Get-TemplateStoreParsed {
         }
 
         $reminderMinutes = 0
-        $parsedReminderMinutes = 0
         $rawReminderMinutes = [string](Get-JsonProp $entry 'reminderMinutes')
         if (-not [string]::IsNullOrWhiteSpace($rawReminderMinutes)) {
-            if (-not [int]::TryParse($rawReminderMinutes, [ref]$parsedReminderMinutes) -or $parsedReminderMinutes -lt 0 -or $parsedReminderMinutes -gt 1440) {
+            $parsedReminderMinutes = ConvertTo-TemplateReminderMinutes -Value $rawReminderMinutes
+            if ($null -eq $parsedReminderMinutes) {
                 $errors.Add((T 'tpl.badReminder' $key))
             }
             else { $reminderMinutes = $parsedReminderMinutes }
@@ -629,16 +692,47 @@ function Get-TemplateDefinitionBlocker {
     return ''
 }
 
+function ConvertTo-TemplateReminderMinutes {
+    param($Value)
+    $minutes = 0
+    if ([int]::TryParse([string]$Value, [ref]$minutes) -and $minutes -ge 0 -and $minutes -le 1440) { return $minutes }
+}
+
 function Save-TemplateDefinitionChange {
     param(
         [Parameter(Mandatory)][string]$TemplateKey,
         [Parameter(Mandatory)][ValidateSet('edit', 'create', 'delete')][string]$Action,
         [hashtable]$Definition = @{},
-        [string]$ExpectedRevision = ''
+        [string]$ExpectedRevision = '',
+        [string]$ExpectedRegistryHash = '',
+        [switch]$RemoveInvalid,
+        [long]$Deadline = 0
     )
     $path = Get-TemplateRegistryFilePath
+    $temporary = ''
+    $writesReminder = $Action -ne 'delete' -and $Definition.ContainsKey('reminderMinutes')
+    if ($writesReminder) {
+        $minutes = ConvertTo-TemplateReminderMinutes -Value $Definition['reminderMinutes']
+        if ($null -eq $minutes) {
+            return [pscustomobject]@{ Success = $false; Code = 'scene_definition_reminder_range'; Error = (T 'tpl.durationRange'); BackupPath = '' }
+        }
+        $Definition['reminderMinutes'] = $minutes
+    }
     try {
-        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($RemoveInvalid) {
+            if ($Action -ne 'delete' -or -not $ExpectedRegistryHash -or -not $ExpectedRevision) {
+                return [pscustomobject]@{ Success = $false; Code = 'template_issue_invalid'; Error = ''; BackupPath = '' }
+            }
+            $snapshot = Get-WebTemplateIssueSnapshot -Path $path
+            if ($snapshot.Hash -cne $ExpectedRegistryHash) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = ''; BackupPath = '' }
+            }
+            $raw = $snapshot.Document
+        }
+        else {
+            $registryText = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+            $raw = $registryText | ConvertFrom-Json -ErrorAction Stop
+        }
         $existing = Get-JsonProp $raw $TemplateKey
         if ($ExpectedRevision -and $ExpectedRevision -cne (Get-TemplatePresetRevision -TemplateKey $TemplateKey -Entry $existing)) {
             return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = (T 'tpl.definitionChanged'); BackupPath = '' }
@@ -657,6 +751,16 @@ function Save-TemplateDefinitionChange {
                     'scene_definition_alias' { 'tpl.cannotDeleteAlias' }
                 }
                 return [pscustomobject]@{ Success = $false; Code = $blocker; Error = (T $key); BackupPath = '' }
+            }
+        }
+        if ($RemoveInvalid) {
+            $issue = Get-TemplateRegistryEntryIssue -Entry $existing
+            if (-not $issue.Code) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = ''; BackupPath = '' }
+            }
+            $issueBlocker = Get-WebTemplateIssueLiveBlocker -Entry $existing -Deadline $Deadline
+            if ($issueBlocker) {
+                return [pscustomobject]@{ Success = $false; Code = $issueBlocker; Error = ''; BackupPath = '' }
             }
         }
         if ($Action -eq 'delete') {
@@ -693,40 +797,111 @@ function Save-TemplateDefinitionChange {
                 if ($Definition.ContainsKey($name)) { $target | Add-Member -NotePropertyName $name -NotePropertyValue $Definition[$name] -Force }
             }
         }
-        $backupPath = Backup-TemplateRegistryFile -Path $path
-
-        $temporary = "$path.tmp"
-        $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
+        if ($RemoveInvalid) {
+            $temporary = "$path.issue-$([guid]::NewGuid().ToString('N')).tmp"
+            # Parse independently of PowerShell's date conversion so deleting
+            # an entry cannot rewrite another template's preset string values.
+            $parseOptions = [System.Text.Json.JsonDocumentOptions]@{
+                CommentHandling = [System.Text.Json.JsonCommentHandling]::Skip
+                AllowTrailingCommas = $true
+                MaxDepth = 1024
+            }
+            $document = [System.Text.Json.Nodes.JsonNode]::Parse($snapshot.Text, $null, $parseOptions)
+            if (-not $document.Remove($TemplateKey)) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = ''; BackupPath = '' }
+            }
+            [IO.File]::WriteAllText($temporary, $document.ToJsonString([System.Text.Json.JsonSerializerOptions]@{
+                WriteIndented = $true
+                MaxDepth = 1024
+            }))
+            if ((Get-WebTemplateIssueSnapshot -Path $path).Hash -cne $ExpectedRegistryHash) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = ''; BackupPath = '' }
+            }
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return [pscustomobject]@{ Success = $false; Code = 'bridge_busy'; Error = ''; BackupPath = '' }
+            }
+            $backupDirectory = Get-Item -LiteralPath "$path.backups" -Force -ErrorAction SilentlyContinue
+            if ($backupDirectory -and ($backupDirectory -isnot [IO.DirectoryInfo] -or
+                    ($backupDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_failed'; Error = ''; BackupPath = '' }
+            }
+            $backupPath = Backup-TemplateRegistryFile -Path $path
+            if (-not $backupPath -or (Get-WebTemplateIssueSnapshot -Path $backupPath).Hash -cne $ExpectedRegistryHash -or
+                (Get-WebTemplateIssueSnapshot -Path $path).Hash -cne $ExpectedRegistryHash) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = ''; BackupPath = '' }
+            }
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return [pscustomobject]@{ Success = $false; Code = 'bridge_busy'; Error = ''; BackupPath = '' }
+            }
+            $issueBlocker = Get-WebTemplateIssueLiveBlocker -Entry $existing -Deadline $Deadline
+            if ($issueBlocker) {
+                return [pscustomobject]@{ Success = $false; Code = $issueBlocker; Error = ''; BackupPath = '' }
+            }
+            if ((Get-WebTemplateIssueSnapshot -Path $path).Hash -cne $ExpectedRegistryHash) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = ''; BackupPath = '' }
+            }
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return [pscustomobject]@{ Success = $false; Code = 'bridge_busy'; Error = ''; BackupPath = '' }
+            }
+            [IO.File]::Move($temporary, $path, $true)
+        }
+        elseif ($writesReminder) {
+            # Keep legacy metadata byte-for-byte as JSON values. PowerShell's
+            # JSON reader can coerce an untouched timestamp string to a date.
+            $options = [System.Text.Json.JsonDocumentOptions]@{
+                CommentHandling = [System.Text.Json.JsonCommentHandling]::Skip
+                AllowTrailingCommas = $true
+                MaxDepth = 1024
+            }
+            $document = [System.Text.Json.Nodes.JsonNode]::Parse($registryText, $null, $options)
+            $storedKey = $raw.PSObject.Properties[$TemplateKey].Name
+            if ($Action -eq 'create') {
+                $node = [System.Text.Json.Nodes.JsonObject]::new()
+                $document[$storedKey] = $node
+            }
+            else { $node = $document[$storedKey] }
+            foreach ($name in @('path', 'layer', 'order', 'description', 'category', 'fields', 'reminderMinutes')) {
+                if (-not $Definition.ContainsKey($name)) { continue }
+                $storedProperty = $target.PSObject.Properties[$name].Name
+                $node[$storedProperty] = [System.Text.Json.Nodes.JsonNode]::Parse((ConvertTo-Json -InputObject $Definition[$name] -Depth 100 -Compress))
+            }
+            $temporary = "$path.reminder-$([guid]::NewGuid().ToString('N')).tmp"
+            [IO.File]::WriteAllText($temporary, $document.ToJsonString([System.Text.Json.JsonSerializerOptions]@{
+                WriteIndented = $true; MaxDepth = 1024
+            }))
+            if (-not [string]::Equals((Get-Content -LiteralPath $path -Raw -ErrorAction Stop), $registryText, [StringComparison]::Ordinal)) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = (T 'tpl.definitionChanged'); BackupPath = '' }
+            }
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return [pscustomobject]@{ Success = $false; Code = 'bridge_busy'; Error = ''; BackupPath = '' }
+            }
+            $backupPath = Backup-TemplateRegistryFile -Path $path
+            if (-not [string]::Equals((Get-Content -LiteralPath $path -Raw -ErrorAction Stop), $registryText, [StringComparison]::Ordinal)) {
+                return [pscustomobject]@{ Success = $false; Code = 'scene_registry_stale'; Error = (T 'tpl.definitionChanged'); BackupPath = '' }
+            }
+            if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) {
+                return [pscustomobject]@{ Success = $false; Code = 'bridge_busy'; Error = ''; BackupPath = '' }
+            }
+            [IO.File]::Move($temporary, $path, $true)
+        }
+        else {
+            $backupPath = Backup-TemplateRegistryFile -Path $path
+            $normalTemporary = "$path.tmp"
+            $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $normalTemporary -Encoding utf8 -ErrorAction Stop
+            Move-Item -LiteralPath $normalTemporary -Destination $path -Force -ErrorAction Stop
+        }
         $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
         return [pscustomobject]@{ Success = $true; Error = ''; BackupPath = $backupPath }
     }
     catch { return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; BackupPath = '' } }
+    finally {
+        if ($temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 function Save-TemplateReminderMinutes {
-    <# Updates only the per-template elapsed-time reminder setting. The
-       registry backup and atomic replacement follow the existing template
-       mutation contract so one button cannot leave a partial JSON file. #>
     param([Parameter(Mandatory)][string]$TemplateKey, [Parameter(Mandatory)][int]$Minutes)
-    if ($Minutes -lt 0 -or $Minutes -gt 1440) {
-        return [pscustomobject]@{ Success = $false; Error = (T 'tpl.durationRange'); BackupPath = '' }
-    }
-    $path = Get-TemplateRegistryFilePath
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        $template = Get-JsonProp $raw $TemplateKey
-        if (-not $template) { throw (T 'tpl.notFound' $TemplateKey) }
-        $backupPath = Backup-TemplateRegistryFile -Path $path
-
-        $template | Add-Member -NotePropertyName reminderMinutes -NotePropertyValue $Minutes -Force
-        $temporary = "$path.tmp"
-        $raw | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $temporary -Encoding utf8 -ErrorAction Stop
-        Move-Item -LiteralPath $temporary -Destination $path -Force -ErrorAction Stop
-        $script:TemplateCache = @{ WriteTime = [datetime]::MinValue; Path = ''; Map = @{}; Order = @(); Errors = @() }
-        return [pscustomobject]@{ Success = $true; Error = ''; BackupPath = $backupPath }
-    }
-    catch { return [pscustomobject]@{ Success = $false; Error = $_.Exception.Message; BackupPath = '' } }
+    return Save-TemplateDefinitionChange -TemplateKey $TemplateKey -Action edit -Definition @{ reminderMinutes = $Minutes }
 }
 
 function Get-HideAllTargetLayers {

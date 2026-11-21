@@ -1,5 +1,5 @@
 import {
-  Alert, Button, Group, Pagination, Paper, SegmentedControl, Select, SimpleGrid, Skeleton, Stack,
+  Alert, Button, Group, Menu, Pagination, Paper, SegmentedControl, Select, SimpleGrid, Skeleton, Stack,
   Table, Text, TextInput, Title,
 } from '@mantine/core'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -131,7 +131,17 @@ export function ShiftHistoryPage() {
           {data && <Text size="sm" c="dimmed">بتوقيت المحطة <bdi dir="ltr">{data.stationTimeZone}</bdi></Text>}
         </Stack>
         <Group gap="xs">
-          <Button component={Link} to="/reports/work-summary" variant="default">ملخص العمل</Button>
+          <Menu>
+            <Menu.Target><Button variant="default">التقارير</Button></Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item component={Link} to="/reports/handover">تسليم المناوبة</Menu.Item>
+              <Menu.Item component={Link} to="/reports/weekly">التقرير الأسبوعي</Menu.Item>
+              <Menu.Item component={Link} to="/reports/work-summary">ملخص العمل</Menu.Item>
+              <Menu.Item component={Link} to="/reports/templates">تقرير القوالب</Menu.Item>
+              <Menu.Item component={Link} to="/reports/bulletins">تقرير الموجزات</Menu.Item>
+              <Menu.Item component={Link} to="/reports/ticker">تقرير شريط الأخبار</Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
           {admin && <Button variant="default" loading={csv.isPending} disabled={!ready || !data?.total || records.isError}
             onClick={() => { setFeedback(''); csv.mutate() }}>تصدير CSV</Button>}
         </Group>

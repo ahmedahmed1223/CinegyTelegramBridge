@@ -8,6 +8,8 @@ import { PageHeader } from '../../components/PageHeader'
 import { formatDateTime } from '../../lib/time'
 
 import { RuntimeFileDiagnosticsPage } from './RuntimeFileDiagnosticsPage'
+import { ShiftReadinessPanel } from './ShiftReadinessPanel'
+import { NotificationCoveragePanel } from './NotificationCoveragePanel'
 import { AdminSettingEditor } from './AdminSettingEditor'
 
 type Overview = Schemas['AdminOverview']
@@ -179,19 +181,26 @@ export function AdminOverviewPage() {
       {overview.isError && <Alert color="red" role="alert">
         {messageFor(overview.error.message)}{data && ' تعرض الصفحة آخر قراءة متاحة.'}
       </Alert>}
-      {data && <>
-        <Text size="sm" c="dimmed">آخر تحديث {formatDateTime(data.publishedAt)}</Text>
+      {data && <Text size="sm" c="dimmed">آخر تحديث {formatDateTime(data.publishedAt)}</Text>}
+      {canRead && (
         <Tabs defaultValue="health" keepMounted={false}>
           <Tabs.List mb="md">
             <Tabs.Tab value="health" leftSection={<IconActivityHeartbeat size={17} />}>الحالة</Tabs.Tab>
             <Tabs.Tab value="settings" leftSection={<IconSettings size={17} />}>الإعدادات</Tabs.Tab>
+            <Tabs.Tab value="readiness">جاهزية الوردية</Tabs.Tab>
             <Tabs.Tab value="files">ملفات التشغيل</Tabs.Tab>
           </Tabs.List>
+          <Tabs.Panel value="readiness">{session.data?.id != null && <ShiftReadinessPanel accountId={session.data.id} />}</Tabs.Panel>
           <Tabs.Panel value="files"><RuntimeFileDiagnosticsPage embedded /></Tabs.Panel>
-          <Tabs.Panel value="health"><HealthPanel overview={data} /></Tabs.Panel>
-          <Tabs.Panel value="settings"><SettingsPanel settings={data.settings} /></Tabs.Panel>
+          <Tabs.Panel value="health">
+            <Stack>
+              {data && <HealthPanel overview={data} />}
+              {session.data?.id != null && <NotificationCoveragePanel accountId={session.data.id} />}
+            </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="settings">{data && <SettingsPanel settings={data.settings} />}</Tabs.Panel>
         </Tabs>
-      </>}
+      )}
     </Stack>
   )
 }

@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Group,
+  Menu,
   Paper,
   SimpleGrid,
   Skeleton,
@@ -20,6 +21,8 @@ import { messageFor } from '../../api/messages'
 import { isAdmin, useSession } from '../../api/session'
 import { PageHeader } from '../../components/PageHeader'
 import { ShowModal } from './ShowModal'
+import { TemplateIssues } from './TemplateIssues'
+import { TemplateBackups } from './TemplateBackups'
 import { TemplateRehearsal } from './TemplateRehearsal'
 import { TemplateRegistration } from './TemplateRegistration'
 import { TemplateDefinitionEditor } from './TemplateDefinitionEditor'
@@ -30,6 +33,8 @@ export function TemplatesPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDto | null>(null)
   const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
   const [registering, setRegistering] = useState(false)
+  const [backupsOpen, setBackupsOpen] = useState(false)
+  const [issuesOpen, setIssuesOpen] = useState(false)
   const [managingKey, setManagingKey] = useState<string | null>(null)
   const [rerunKind, setRerunKind] = useState<TemplateRerunKind | null>(null)
   const session = useSession()
@@ -56,7 +61,14 @@ export function TemplatesPage() {
         <Group gap="xs">
           <Button variant="default" onClick={() => setRerunKind('repeat')}>إعادة آخر عرض</Button>
           <Button variant="default" onClick={() => setRerunKind('retry')}>إعادة آخر محاولة</Button>
-          {canRehearse && <Button leftSection={<IconPlus size={17} />} onClick={() => setRegistering(true)}>تسجيل قالب</Button>}
+          {canRehearse && <Menu>
+            <Menu.Target><Button variant="default">إدارة السجل</Button></Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IconPlus size={17} />} onClick={() => setRegistering(true)}>تسجيل قالب</Menu.Item>
+              <Menu.Item onClick={() => setBackupsOpen(true)}>نسخ القوالب</Menu.Item>
+              <Menu.Item onClick={() => setIssuesOpen(true)}>قوالب غير صالحة</Menu.Item>
+            </Menu.Dropdown>
+          </Menu>}
           <ActionIcon
             variant="default"
             size="lg"
@@ -70,6 +82,8 @@ export function TemplatesPage() {
         </Group>
       } />
       {registering && <TemplateRegistration onClose={() => setRegistering(false)} />}
+      {issuesOpen && <TemplateIssues onClose={() => setIssuesOpen(false)} />}
+      {backupsOpen && <TemplateBackups onClose={() => setBackupsOpen(false)} />}
       {rerunKind && <TemplateRerun key={rerunKind} kind={rerunKind} onClose={() => setRerunKind(null)} />}
 
       <TextInput

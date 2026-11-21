@@ -359,6 +359,8 @@ function Invoke-WebChannelOperation {
         'air.templateDefinition' { return Invoke-WebTemplateDefinition -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.settings.review' { return New-WebAdminSettingReview -Arguments $arguments }
         'admin.settings.confirm' { return Complete-WebAdminSettingReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'admin.notifications.coverage' { return Get-WebAdminNotificationCoverage -Arguments $arguments }
+        'admin.readiness' { return Get-WebShiftReadiness -Arguments $arguments }
         'admin.overview' { return Get-WebAdminOverview -Arguments $arguments }
         'shift.notices' { return Invoke-WebShiftNotice -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.revoke.review' { return New-WebTelegramRevokeReview -Arguments $arguments }
@@ -367,6 +369,12 @@ function Invoke-WebChannelOperation {
         'telegram.access.suspension.review' { return New-WebTelegramSuspensionReview -Arguments $arguments }
         'telegram.access.suspension.confirm' { return Complete-WebTelegramSuspensionReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.history' { return Get-WebAccessHistoryPage -Arguments $arguments }
+        'telegram.access.alias.review' { return New-WebTelegramAliasReview -Arguments $arguments }
+        'telegram.access.alias.confirm' { return Complete-WebTelegramAliasReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'telegram.access.operator-activity' { return Get-WebTelegramOperatorActivity -Arguments $arguments }
+        'telegram.delivery.quarantine' { return Get-WebTelegramDeliveryQuarantine -Arguments $arguments }
+        'telegram.delivery.quarantine.reset.review' { return New-WebTelegramQuarantineResetReview -Arguments $arguments }
+        'telegram.delivery.quarantine.reset.confirm' { return Complete-WebTelegramQuarantineResetReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'telegram.access.blocked' { return Get-WebBlockedAccessPage -Arguments $arguments }
         'telegram.access.unblock.review' { return New-WebTelegramUnblockReview -Arguments $arguments }
         'telegram.access.unblock.confirm' { return Complete-WebTelegramUnblockReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -377,6 +385,11 @@ function Invoke-WebChannelOperation {
         'admin.announcements.cancel.confirm' { return Complete-WebAnnouncementCancelReview -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'admin.diagnostics.runtime-files' { return Get-WebRuntimeFileDiagnostics -Arguments $arguments }
         'schedule.executions' { return Get-WebScheduleExecutionPage -Arguments $arguments }
+        'reports.templates' { return Get-WebTemplateReport -Arguments $arguments }
+        'reports.weekly' { return Get-WebWeeklyReport -Arguments $arguments }
+        'reports.handover' { return Get-WebShiftHandoverReport -Arguments $arguments }
+        'reports.ticker' { return Get-WebTickerReport -Arguments $arguments }
+        'reports.bulletins' { return Get-WebBulletinReport -Arguments $arguments }
         'reports.work-summary' { return Get-WebWorkSummary -Arguments $arguments }
         'shift.history' { return Invoke-WebShiftHistory -Arguments $arguments }
         'air.maintenance' { return Invoke-WebAirMaintenance -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
@@ -394,6 +407,8 @@ function Invoke-WebChannelOperation {
         'air.preset-change' { return Invoke-WebTemplatePresetChange -Arguments $arguments }
         'air.rehearsal' { return Invoke-WebTemplateRehearsal -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.show' { return Invoke-WebAirShow -Arguments $arguments }
+        'air.template-issues' { return Invoke-WebTemplateIssue -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
+        'air.template-backups' { return Invoke-WebTemplateBackup -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.layer-removal' { return Invoke-WebLayerRemoval -Arguments $arguments -Deadline ([long](Get-JsonProp $Entry 'Deadline')) }
         'air.hide' { return Invoke-WebAirHide -Arguments $arguments }
         'air.exit' { return Invoke-WebAirExit -Arguments $arguments }
@@ -975,6 +990,7 @@ function Get-WebTemplateDefinitionView {
         layer = $layer; device = [string](Get-JsonProp $Entry 'device')
         description = [string](Get-JsonProp $Entry 'description'); category = [string](Get-JsonProp $Entry 'category')
         presetCount = @(Get-JsonProp $Entry 'presets' | Where-Object { $null -ne $_ }).Count; fields = $fields
+        reminderMinutes = [int](ConvertTo-TemplateReminderMinutes -Value (Get-JsonProp $Entry 'reminderMinutes'))
     }
 }
 
@@ -990,6 +1006,12 @@ function ConvertTo-WebTemplateDefinitionChanges {
         -not [int]::TryParse([string](Get-JsonProp $Requested 'layer'), [ref]$layer) -or
         ($layer -ne $Current.layer -and ($layer -le 0 -or $Current.device))) { return $invalid }
 
+    $reminder = Get-JsonProp $Requested 'reminderMinutes'
+    if ($null -ne $reminder) {
+        if ($reminder -isnot [int] -and $reminder -isnot [long]) { return @{ error = 'scene_definition_reminder_range' } }
+        $reminder = ConvertTo-TemplateReminderMinutes -Value $reminder
+        if ($null -eq $reminder) { return @{ error = 'scene_definition_reminder_range' } }
+    }
     $fields = @(Get-JsonProp $Requested 'fields' | Where-Object { $null -ne $_ })
     if ($fields.Count -gt [math]::Max(40, $Current.fields.Count)) { return $invalid }
     $names = @($fields | ForEach-Object { ([string](Get-JsonProp $_ 'name')).Trim() })
@@ -1027,6 +1049,25 @@ function ConvertTo-WebTemplateDefinitionChanges {
     $view = @{
         path = Get-JsonProp $Existing 'path'; device = $Current.device; layer = $layer
         description = $description; category = $category; fields = $updatedFields; presets = Get-JsonProp $Existing 'presets'
+        reminderMinutes = $Current.reminderMinutes
+    }
+    if ($null -ne $reminder) {
+        $changes.reminderMinutes = $reminder
+        $view.reminderMinutes = $reminder
+        # The editor roundtrips projected values. Preserve legacy encodings
+        # when a reminder edit leaves those other controls alone.
+        foreach ($name in 'description', 'category') {
+            if ([string]::Equals([string](Get-JsonProp $Requested $name), $Current[$name], [StringComparison]::Ordinal)) {
+                $changes.Remove($name)
+                $view[$name] = $Current[$name]
+            }
+        }
+        $projected = Get-WebTemplateDefinitionView -Key $Current.key -Entry $view -Revision $Current.revision
+        if ([string]::Equals((ConvertTo-Json -InputObject $projected.fields -Compress),
+                (ConvertTo-Json -InputObject $Current.fields -Compress), [StringComparison]::Ordinal)) {
+            $changes.Remove('fields')
+            $view.fields = Get-JsonProp $Existing 'fields'
+        }
     }
     return @{ changes = $changes; after = (Get-WebTemplateDefinitionView -Key $Current.key -Entry $view -Revision $Current.revision) }
 }
@@ -1067,7 +1108,7 @@ function Invoke-WebTemplateDefinition {
             if ($blocker) { return @{ ok = $false; error = $blocker } }
         }
     }
-    $fingerprint = ConvertTo-Json -InputObject @($key, $revision, $mode, $after) -Depth 8 -Compress
+    $fingerprint = ConvertTo-Json -InputObject @($key, $revision, $mode, $after, $changes.ContainsKey('reminderMinutes')) -Depth 8 -Compress
     if ($action -clike 'review-*') {
         $token = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebTemplateManagementReviews
         return @{ ok = $true; data = @{ preview = @{ review = $token; before = $definition; after = $after } } }
@@ -1075,7 +1116,7 @@ function Invoke-WebTemplateDefinition {
     $approved = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebTemplateManagementReviews
     if (-not $approved -or $approved.Fingerprint -cne $fingerprint) { return $stale }
     if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return @{ ok = $false; error = 'bridge_busy' } }
-    $saved = Save-TemplateDefinitionChange -TemplateKey $key -Action $mode -Definition $changes -ExpectedRevision $revision
+    $saved = Save-TemplateDefinitionChange -TemplateKey $key -Action $mode -Definition $changes -ExpectedRevision $revision -Deadline $Deadline
     if (-not $saved.Success) {
         $code = [string](Get-JsonProp $saved 'Code')
         return @{ ok = $false; error = ($code ? $code : 'scene_registry_failed') }

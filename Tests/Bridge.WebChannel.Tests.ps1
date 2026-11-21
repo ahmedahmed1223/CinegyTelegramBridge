@@ -421,6 +421,45 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'returns a scoped ticker aggregate and HTML through the real pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $false }
+        Mock Get-NewsReportDays {
+            @{ Label = 'Today'; Publishes = 2; Items = 11; SilentDays = 0; Truncated = $false; LastPublishedAt = $null
+                Days = @([pscustomobject]@{ Date = [datetime]'2026-03-10'; Publishes = 2; Items = 11
+                        Counts = @(8, 11); First = $null; Last = $null; Tally = @{ Single = 'Ticker desk'; Breakdown = '' }
+                    }) }
+        }
+        $list = @{ op = 'reports.ticker'; args = @{ actor = 4321; action = 'list'; period = 'today' } } | ConvertTo-Json -Compress
+        $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $list | ConvertFrom-Json
+        $reply.ok | Should -BeTrue
+        $reply.data.scope | Should -Be 'mine'
+        $reply.data.days[0].items | Should -Be 11
+        $save = @{ op = 'reports.ticker'; args = @{ actor = 4321; action = 'export'; period = 'today' } } | ConvertTo-Json -Compress
+        $export = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $save | ConvertFrom-Json
+        $export.data.days | Should -Be 1
+        $export.data.html | Should -Match 'Ticker desk'
+        Should -Invoke Get-NewsReportDays -Times 2 -Exactly -ParameterFilter { $OnlyUserId -eq 4321 }
+    }
+
+    It 'returns both station reports for an authorized operator through the real pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Get-MissedEventsWindow { @{ Records = @(); Truncated = $false } }
+        Mock Get-WeeklyReportData {
+            @{ From = [datetime]'2026-03-04'; To = [datetime]'2026-03-10'; TickerPublishes = 5; TickerLastAt = $null
+                UrgentRunsStarted = 0; UrgentStoriesPlayed = 0; NearLimit = $false; PeakScreen = ''; PeakPercent = 0
+                IdleTemplates = @(); Repeats = @(); ChangedSettings = @(); Truncated = $false }
+        }
+        $weekly = @{ op = 'reports.weekly'; args = @{ actor = 4321 } } | ConvertTo-Json -Compress
+        $week = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $weekly | ConvertFrom-Json
+        $week.ok | Should -BeTrue
+        $week.data.tickerPublishes | Should -Be 5
+        $handover = @{ op = 'reports.handover'; args = @{ actor = 4321 } } | ConvertTo-Json -Compress
+        $shift = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $handover | ConvertFrom-Json
+        $shift.ok | Should -BeTrue
+        $shift.data.showCount | Should -Be 0
+    }
+
     It 'carries a queued request to the bridge thread and its answer back' {
         $parsed = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}') | ConvertFrom-Json
         $parsed.ok | Should -BeTrue
@@ -800,6 +839,38 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'protects registry diagnostics and lists opaque backup choices through the named pipe' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        $oldRegistry = $config.TemplateRegistryPath
+        $oldManagement = Get-Setting 'EnableFullTemplateManagement'
+        $registry = New-TempTemplateFile -Json '{}'
+        $backupDirectory = New-Item -ItemType Directory -Path "$registry.backups"
+        $backupName = 'templates-20261121-123456-000-a1234567.json'
+        Copy-Item -LiteralPath $registry -Destination (Join-Path $backupDirectory.FullName $backupName)
+        Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $true
+        $call = {
+            param([string]$Operation, [long]$Actor)
+            $line = @{ op = $Operation; args = @{ actor = $Actor; action = 'list' } } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'air.template-backups' 4322).error | Should -Be 'forbidden'
+            (& $call 'air.template-issues' 4322).error | Should -Be 'forbidden'
+            $result = & $call 'air.template-backups' 4321
+            $result.ok | Should -BeTrue
+            @($result.data.backups).Count | Should -Be 1
+            $result.data.backups[0].id | Should -Match '^[A-F0-9]{64}$'
+            ($result | ConvertTo-Json -Depth 6) | Should -Not -Match ([regex]::Escape($backupDirectory.FullName))
+            ($result | ConvertTo-Json -Depth 6) | Should -Not -Match ([regex]::Escape($backupName))
+            (& $call 'air.template-issues' 4321).ok | Should -BeTrue
+        }
+        finally {
+            $config.TemplateRegistryPath = $oldRegistry
+            Set-JsonProp $config.Settings 'EnableFullTemplateManagement' $oldManagement
+        }
+    }
+
     It 'validates a replacement file in the catalogue worker and changes only the reviewed registry path' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-Admin { $UserId -eq 4321 }
@@ -852,6 +923,59 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'only clears the reviewed Telegram quarantine after saving through the named pipe' {
+        $previousChats = $script:DeadChats
+        $previousStrikes = $script:DeadChatStrikes
+        $previousReviews = $script:WebTelegramQuarantineReviews
+        $script:DeadChats = @{
+            '444' = @{ Since = '2026-11-21T08:00:00Z'; Strikes = 3; LastError = 'private Telegram response' }
+            '-555' = @{ Since = '2026-11-21T09:00:00Z'; Strikes = 4; LastError = 'private group response' }
+        }
+        $script:DeadChatStrikes = @{ '444' = 3 }
+        $script:WebTelegramQuarantineReviews = @{}
+        $script:QuarantineSaveSucceeds = $false
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Save-DeadChats { $script:QuarantineSaveSucceeds }
+        Mock Invoke-BridgeTelegramRequest { throw 'A quarantine reset cannot send a Telegram message.' }
+        $call = {
+            param([string]$Operation, [hashtable]$Arguments)
+            $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $call 'telegram.delivery.quarantine' @{ actor = 4322 }).error | Should -Be 'forbidden'
+            $list = & $call 'telegram.delivery.quarantine' @{ actor = 4321 }
+            $list.ok | Should -BeTrue
+            $list.data.total | Should -Be 2
+            $list.data.items[0].canReset | Should -BeFalse
+            $list.data.items[1].canReset | Should -BeTrue
+            ($list | ConvertTo-Json -Depth 7) | Should -Not -Match 'LastError|private Telegram response|private group response'
+
+            $review = & $call 'telegram.delivery.quarantine.reset.review' @{ actor = 4321; chatId = 444 }
+            $review.ok | Should -BeTrue
+            $confirm = @{ actor = 4321; chatId = 444; review = $review.data.review }
+            (& $call 'telegram.delivery.quarantine.reset.confirm' $confirm).error | Should -Be 'telegram_quarantine_save_failed'
+            (Test-DeadChat -ChatId 444) | Should -BeTrue
+            $script:DeadChatStrikes['444'] | Should -Be 3
+
+            $script:QuarantineSaveSucceeds = $true
+            (& $call 'telegram.delivery.quarantine.reset.confirm' $confirm).error | Should -Be 'telegram_quarantine_stale'
+            $review = & $call 'telegram.delivery.quarantine.reset.review' @{ actor = 4321; chatId = 444 }
+            $confirm.review = $review.data.review
+            (& $call 'telegram.delivery.quarantine.reset.confirm' $confirm).data.chatId | Should -Be 444
+            (Test-DeadChat -ChatId 444) | Should -BeFalse
+            (Test-DeadChat -ChatId -555) | Should -BeTrue
+            $script:DeadChatStrikes.ContainsKey('444') | Should -BeFalse
+            Should -Invoke Invoke-BridgeTelegramRequest -Times 0 -Exactly
+        }
+        finally {
+            $script:DeadChats = $previousChats
+            $script:DeadChatStrikes = $previousStrikes
+            $script:WebTelegramQuarantineReviews = $previousReviews
+        }
+    }
+
     It 'keeps administrative disclosure behind current Telegram access and exposes personal notice settings' {
         Mock Test-Authorized { $UserId -eq 4321 }
         Mock Test-Admin { $false }
@@ -860,7 +984,7 @@ Describe 'Web channel: the pipe' {
             $line = @{ op = $Operation; args = $Arguments } | ConvertTo-Json -Depth 5 -Compress
             Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
         }
-        foreach ($operation in @('admin.announcements.list', 'admin.diagnostics.runtime-files', 'telegram.access.blocked', 'telegram.access.history', 'telegram.access.suspended-operators')) {
+        foreach ($operation in @('admin.announcements.list', 'admin.diagnostics.runtime-files', 'admin.readiness', 'admin.notifications.coverage', 'telegram.access.blocked', 'telegram.access.history', 'telegram.access.suspended-operators')) {
             (& $call $operation @{ actor = 4321 }).error | Should -Be 'forbidden'
         }
         (& $call 'shift.notices' @{ actor = 4321; area = 'personal'; action = 'read' }).ok | Should -BeTrue
@@ -871,7 +995,7 @@ Describe 'Web channel: the pipe' {
     It 'rechecks air permissions before loading sensitive scene data through the named pipe' {
         Mock Test-Authorized { $false }
         Mock Get-TitlerLayerStatus { throw 'A denied request must not probe a layer.' }
-        foreach ($operation in @('air.rollback', 'air.text', 'air.timer', 'air.maintenance', 'air.emergency-hide', 'air.layer-removal')) {
+        foreach ($operation in @('air.rollback', 'air.text', 'air.timer', 'air.maintenance', 'air.emergency-hide', 'air.layer-removal', 'air.template-backups')) {
             $line = @{ op = $operation; args = @{ actor = 4321; layer = 9; action = 'preview' } } | ConvertTo-Json -Depth 5 -Compress
             $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
             $reply.error | Should -Be 'forbidden'
@@ -2936,6 +3060,49 @@ Describe 'Web channel: the pipe' {
             $script:MojazLibrary.Bulletins[0].Rows[0].Image | Should -Be '.\logo.png'
         }
         finally { $script:MojazLibrary = $oldLibrary }
+    }
+
+    It 'returns a scoped bulletin report and its bounded HTML through the real pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $false }
+        Mock Get-MojazReportData {
+            @{ Label = 'Today'; Rows = 2; Operators = 1; Scheduled = 1; Truncated = $false
+                Runs = @([pscustomobject]@{ Name = 'Fixture bulletin'; UserId = '4321'; Rows = 2
+                        StartedAt = [datetime]::new(2026, 3, 10, 8, 0, 0, [DateTimeKind]::Local)
+                        EndedAt = $null; Kind = 'scheduled'; DurationMs = 0L
+                    }) }
+        }
+        $list = @{ op = 'reports.bulletins'; args = @{ actor = 4321; action = 'list'; period = 'today' } } | ConvertTo-Json -Compress
+        $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $list | ConvertFrom-Json
+        $reply.ok | Should -BeTrue
+        $reply.data.scope | Should -Be 'mine'
+        $reply.data.items[0].name | Should -Be 'Fixture bulletin'
+        $save = @{ op = 'reports.bulletins'; args = @{ actor = 4321; action = 'export'; period = 'today' } } | ConvertTo-Json -Compress
+        $export = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $save | ConvertFrom-Json
+        $export.data.count | Should -Be 1
+        $export.data.html | Should -Match 'Fixture bulletin'
+        Should -Invoke Get-MojazReportData -Times 2 -Exactly -ParameterFilter { $OnlyUserId -eq 4321 }
+    }
+
+    It 'returns a scoped template aggregate and HTML through the real pipe' {
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Admin { $false }
+        Mock Get-BannerReportData {
+            @{ Label = 'Today'; Operators = 1; Truncated = $false
+                Sessions = @([pscustomobject]@{ Target = 'Fixture banner'; UserId = '4321'; Layer = 4
+                        StartedAt = [datetime]'2026-03-10T08:00:00'; EndedAt = $null; EndedBy = ''; Values = 'Editorial fixture'
+                    }) }
+        }
+        $list = @{ op = 'reports.templates'; args = @{ actor = 4321; action = 'list'; period = 'today' } } | ConvertTo-Json -Compress
+        $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $list | ConvertFrom-Json
+        $reply.ok | Should -BeTrue
+        $reply.data.scope | Should -Be 'mine'
+        $reply.data.items[0].layer | Should -Be 4
+        $save = @{ op = 'reports.templates'; args = @{ actor = 4321; action = 'export'; period = 'today' } } | ConvertTo-Json -Compress
+        $export = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $save | ConvertFrom-Json
+        $export.data.html | Should -Match 'Fixture banner'
+        $export.data.html | Should -Not -Match 'Editorial fixture'
+        Should -Invoke Get-BannerReportData -Times 2 -Exactly -ParameterFilter { $OnlyUserId -eq 4321 }
     }
 
     It 'routes reviewed after-urgent bookings and whole-bulletin deletion over the pipe without calling air' {

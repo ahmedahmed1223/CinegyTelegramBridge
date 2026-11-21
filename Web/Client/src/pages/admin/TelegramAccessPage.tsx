@@ -10,8 +10,11 @@ import { PageHeader } from '../../components/PageHeader'
 import { formatDateTime } from '../../lib/time'
 
 import { SuspendedTelegramOperators, TelegramSuspensionButton } from './TelegramSuspension'
+import { TelegramAliasButton } from './TelegramAliasButton'
+import { TelegramOperatorActivityButton } from './TelegramOperatorActivityButton'
 import { TelegramAccessHistory } from './TelegramAccessHistory'
 import { BlockedTelegramChats } from './BlockedTelegramChats'
+import { TelegramDeliveryQuarantine } from './TelegramDeliveryQuarantine'
 import { TelegramRevokeButton } from './TelegramRevokeButton'
 
 const requestsKey = ['telegram-access', 'requests'] as const
@@ -228,6 +231,8 @@ export function TelegramAccessPage({ embedded = false }: { embedded?: boolean })
                       <Group gap="xs">
                         <TelegramRevokeButton user={user} disabled={busy} />
                         {user.role === 'operator' && <TelegramSuspensionButton user={user} suspend busy={busy} />}
+                        {user.role === 'operator' && <TelegramAliasButton user={user} busy={busy} />}
+                        {user.role === 'operator' && <TelegramOperatorActivityButton user={user} />}
                         {isOwner && expectedRole && <Button variant="default" size="compact-sm" disabled={busy}
                         aria-label={`تغيير دور ${user.name} إلى ${roleLabel[nextRole]}`}
                         onClick={() => setChange({ kind: 'role', user, expectedRole, role: nextRole })}>
@@ -244,6 +249,7 @@ export function TelegramAccessPage({ embedded = false }: { embedded?: boolean })
       </Paper>
 
       <BlockedTelegramChats />
+      <TelegramDeliveryQuarantine />
       <SuspendedTelegramOperators />
       <TelegramAccessHistory />
       <Modal opened={change !== null} centered title={confirmLabel}

@@ -149,7 +149,7 @@ public static class AirEndpoints
         if (reply.IsUnavailable) return ApiErrors.BridgeUnavailable();
         if (!reply.Ok) return reply.Error switch
         {
-            "scene_definition_invalid" => ApiErrors.Of(400, reply.Error),
+            "scene_definition_invalid" or "scene_definition_reminder_range" => ApiErrors.Of(400, reply.Error),
             "scene_not_found" => ApiErrors.Of(404, reply.Error),
             "scene_registry_stale" or "scene_definition_live" or "scene_definition_scheduled" or
                 "scene_definition_linked" or "scene_definition_alias" or "scene_definition_preset_fields" => ApiErrors.Of(409, reply.Error),

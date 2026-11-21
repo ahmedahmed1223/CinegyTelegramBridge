@@ -24,10 +24,14 @@ public sealed record TemplateCatalogueResult(string? Folder, TemplateSceneEntry[
     TemplateCataloguePreview? Preview);
 public sealed record TemplateDefinitionFieldChange(string Name, string Label, int MaxLength, bool Required, bool Sensitive);
 public sealed record TemplateDefinitionField(string Name, string Label, string Type, int MaxLength, bool Required, bool Sensitive);
-public sealed record TemplateDefinitionChanges(string Description, string Category, int Layer, TemplateDefinitionFieldChange[] Fields);
+public sealed record TemplateDefinitionChanges(string Description, string Category, int Layer, TemplateDefinitionFieldChange[] Fields)
+{
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.Strict)]
+    public int? ReminderMinutes { get; init; }
+}
 public sealed record TemplateDefinitionCommand(string Action, string Revision = "", string Review = "", TemplateDefinitionChanges? Changes = null);
 public sealed record TemplateDefinitionView(string Key, string Revision, string File, int Layer, string Device,
-    string Description, string Category, int PresetCount, TemplateDefinitionField[] Fields);
+    string Description, string Category, int PresetCount, TemplateDefinitionField[] Fields, int ReminderMinutes);
 public sealed record TemplateDefinitionPreview(string Review, TemplateDefinitionView Before, TemplateDefinitionView? After);
 public sealed record TemplateDefinitionResult(TemplateDefinitionView? Definition, TemplateDefinitionPreview? Preview);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
@@ -246,12 +250,19 @@ public sealed record BulletinManagementConfirmCommand(string Review);
 public sealed record BulletinManagementReview(string Id, int Revision, string Operation, string Name,
     int RowCount, int PendingCount, int ReferenceCount, string Review);
 public sealed record BulletinManagementResult(string Id, string Operation, int? Revision);
+public sealed record BulletinReportRun(string Name, string OperatorName, string Started, string Ended, string Duration, int Rows, bool Scheduled);
+public sealed record BulletinReportPage(string Period, string Scope, int Total, int Rows, int Operators, int Scheduled, bool Truncated,
+    int Page, int PageCount, BulletinReportRun[] Items);
+public sealed record BulletinReportExport(string Html, int Count, int Total, bool Truncated);
 public sealed record BulletinSceneImageChoice(int Slot, string Label, long Bytes);
 public sealed record BulletinSceneImagePage(string Selection, int Page, int PageCount, bool Truncated,
     IReadOnlyList<BulletinSceneImageChoice> Items);
 public sealed record BulletinSceneImageApply(string Id, string RowId, int Revision, string Selection, int Slot);
 public sealed record RuntimeFileDiagnostic(string Kind, string State, double SizeKilobytes, long ModifiedAt, bool HasBackup);
 public sealed record RuntimeFileDiagnostics(long CheckedAt, int ParseLimitBytes, RuntimeFileDiagnostic[] Items);
+public sealed record ShiftReadinessReport(long CheckedAt, bool Ready, int OnAirLayers, int PendingOperations,
+    string TickerDraft, int QuarantinedChats, int PinnedFaults, bool QuietHours, string[] ProtectionFindings);
+public sealed record AdminNotificationCoverage(long CheckedAt, int Matched, int WithoutPersonalChat, int WithoutAdminRights);
 public sealed record ScheduleExecutionItem(string Kind, string Label, int Layer, string Result, int Attempt, long DurationMs,
     long? RanAtMs, long? DueAtMs, string RanAtStation, string DueAtStation, long? DelaySeconds, string Reason);
 public sealed record ScheduleExecutionPage(ScheduleExecutionItem[] Items, int Page, int PageCount, int Total, int ReadLimit,
@@ -285,6 +296,10 @@ public sealed record BlockedAccessPage(BlockedAccessItem[] Items, int Page, int 
 public sealed record AccessUnblockPreview(BlockedAccessItem Item, string Review);
 public sealed record AccessUnblockCommand(string Review);
 public sealed record AccessUnblockResult(long ChatId);
+public sealed record TemplateBackupCommand(string Action, string? Id = null, string? Review = null);
+public sealed record TemplateBackupSummary(string Id, long SavedAt, long Bytes);
+public sealed record TemplateBackupPreview(string Id, string[] Added, string[] Changed, string[] Removed, string Review);
+public sealed record TemplateBackupResult(TemplateBackupSummary[]? Backups, bool? Truncated, TemplateBackupPreview? Preview, bool? Restored);
 public sealed record TemplateSceneReplacementCommand(string Action, string? Revision = null, string? File = null, string? Selection = null, string? Review = null);
 public sealed record TemplateSceneReplacementCurrent(string Key, string File, int Layer, string Revision, int PresetCount);
 public sealed record TemplateSceneReplacementSelection(string? Handle, string File, string[] IncompatibleFields);
@@ -293,3 +308,41 @@ public sealed record TemplateSceneReplacementResult(TemplateSceneReplacementCurr
     TemplateSceneReplacementPreview? Preview);
 public sealed record WorkSummaryResponse(
     string Period, string Scope, bool Truncated, int Operators, int Operations, int Successful, int Blocked, int Failed, int Shows);
+
+public sealed record TickerReportDay(string Date, int Publishes, int Items, string First, string Last,
+    string Range, string Edits, string Operators);
+public sealed record TickerReportResponse(string Period, string Scope, int Publishes, int Items, int SilentDays,
+    string LastPublishedAt, bool Truncated, TickerReportDay[] Days);
+public sealed record TickerReportExport(string Html, int Days, int Publishes, bool Truncated);
+
+public sealed record TelegramOperatorActivityTotals(int Operations, int Successful, int Blocked, int Failed, int Shows, bool Truncated);
+public sealed record TelegramOperatorActivity(long UserId, string State, int? AgeMinutes, int RecentMinutes, TelegramOperatorActivityTotals Today);
+public sealed record TelegramDeliveryQuarantineRow(long ChatId, DateTimeOffset? Since, int Strikes, bool CanReset);
+public sealed record TelegramDeliveryQuarantinePage(TelegramDeliveryQuarantineRow[] Items, int Page, int PageSize, int Total);
+public sealed record TelegramDeliveryQuarantineReview(TelegramDeliveryQuarantineRow Target, string Review, DateTimeOffset ExpiresAt);
+public sealed record TelegramDeliveryQuarantineConfirm(string Review);
+public sealed record TelegramDeliveryQuarantineReset(long ChatId);
+public sealed record TemplateIssueCommand(string Action, string? Id = null, string? Review = null);
+public sealed record TemplateIssueItem(string Id, string Name, string Reason, int Layer, bool CanReview);
+public sealed record TemplateIssuePreview(TemplateIssueItem Issue, string Review);
+public sealed record TemplateIssueResult(TemplateIssueItem[]? Items, bool? Truncated, TemplateIssuePreview? Preview, bool? Deleted);
+public sealed record TemplateReportRun(string Name, string OperatorName, int Layer, string Started, string Ended, string Duration, string EndedBy);
+public sealed record TemplateReportPage(string Period, string Scope, int Total, int Operators, int WithoutEnd, bool Truncated,
+    int Page, int PageCount, TemplateReportRun[] Items);
+public sealed record TemplateReportExport(string Html, int Count, int Total, bool Truncated);
+
+public sealed record WeeklyReport(string From, string Through, int TickerPublishes, string TickerLast,
+    int UrgentRuns, int UrgentStories, bool NearLimit, string PeakScreen, int PeakPercent, int IdleCount, string[] Idle,
+    int[] RepeatCounts, int ChangedCount, string[] Changed, bool Truncated);
+public sealed record HandoverActiveLayer(int Layer, string Name);
+public sealed record HandoverShow(string Name, int Count, string Last, string Operators);
+public sealed record HandoverFailure(string When, string Action, string Name);
+public sealed record ShiftHandoverReport(int Hours, bool Truncated, string Connection, int ActiveCount, HandoverActiveLayer[] Active,
+    int ShowCount, int HiddenGroups, HandoverShow[] Shows, int RemovalCount, string LastRemoval, int FailureCount, int BlockedCount,
+    int NotableCount, HandoverFailure[] RecentFailures);
+
+public sealed record TelegramAliasTarget(long Id, string Name, string Alias);
+public sealed record TelegramAliasReviewCommand(string? Alias);
+public sealed record TelegramAliasConfirmCommand(string Review);
+public sealed record TelegramAliasPreview(TelegramAliasTarget Target, string Alias, string Review, DateTimeOffset ExpiresAt);
+public sealed record TelegramAliasResult(long UserId, string Name, string Alias);

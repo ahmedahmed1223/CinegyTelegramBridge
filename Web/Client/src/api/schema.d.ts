@@ -295,6 +295,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShiftReadinessReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/notifications/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminNotificationCoverage"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/air/rollback": {
         parameters: {
             query?: never;
@@ -496,6 +602,79 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telegram-access/users/{userId}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    userId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TelegramOperatorActivity"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -900,6 +1079,156 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["AirLayerRemovalResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/air/template-backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateBackupCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateBackupResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/air/template-issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateIssueCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateIssueResult"];
                     };
                 };
                 /** @description Bad Request */
@@ -4530,6 +4859,375 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/telegram-access/users/{userId}/alias/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    userId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TelegramAliasReviewCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TelegramAliasPreview"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telegram-access/users/{userId}/alias/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    userId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TelegramAliasConfirmCommand"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TelegramAliasResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telegram-access/delivery-quarantine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    pageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TelegramDeliveryQuarantinePage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telegram-access/delivery-quarantine/{chatId}/reset/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TelegramDeliveryQuarantineReview"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telegram-access/delivery-quarantine/{chatId}/reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TelegramDeliveryQuarantineConfirm"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TelegramDeliveryQuarantineReset"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/announcements": {
         parameters: {
             query?: never;
@@ -4880,6 +5578,504 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/bulletins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    period?: string;
+                    scope?: string;
+                    page?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulletinReportPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/bulletins/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    period?: string;
+                    scope?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulletinReportExport"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/ticker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    period?: string;
+                    scope?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TickerReportResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/ticker/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    period?: string;
+                    scope?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TickerReportExport"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    period?: string;
+                    scope?: string;
+                    page?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateReportPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/templates/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    period?: string;
+                    scope?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateReportExport"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/weekly": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WeeklyReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/handover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShiftHandoverReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7716,6 +8912,16 @@ export interface components {
             accounts: components["schemas"]["WebAccountResponse"][];
             bridgeUsers: components["schemas"]["BridgeUserResponse"][];
         };
+        AdminNotificationCoverage: {
+            /** Format: int64 */
+            checkedAt: number;
+            /** Format: int32 */
+            matched: number;
+            /** Format: int32 */
+            withoutPersonalChat: number;
+            /** Format: int32 */
+            withoutAdminRights: number;
+        };
         AdminOverview: {
             version: string;
             /** Format: int64 */
@@ -8280,6 +9486,42 @@ export interface components {
             /** @default null */
             imageFields: string[] | null;
         };
+        BulletinReportExport: {
+            html: string;
+            /** Format: int32 */
+            count: number;
+            /** Format: int32 */
+            total: number;
+            truncated: boolean;
+        };
+        BulletinReportPage: {
+            period: string;
+            scope: string;
+            /** Format: int32 */
+            total: number;
+            /** Format: int32 */
+            rows: number;
+            /** Format: int32 */
+            operators: number;
+            /** Format: int32 */
+            scheduled: number;
+            truncated: boolean;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageCount: number;
+            items: components["schemas"]["BulletinReportRun"][];
+        };
+        BulletinReportRun: {
+            name: string;
+            operatorName: string;
+            started: string;
+            ended: string;
+            duration: string;
+            /** Format: int32 */
+            rows: number;
+            scheduled: boolean;
+        };
         BulletinRow: {
             id: string;
             values: {
@@ -8507,6 +9749,23 @@ export interface components {
             outageSeconds: number;
             recent: components["schemas"]["FeedOutage"][];
         } | null;
+        HandoverActiveLayer: {
+            /** Format: int32 */
+            layer: number;
+            name: string;
+        };
+        HandoverFailure: {
+            when: string;
+            action: string;
+            name: string;
+        };
+        HandoverShow: {
+            name: string;
+            /** Format: int32 */
+            count: number;
+            last: string;
+            operators: string;
+        };
         LayerStatus: {
             /** Format: int32 */
             layer: number;
@@ -8817,6 +10076,30 @@ export interface components {
         SetPasswordRequest: {
             password: string;
         };
+        ShiftHandoverReport: {
+            /** Format: int32 */
+            hours: number;
+            truncated: boolean;
+            connection: string;
+            /** Format: int32 */
+            activeCount: number;
+            active: components["schemas"]["HandoverActiveLayer"][];
+            /** Format: int32 */
+            showCount: number;
+            /** Format: int32 */
+            hiddenGroups: number;
+            shows: components["schemas"]["HandoverShow"][];
+            /** Format: int32 */
+            removalCount: number;
+            lastRemoval: string;
+            /** Format: int32 */
+            failureCount: number;
+            /** Format: int32 */
+            blockedCount: number;
+            /** Format: int32 */
+            notableCount: number;
+            recentFailures: components["schemas"]["HandoverFailure"][];
+        };
         ShiftHistoryEventOption: {
             value: string;
             label: string;
@@ -8874,6 +10157,22 @@ export interface components {
             hiddenTargets: number;
             /** Format: int32 */
             hiddenOperators: number;
+        };
+        ShiftReadinessReport: {
+            /** Format: int64 */
+            checkedAt: number;
+            ready: boolean;
+            /** Format: int32 */
+            onAirLayers: number;
+            /** Format: int32 */
+            pendingOperations: number;
+            tickerDraft: string;
+            /** Format: int32 */
+            quarantinedChats: number;
+            /** Format: int32 */
+            pinnedFaults: number;
+            quietHours: boolean;
+            protectionFindings: string[];
         };
         ShowTemplateRequest: {
             key: string;
@@ -8955,6 +10254,85 @@ export interface components {
             role: string;
             expectedRole: string;
         };
+        TelegramAliasConfirmCommand: {
+            review: string;
+        };
+        TelegramAliasPreview: {
+            target: components["schemas"]["TelegramAliasTarget"];
+            alias: string;
+            review: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        TelegramAliasResult: {
+            /** Format: int64 */
+            userId: number;
+            name: string;
+            alias: string;
+        };
+        TelegramAliasReviewCommand: {
+            alias: string | null;
+        };
+        TelegramAliasTarget: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            alias: string;
+        };
+        TelegramDeliveryQuarantineConfirm: {
+            review: string;
+        };
+        TelegramDeliveryQuarantinePage: {
+            items: components["schemas"]["TelegramDeliveryQuarantineRow"][];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageSize: number;
+            /** Format: int32 */
+            total: number;
+        };
+        TelegramDeliveryQuarantineReset: {
+            /** Format: int64 */
+            chatId: number;
+        };
+        TelegramDeliveryQuarantineReview: {
+            target: components["schemas"]["TelegramDeliveryQuarantineRow"];
+            review: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        TelegramDeliveryQuarantineRow: {
+            /** Format: int64 */
+            chatId: number;
+            /** Format: date-time */
+            since: string | null;
+            /** Format: int32 */
+            strikes: number;
+            canReset: boolean;
+        };
+        TelegramOperatorActivity: {
+            /** Format: int64 */
+            userId: number;
+            state: string;
+            /** Format: int32 */
+            ageMinutes: number | null;
+            /** Format: int32 */
+            recentMinutes: number;
+            today: components["schemas"]["TelegramOperatorActivityTotals"];
+        };
+        TelegramOperatorActivityTotals: {
+            /** Format: int32 */
+            operations: number;
+            /** Format: int32 */
+            successful: number;
+            /** Format: int32 */
+            blocked: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            shows: number;
+            truncated: boolean;
+        };
         TelegramPollResponse: {
             state: string;
         };
@@ -9034,6 +10412,33 @@ export interface components {
             scope: string;
             canChange: boolean;
         };
+        TemplateBackupCommand: {
+            action: string;
+            /** @default null */
+            id: string | null;
+            /** @default null */
+            review: string | null;
+        };
+        TemplateBackupPreview: {
+            id: string;
+            added: string[];
+            changed: string[];
+            removed: string[];
+            review: string;
+        } | null;
+        TemplateBackupResult: {
+            backups: components["schemas"]["TemplateBackupSummary"][] | null;
+            truncated: boolean | null;
+            preview: components["schemas"]["TemplateBackupPreview"];
+            restored: boolean | null;
+        };
+        TemplateBackupSummary: {
+            id: string;
+            /** Format: int64 */
+            savedAt: number;
+            /** Format: int64 */
+            bytes: number;
+        };
         TemplateCataloguePreview: {
             review: string;
             key: string;
@@ -9076,6 +10481,8 @@ export interface components {
             /** Format: int32 */
             layer: number;
             fields: components["schemas"]["TemplateDefinitionFieldChange"][];
+            /** Format: int32 */
+            reminderMinutes?: number | null;
         } | null;
         TemplateDefinitionCommand: {
             action: string;
@@ -9123,6 +10530,8 @@ export interface components {
             /** Format: int32 */
             presetCount: number;
             fields: components["schemas"]["TemplateDefinitionField"][];
+            /** Format: int32 */
+            reminderMinutes: number;
         } | null;
         TemplateDefinitionView2: {
             key: string;
@@ -9136,6 +10545,8 @@ export interface components {
             /** Format: int32 */
             presetCount: number;
             fields: components["schemas"]["TemplateDefinitionField"][];
+            /** Format: int32 */
+            reminderMinutes: number;
         };
         TemplateDto: {
             key: string;
@@ -9154,6 +10565,31 @@ export interface components {
             maxLength: number | null;
             /** @default false */
             sensitive: boolean;
+        };
+        TemplateIssueCommand: {
+            action: string;
+            /** @default null */
+            id: string | null;
+            /** @default null */
+            review: string | null;
+        };
+        TemplateIssueItem: {
+            id: string;
+            name: string;
+            reason: string;
+            /** Format: int32 */
+            layer: number;
+            canReview: boolean;
+        };
+        TemplateIssuePreview: {
+            issue: components["schemas"]["TemplateIssueItem"];
+            review: string;
+        } | null;
+        TemplateIssueResult: {
+            items: components["schemas"]["TemplateIssueItem"][] | null;
+            truncated: boolean | null;
+            preview: components["schemas"]["TemplateIssuePreview"];
+            deleted: boolean | null;
         };
         TemplatePresetItem: {
             /** Format: int32 */
@@ -9216,6 +10652,40 @@ export interface components {
             preview: components["schemas"]["TemplateRehearsalPreview"];
             /** @default false */
             autoHideFailed: boolean;
+        };
+        TemplateReportExport: {
+            html: string;
+            /** Format: int32 */
+            count: number;
+            /** Format: int32 */
+            total: number;
+            truncated: boolean;
+        };
+        TemplateReportPage: {
+            period: string;
+            scope: string;
+            /** Format: int32 */
+            total: number;
+            /** Format: int32 */
+            operators: number;
+            /** Format: int32 */
+            withoutEnd: number;
+            truncated: boolean;
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            pageCount: number;
+            items: components["schemas"]["TemplateReportRun"][];
+        };
+        TemplateReportRun: {
+            name: string;
+            operatorName: string;
+            /** Format: int32 */
+            layer: number;
+            started: string;
+            ended: string;
+            duration: string;
+            endedBy: string;
         };
         /** @default null */
         TemplateSceneDefinition: {
@@ -9481,6 +10951,39 @@ export interface components {
             /** Format: int32 */
             offset: number;
         };
+        TickerReportDay: {
+            date: string;
+            /** Format: int32 */
+            publishes: number;
+            /** Format: int32 */
+            items: number;
+            first: string;
+            last: string;
+            range: string;
+            edits: string;
+            operators: string;
+        };
+        TickerReportExport: {
+            html: string;
+            /** Format: int32 */
+            days: number;
+            /** Format: int32 */
+            publishes: number;
+            truncated: boolean;
+        };
+        TickerReportResponse: {
+            period: string;
+            scope: string;
+            /** Format: int32 */
+            publishes: number;
+            /** Format: int32 */
+            items: number;
+            /** Format: int32 */
+            silentDays: number;
+            lastPublishedAt: string;
+            truncated: boolean;
+            days: components["schemas"]["TickerReportDay"][];
+        };
         TickerSavedSet: {
             /** Format: int32 */
             index: number;
@@ -9714,6 +11217,29 @@ export interface components {
             lastLoginAt: string | null;
             /** Format: date-time */
             lockedUntil: string | null;
+        };
+        WeeklyReport: {
+            from: string;
+            through: string;
+            /** Format: int32 */
+            tickerPublishes: number;
+            tickerLast: string;
+            /** Format: int32 */
+            urgentRuns: number;
+            /** Format: int32 */
+            urgentStories: number;
+            nearLimit: boolean;
+            peakScreen: string;
+            /** Format: int32 */
+            peakPercent: number;
+            /** Format: int32 */
+            idleCount: number;
+            idle: string[];
+            repeatCounts: number[];
+            /** Format: int32 */
+            changedCount: number;
+            changed: string[];
+            truncated: boolean;
         };
         WorkSummaryResponse: {
             period: string;

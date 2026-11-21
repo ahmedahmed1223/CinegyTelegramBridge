@@ -1063,8 +1063,15 @@ function Get-MissedEventsRecords {
        and the block screen read exactly the same set - two readers of one
        log that filter it separately are two answers waiting to disagree. #>
     param([int]$Hours = 12)
+    return (Get-MissedEventsWindow -Hours $Hours).Records
+}
+
+function Get-MissedEventsWindow {
+    param([int]$Hours = 12)
     $since = (Get-Date).ToUniversalTime().AddHours(-[math]::Max(1, $Hours))
-    return @(Read-AuditRecords -MaxLines 1500 | ForEach-Object {
+    $limit = 1500
+    $raw = @(Read-AuditRecords -MaxLines $limit)
+    $records = @($raw | ForEach-Object {
             $record = $_
             $when = Read-AuditRecordStamp -Record $record
             if (-not $when -or $when.ToUniversalTime() -lt $since) { return }
@@ -1077,6 +1084,7 @@ function Get-MissedEventsRecords {
                 UserId  = (Get-AuditRecordField -Record $record -Name 'userId')
             }
         })
+    return @{ Records = $records; Truncated = ($raw.Count -ge $limit) }
 }
 
 function Get-MissedEventsText {

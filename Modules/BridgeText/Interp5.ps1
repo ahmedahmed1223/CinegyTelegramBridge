@@ -40,6 +40,8 @@ function Add-BridgeTextInterp5 {
     $catalogue['kb.by'] = @{ ar = ' · بواسطة {0}'; en = ' · by {0}' }
     $catalogue['kb.addedOn'] = @{ ar = '📅 أُضيف {0}{1}'; en = '📅 Added {0}{1}' }
     $catalogue['kb.workingNamePrompt'] = @{ ar = "✏️ الاسم التشغيلي للمستخدم {0}`nالحالي: {1}`n`nأرسل الاسم الجديد، أو أرسل - لحذف الـAlias."; en = "✏️ The working name for user {0}`nCurrently: {1}`n`nSend the new name, or send - to remove the alias." }
+    $catalogue['kb.workingNameLimit'] = @{ ar = 'أرسل اسمًا لا يتجاوز {0} حرفًا.'; en = 'Send a name of at most {0} characters.' }
+    $catalogue['kb.workingNameSingleLine'] = @{ ar = 'أرسل الاسم في سطر واحد.'; en = 'Send the name on one line.' }
     $catalogue['kb.aliasSet'] = @{ ar = 'تعيين اسم بديل ''{0}'''; en = 'an alias set to ''{0}''' }
     $catalogue['kb.userAudit'] = @{ ar = '👤 {0} للمستخدم {1} - بواسطة {2}'; en = '👤 {0} for user {1} - by {2}' }
     $catalogue['kb.noFavouritesYet'] = @{ ar = '<i>ℹ️ لم تختر شيئًا بعد، فتعرض القائمة أكثر {0} استخدامًا تلقائيًا.</i>'; en = '<i>ℹ️ You have chosen nothing yet, so the menu shows the {0} most used by itself.</i>' }

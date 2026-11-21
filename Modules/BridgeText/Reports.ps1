@@ -98,7 +98,10 @@ function Add-BridgeTextReports {
     $catalogue['rep.bySchedule'] = @{ ar = ' &middot; بالجدولة'; en = ' &middot; by schedule' }
     $catalogue['rep.newsReport'] = @{ ar = '📰 تقرير الأخبار'; en = '📰 News report' }
     $catalogue['rep.bulletinReport'] = @{ ar = '📑 تقرير الموجزات'; en = '📑 Bulletin report' }
+    $catalogue['rep.bulletinWebExportCap'] = @{ ar = 'يشمل هذا الملف أحدث {0} تشغيلًا من أصل {1} في التقرير.'; en = 'This file includes the latest {0} of {1} runs in the report.' }
     $catalogue['rep.bannerReport'] = @{ ar = '🖼 تقرير البنرات'; en = '🖼 Banner report' }
+    $catalogue['rep.templateMissingEnd'] = @{ ar = 'بلا نهاية مسجّلة'; en = 'No end recorded' }
+    $catalogue['rep.templateWebExportCap'] = @{ ar = 'يشمل هذا الملف أحدث {0} عرضًا من أصل {1} في التقرير.'; en = 'This file includes the latest {0} of {1} displays in the report.' }
     $catalogue['rep.sendReportFailed'] = @{ ar = '⚠️ تعذّر إرسال ملف التقرير.'; en = '⚠️ Could not send the report file.' }
     $catalogue['rep.createReportFailed'] = @{ ar = '⚠️ تعذّر إنشاء ملف التقرير.'; en = '⚠️ Could not create the report file.' }
     $catalogue['rep.day.sun'] = @{ ar = 'أحد'; en = 'Sun' }

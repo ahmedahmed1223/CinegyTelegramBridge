@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.123.0'
+$script:BridgeVersion = '8.125.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -105,6 +105,7 @@ foreach ($part in @(
         'Bridge.Urgent.Playback'
         'Bridge.Boards'
         'Bridge.Users'
+        'Bridge.UserWorkingNames'
         'Bridge.Templates'
         'Bridge.OnAir'
         'Bridge.Schedule'
@@ -143,17 +144,26 @@ foreach ($part in @(
         'Bridge.WebTelegramUnblock'
         'Bridge.WebAccessHistory'
         'Bridge.WebTelegramSuspension'
+        'Bridge.WebTelegramAlias'
+        'Bridge.WebTelegramOperatorActivity'
+        'Bridge.WebTelegramDeliveryQuarantine'
         'Bridge.WebAnnouncements'
         'Bridge.WebRuntimeFileDiagnostics'
         'Bridge.WebScheduleExecution'
         'Bridge.WebSceneReplacement'
         'Bridge.WebWorkSummary'
+        'Bridge.WebBulletinReport'
+        'Bridge.WebTickerReport'
+        'Bridge.WebTemplateReport'
+        'Bridge.WebHandoverReports'
         'Bridge.WebBulletinManagement'
         'Bridge.WebBulletinAfterUrgent'
         'Bridge.WebBulletinSceneImages'
         'Bridge.WebAirEmergency'
         'Bridge.WebAirTimer'
         'Bridge.WebLayerRemoval'
+        'Bridge.WebTemplateBackups'
+        'Bridge.WebTemplateIssues'
     )) {
     . (Join-Path $scriptRoot "Parts/$part.ps1")
 }

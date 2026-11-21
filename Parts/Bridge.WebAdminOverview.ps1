@@ -62,6 +62,47 @@ function Get-WebAdminSettingView {
     Get-WebAdminPresentationSettingView
 }
 
+function Get-WebAdminNotificationCoverage {
+    param([System.Collections.IDictionary]$Arguments, [datetimeoffset]$Now = [datetimeoffset]::Now)
+
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-Admin -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    # The Bot can render private IDs to a station administrator. Only counts
+    # cross the web boundary, so this report also works for shared screens.
+    $mismatch = Get-AdminListMismatch
+    return @{ ok = $true; data = @{
+        checkedAt = $Now.ToUnixTimeMilliseconds()
+        matched = $mismatch.MatchedCount
+        withoutPersonalChat = $mismatch.Unnotified.Count
+        withoutAdminRights = $mismatch.Unauthorized.Count
+    } }
+}
+
+function Get-WebShiftReadiness {
+    param([System.Collections.IDictionary]$Arguments, [datetimeoffset]$Now = [datetimeoffset]::Now)
+
+    $actor = 0L
+    if (-not [long]::TryParse([string](Get-JsonProp $Arguments 'actor'), [ref]$actor) -or $actor -le 0 -or
+        -not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-Admin -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    $snapshot = Get-ShiftReadinessSnapshot
+    return @{ ok = $true; data = @{
+        checkedAt = $Now.ToUnixTimeMilliseconds()
+        ready = $snapshot.Ready
+        onAirLayers = $snapshot.OnAirLayers
+        pendingOperations = $snapshot.PendingOperations
+        tickerDraft = $snapshot.TickerDraft
+        quarantinedChats = $snapshot.QuarantinedChats
+        pinnedFaults = $snapshot.PinnedFaults
+        quietHours = $snapshot.QuietHours
+        protectionFindings = @(Get-ShiftReadinessProtectionFinding | ForEach-Object { $_.Name })
+    } }
+}
+
 function Get-WebAdminOverview {
     param([System.Collections.IDictionary]$Arguments, [datetime]$Now = (Get-Date))
     $actor = 0L

@@ -863,6 +863,7 @@ Describe 'An administrator who can approve is an administrator who is told' {
 
     It 'names the administrator who hears nothing, in both directions' {
         $mismatch = Get-AdminListMismatch
+        $mismatch.MatchedCount | Should -Be 2
         @($mismatch.Unnotified) | Should -Be @(33)
         @($mismatch.Unauthorized) | Should -BeNullOrEmpty
 

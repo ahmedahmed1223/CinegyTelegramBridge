@@ -1419,6 +1419,7 @@ function Get-AdminListMismatch {
         Unnotified = @($users | Where-Object { $chats -notcontains $_ } | Sort-Object -Unique)
         # Notified without authority - confusing rather than harmful.
         Unauthorized = @($chats | Where-Object { $users -notcontains $_ } | Sort-Object -Unique)
+        MatchedCount = @($users | Where-Object { $chats -contains $_ } | Sort-Object -Unique).Count
     }
 }
 

@@ -53,6 +53,7 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
   const [description, setDescription] = useState(definition.description)
   const [category, setCategory] = useState(definition.category)
   const [layer, setLayer] = useState<number | string>(definition.layer)
+  const [reminderMinutes, setReminderMinutes] = useState<number | string>(definition.reminderMinutes)
   const [fields, setFields] = useState<Field[]>(() =>
     definition.fields.map(({ name, label, maxLength, required, sensitive }) =>
       ({ id: crypto.randomUUID(), name, label, maxLength, required, sensitive })))
@@ -88,9 +89,10 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
   }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (typeof layer !== 'number') return
+    if (typeof layer !== 'number' || typeof reminderMinutes !== 'number') return
     checking.mutate({
       mode: 'edit', changes: { description, category, layer,
+        ...(reminderMinutes !== definition.reminderMinutes ? { reminderMinutes } : {}),
         fields: fields.map(({ name, label, maxLength, required, sensitive }) => ({ name, label, maxLength, required, sensitive })) },
     })
   }
@@ -107,7 +109,9 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
       </Stack>
       {error && <Alert color="orange" role="alert">
         <Stack gap="xs" align="flex-start">
-          {messageFor(error.message)}
+          {error.message === 'scene_definition_reminder_range'
+            ? 'اضبط تذكير مدة العرض بين ٠ و١٤٤٠ دقيقة.'
+            : messageFor(error.message)}
           {error.message === 'scene_registry_stale' && <Button variant="default" size="xs" onClick={onReload}>تحميل التعريف الحالي</Button>}
         </Stack>
       </Alert>}
@@ -131,6 +135,9 @@ function DefinitionForm({ definition, onClose, onReload }: { definition: Definit
               {definition.device ? <TextInput label="جهاز القالب" value={definition.device} readOnly />
                 : <NumberInput required label="الطبقة" min={1} allowDecimal={false} value={layer}
                   onChange={value => setLayer(typeof value === 'bigint' ? Number(value) : value)} />}
+              <NumberInput required label="تذكير بعد مرور (دقيقة)" description="٠ يوقف التذكير. الحد الأقصى ١٤٤٠ دقيقة."
+                min={0} max={1440} allowNegative={false} allowDecimal={false} value={reminderMinutes}
+                onChange={value => setReminderMinutes(typeof value === 'bigint' ? Number(value) : value)} />
             </SimpleGrid>
             <Group justify="space-between">
               <Text fw={600}>حقول الإدخال</Text>
@@ -196,6 +203,10 @@ function describeField(field: Definition['fields'][number]) {
     field.required ? 'إلزامي' : '', field.sensitive ? 'حسّاس' : ''].filter(Boolean).join(' · ')
 }
 
+function reminderLabel(minutes: number) {
+  return minutes === 0 ? 'متوقف' : `${new Intl.NumberFormat('ar').format(minutes)} دقيقة`
+}
+
 function DefinitionComparison({ before, after }: { before: Definition; after: Definition }) {
   const oldFields = new Map(before.fields.map(field => [field.name, describeField(field)]))
   const newFields = new Map(after.fields.map(field => [field.name, describeField(field)]))
@@ -204,6 +215,7 @@ function DefinitionComparison({ before, after }: { before: Definition; after: De
     { name: 'اسم العرض', before: before.description, after: after.description },
     { name: 'التصنيف', before: before.category, after: after.category },
     { name: 'الطبقة', before: String(before.layer), after: String(after.layer) },
+    { name: 'تذكير مدة العرض', before: reminderLabel(before.reminderMinutes), after: reminderLabel(after.reminderMinutes) },
     ...Array.from(fields, name => ({ name, before: oldFields.get(name), after: newFields.get(name) })),
   ].filter(row => row.before !== row.after)
 

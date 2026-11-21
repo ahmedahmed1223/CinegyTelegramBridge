@@ -1543,35 +1543,55 @@ function Get-ReportHtmlDocument {
 function Get-BannerReportHtml {
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-BannerReportData -Period $Period -OnlyUserId $OnlyUserId
-    $sessions = @($data.Sessions)
+    return ConvertTo-BannerReportHtml -Data $data -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
+}
+
+function Get-BannerSessionDuration {
+    param($Session)
+    $minutes = [int][math]::Round((([datetime]$Session.EndedAt) - ([datetime]$Session.StartedAt)).TotalMinutes)
+    return Format-DurationMinutes -Minutes $minutes
+}
+
+function ConvertTo-BannerReportHtml {
+    param([Parameter(Mandatory)][hashtable]$Data, [string]$Note, [switch]$SummaryOnly)
+    $sessions = @($Data.Sessions)
     $body = [System.Collections.Generic.List[string]]::new()
     if ($sessions.Count -eq 0) { $body.Add((T 'rep.noBannerP')) }
     foreach ($session in $sessions) {
-        $who = Get-AuditOperatorName -UserId ([string]$session.UserId)
+        $who = if ($SummaryOnly) { [string]$session.OperatorName } else { Get-AuditOperatorName -UserId ([string]$session.UserId) }
         $start = ([datetime]$session.StartedAt).ToString('yyyy/MM/dd HH:mm')
         if ($session.EndedAt) {
-            $minutes = [int][math]::Round((([datetime]$session.EndedAt) - ([datetime]$session.StartedAt)).TotalMinutes)
-            $span = "$start &#8592; $(([datetime]$session.EndedAt).ToString('HH:mm')) &middot; $(Format-DurationMinutes -Minutes $minutes)"
+            $span = "$start &#8592; $(([datetime]$session.EndedAt).ToString('HH:mm')) &middot; $(Get-BannerSessionDuration -Session $session)"
+            if ($SummaryOnly -and $session.EndedBy) { $span += ' &middot; ' + (ConvertTo-HtmlText $session.EndedBy) }
         }
+        elseif ($SummaryOnly) { $span = $start + ' &middot; ' + (ConvertTo-HtmlText (T 'rep.templateMissingEnd')) }
         else { $span = '<span class="live">' + $start + (T 'rep.stillOnAirHtml') }
         $sub = '&laquo;' + (ConvertTo-HtmlText ([string]$session.Target)) + (T 'rep.layerHtml' $($session.Layer))
         if ($who) { $sub += ' &middot; ' + (ConvertTo-HtmlText $who) }
-        $copy = if ($session.Values) { ConvertTo-HtmlText ([string]$session.Values) } else { (T 'rep.textNotRecorded') }
-        $body.Add('<div class="row"><div class="head">' + $span + '</div><div class="sub">' + $sub + '</div><div class="copy">' + $copy + '</div></div>')
+        $copyBlock = ''
+        if (-not $SummaryOnly) {
+            $copy = if ($session.Values) { ConvertTo-HtmlText ([string]$session.Values) } else { (T 'rep.textNotRecorded') }
+            $copyBlock = '<div class="copy">' + $copy + '</div>'
+        }
+        $body.Add('<div class="row"><div class="head">' + $span + '</div><div class="sub">' + $sub + '</div>' + $copyBlock + '</div>')
     }
-    $body.Add('<p class="totals">' + (T 'rep.bannerTotalsPage' $($sessions.Count) $($data.Operators)) + '</p>')
-    return Get-ReportHtmlDocument -Title (T 'rep.bannerPageTitle' $($data.Label)) -Body ($body -join "`n") `
-        -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
+    $body.Add('<p class="totals">' + (T 'rep.bannerTotalsPage' $($sessions.Count) $($Data.Operators)) + '</p>')
+    return Get-ReportHtmlDocument -Title (T 'rep.bannerPageTitle' $($Data.Label)) -Body ($body -join "`n") -Note $Note
 }
 
 function Get-MojazReportHtml {
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
     $data = Get-MojazReportData -Period $Period -OnlyUserId $OnlyUserId
-    $runs = @($data.Runs)
+    return ConvertTo-MojazReportHtml -Data $data -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
+}
+
+function ConvertTo-MojazReportHtml {
+    param([Parameter(Mandatory)][hashtable]$Data, [string]$Note, [switch]$UseProjectedOperatorNames)
+    $runs = @($Data.Runs)
     $body = [System.Collections.Generic.List[string]]::new()
     if ($runs.Count -eq 0) { $body.Add((T 'rep.noBulletinRunP')) }
     foreach ($run in $runs) {
-        $who = Get-AuditOperatorName -UserId ([string]$run.UserId)
+        $who = if ($UseProjectedOperatorNames) { [string]$run.OperatorName } else { Get-AuditOperatorName -UserId ([string]$run.UserId) }
         $started = if ($run.StartedAt) { ([datetime]$run.StartedAt).ToString('yyyy/MM/dd HH:mm') } else { '&mdash;' }
         $head = if ($run.EndedAt) { "$started &#8592; $(([datetime]$run.EndedAt).ToString('HH:mm')) &middot; $(Get-MojazRunDuration -Run $run)" }
         else { '<span class="live">' + $started + (T 'rep.stillOnAirHtml') }
@@ -1580,14 +1600,17 @@ function Get-MojazReportHtml {
         if ($who) { $sub += ' &middot; ' + (ConvertTo-HtmlText $who) }
         $body.Add('<div class="row"><div class="head">' + $head + '</div><div class="sub">' + $sub + '</div></div>')
     }
-    $body.Add('<p class="totals">' + (T 'rep.bulletinTotalsPage' $($runs.Count) $([int]$data.Rows) $($data.Operators)) + '</p>')
-    return Get-ReportHtmlDocument -Title (T 'rep.bulletinPageTitle' $($data.Label)) -Body ($body -join "`n") `
-        -Note (Get-ReportTruncationNote -Truncated ([bool]$data.Truncated))
+    $body.Add('<p class="totals">' + (T 'rep.bulletinTotalsPage' $($runs.Count) $([int]$Data.Rows) $($Data.Operators)) + '</p>')
+    return Get-ReportHtmlDocument -Title (T 'rep.bulletinPageTitle' $($Data.Label)) -Body ($body -join "`n") -Note $Note
 }
 
 function Get-NewsReportHtml {
     param([Parameter(Mandatory)][ValidateSet('today', 'yesterday', 'week', 'month')][string]$Period, [long]$OnlyUserId = 0)
-    $data = Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId
+    return ConvertTo-NewsReportHtml -Data (Get-NewsReportDays -Period $Period -OnlyUserId $OnlyUserId)
+}
+
+function ConvertTo-NewsReportHtml {
+    param([Parameter(Mandatory)][hashtable]$Data)
     $days = @($data.Days)
     $body = [System.Collections.Generic.List[string]]::new()
     if ($days.Count -eq 0) { $body.Add((T 'rep.noTickerPublishP')) }

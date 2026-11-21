@@ -353,7 +353,7 @@ function Get-TemplateRegistryImportComparison {
     $removed = @($currentNames | Where-Object { $importedNames -notcontains $_ })
     $changed = @($importedNames | Where-Object {
         $currentNames -contains $_ -and
-        ((Get-JsonProp $Current $_ | ConvertTo-Json -Depth 20 -Compress) -ne (Get-JsonProp $Imported $_ | ConvertTo-Json -Depth 20 -Compress))
+        ((Get-JsonProp $Current $_ | ConvertTo-Json -Depth 20 -Compress) -cne (Get-JsonProp $Imported $_ | ConvertTo-Json -Depth 20 -Compress))
     })
     $unchanged = @($importedNames | Where-Object { $currentNames -contains $_ -and $changed -notcontains $_ })
     return [pscustomobject]@{ Added=$added; Removed=$removed; Changed=$changed; Unchanged=$unchanged }

@@ -8,7 +8,11 @@ import { Shell } from '../layout/Shell'
 import { AccountsPage } from '../pages/accounts/AccountsPage'
 import { AnnouncementsPage } from '../pages/admin/AnnouncementsPage'
 import { ShiftNoticesPage } from '../pages/notices/ShiftNoticesPage'
+import { TemplateReportPage } from '../pages/history/TemplateReportPage'
+import { TickerReportPage } from '../pages/history/TickerReportPage'
 import { WorkSummaryPage } from '../pages/history/WorkSummaryPage'
+import { HandoverReportsPage } from '../pages/history/HandoverReportsPage'
+import { BulletinReportPage } from '../pages/history/BulletinReportPage'
 import { ShiftHistoryPage } from '../pages/history/ShiftHistoryPage'
 import { AdminOverviewPage } from '../pages/admin/AdminOverviewPage'
 import { TelegramAccessPage } from '../pages/admin/TelegramAccessPage'
@@ -47,6 +51,11 @@ const router = createBrowserRouter([
       { path: 'notices', element: <ShiftNoticesPage /> },
       { path: 'admin/announcements', element: <RequireAdmin><AnnouncementsPage /></RequireAdmin> },
       { path: 'reports/work-summary', element: <WorkSummaryPage /> },
+      { path: 'reports/handover', element: <HandoverReportsPage view="handover" /> },
+      { path: 'reports/weekly', element: <HandoverReportsPage view="weekly" /> },
+      { path: 'reports/templates', element: <TemplateReportPage /> },
+      { path: 'reports/ticker', element: <TickerReportPage /> },
+      { path: 'reports/bulletins', element: <BulletinReportPage /> },
       { path: 'history', element: <ShiftHistoryPage /> },
       { path: 'admin/overview', element: <RequireAdmin><AdminOverviewPage /></RequireAdmin> },
       { path: 'telegram-access', element: <RequireAdmin><TelegramAccessPage /></RequireAdmin> },

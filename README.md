@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.111.0
+
+Administrators can delete programme boards from the web newsroom after reviewing the board name and row count. The bridge checks the reviewed revision before deleting and keeps the board and backup when the primary file cannot be moved.
+
 ## Version 8.110.0
 
 Programme boards accept pasted spreadsheet rows or pipe-separated text. The editor previews the columns and skipped entries before committing the approved rows together. Individual edits and batches use the bridge's configured field-length limit.

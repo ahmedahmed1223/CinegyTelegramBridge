@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '8.110.0'
+$script:BridgeVersion = '8.111.0'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1198,6 +1198,8 @@ $script:UrgentHomeMessage = @{}
 # Programme content boards: id -> board, filled from logs/boards/ at startup.
 # The directory is the index; there is no index file to drift from it.
 $script:ContentBoards = [ordered]@{}
+$script:ContentBoardPaths = @{}
+$script:ContentBoardDuplicateIds = @{}
 # Which row of which board is on each LAYER. Keyed by layer because two
 # boards may share one, and the second to be shown replaces the first.
 $script:BoardsLive = @{}

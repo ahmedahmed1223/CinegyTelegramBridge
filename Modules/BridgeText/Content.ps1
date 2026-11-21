@@ -91,6 +91,8 @@ function Add-BridgeTextContent {
         en = '⚠️ Delete "{0}" and its {1} row(s). This cannot be undone.'
     }
     $catalogue['boards.deleteYes'] = @{ ar = '🗑 نعم، احذف'; en = '🗑 Yes, delete' }
+    $catalogue['boards.deleteStale'] = @{ ar = 'تغيّرت اللوحة بعد المراجعة. افتح اللوحة وراجع الحذف من جديد.'; en = 'The board changed after review. Open it and review the deletion again.' }
+    $catalogue['boards.deleteFailed'] = @{ ar = 'تعذّر حذف اللوحة. بقيت محفوظة.'; en = 'The board could not be deleted. It is still saved.' }
     $catalogue['boards.list'] = @{ ar = '⬅️ الجداول'; en = '⬅️ Boards' }
     $catalogue['boards.live'] = @{ ar = '🔴 على الهواء الآن'; en = '🔴 On air now' }
     $catalogue['boards.hide'] = @{ ar = '⏹ إخفاء'; en = '⏹ Hide' }

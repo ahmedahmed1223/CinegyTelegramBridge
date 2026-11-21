@@ -899,18 +899,29 @@ function Invoke-CallbackQuery {
             if ($delBoard) {
                 # Confirmed, because this is a producer's prepared work and not a
                 # setting that can be typed again in a moment.
+                $reviewedRevision = [int](Get-BoardProperty $delBoard 'Revision')
                 Send-TelegramMessage -ChatId $chatId -Text (T 'boards.deleteConfirm' (ConvertTo-TelegramHtmlText ([string](Get-BoardProperty $delBoard 'Name' ''))) @(Get-BoardProperty $delBoard 'Items' @()).Count) `
-                    -ParseMode 'HTML' -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'boards.deleteYes') "boards:delgo:$delId" -Style danger), (New-Button (T 'common.back') "boards:b:$delId"))) }
+                    -ParseMode 'HTML' -ReplyMarkup @{ inline_keyboard = @(, @((New-Button (T 'boards.deleteYes') "boards:delgo:${delId}:$reviewedRevision" -Style danger), (New-Button (T 'common.back') "boards:b:$delId"))) }
             }
             break
         }
         'boards:delgo:*' {
             if (-not (Test-CallbackAdmin -ChatId $chatId -UserId $userId)) { break }
-            $delGoId = [string](Get-CallbackArg $data 'boards:delgo:')
-            $delGoBoard = Get-ContentBoard -BoardId $delGoId
-            if ($delGoBoard) {
-                Add-AuditEntry (T 'cb.boardDeletedAudit' $([string](Get-BoardProperty $delGoBoard 'Name' '')) $(Format-UserAuditActor -UserId $userId))
-                Remove-ContentBoardFile -BoardId $delGoId
+            $deleteParts = @((Get-CallbackArg $data 'boards:delgo:') -split ':', 2)
+            $deleteRevision = 0
+            if ($deleteParts.Count -ne 2 -or -not $deleteParts[0] -or -not [int]::TryParse($deleteParts[1], [ref]$deleteRevision)) {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'boards.deleteStale')
+                break
+            }
+            $deleted = Remove-ReviewedContentBoard -BoardId $deleteParts[0] -Revision $deleteRevision
+            if ($deleted.Success) {
+                Add-AuditEntry (T 'cb.boardDeletedAudit' $([string](Get-BoardProperty $deleted.Value 'Name' '')) $(Format-UserAuditActor -UserId $userId))
+            }
+            elseif ($deleted.ErrorCode -eq 'board_stale') {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'boards.deleteStale')
+            }
+            elseif ($deleted.ErrorCode -eq 'board_delete_failed') {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'boards.deleteFailed')
             }
             Show-BoardsScreen -ChatId $chatId -UserId $userId
             break

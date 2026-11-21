@@ -342,10 +342,39 @@ Describe 'Boards on disk' {
         $board = (New-ContentBoard -Name 'الاقتصاد' -TemplateKey 'Econ').Value
         Save-ContentBoard -Board $board | Out-Null
 
-        Remove-ContentBoardFile -BoardId $board.Id
+        Remove-ContentBoardFile -BoardId $board.Id | Should -BeTrue
 
         Test-Path -LiteralPath (Get-BoardFilePath -BoardId $board.Id) | Should -BeFalse
         @(Get-ContentBoards).Count | Should -Be 0
+    }
+
+    It 'refuses a Telegram delete button after another editor saves more rows' {
+        Mock Test-Authorized { $true }
+        Mock Test-Admin { $true }
+        Mock Test-BoardsAvailable { $true }
+        Mock Confirm-TelegramCallback {}
+        Mock Send-TelegramMessage {}
+        Mock Show-BoardsScreen {}
+        $board = (New-ContentBoard -Name 'الاقتصاد' -TemplateKey 'Econ').Value
+        Save-ContentBoard -Board $board | Should -BeTrue
+        $noticeButton = "boards:delgo:$($board.Id):$($board.Revision)"
+        $callback = [pscustomobject]@{
+            id = 'review-board-deletion'; from = [pscustomobject]@{ id = 101 }
+            message = [pscustomobject]@{ message_id = 1; chat = [pscustomobject]@{ id = 101; type = 'private' } }
+            data = "boards:del:$($board.Id)"
+        }
+        Invoke-CallbackQuery -CallbackQuery $callback
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter {
+            $ReplyMarkup -and $ReplyMarkup.inline_keyboard[0][0].callback_data -ceq $noticeButton
+        }
+
+        $changed = Add-BoardItem -Board $board -TextFields @('title.Text') -Values @{ 'title.Text' = 'عنوان جديد' }
+        Save-ContentBoard -Board $changed.Value | Should -BeTrue
+        $callback.data = $noticeButton
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -match 'تغيّرت اللوحة بعد المراجعة' }
+        (Get-ContentBoard -BoardId $board.Id).Items.Count | Should -Be 1
     }
 
     It 'skips a board whose file is unreadable instead of refusing to start' {

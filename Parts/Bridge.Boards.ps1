@@ -25,6 +25,7 @@ function Get-BoardsDirectory {
 
 function Get-BoardFilePath {
     param([Parameter(Mandatory)][string]$BoardId)
+    if ($script:ContentBoardPaths.ContainsKey($BoardId)) { return $script:ContentBoardPaths[$BoardId] }
     return (Join-Path (Get-BoardsDirectory) "$BoardId.json")
 }
 
@@ -46,6 +47,8 @@ function Import-ContentBoards {
         start over.
     #>
     $script:ContentBoards = [ordered]@{}
+    $script:ContentBoardPaths = @{}
+    $script:ContentBoardDuplicateIds = @{}
     $directory = Get-BoardsDirectory
     if (-not (Test-Path -LiteralPath $directory)) { return }
     foreach ($file in @(Get-ChildItem -LiteralPath $directory -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
@@ -56,8 +59,10 @@ function Import-ContentBoards {
             $board = $read.Data
             $id = [string](Get-JsonProp $board 'Id')
             if (-not $id) { continue }
+            if ($script:ContentBoardPaths.ContainsKey($id)) { $script:ContentBoardDuplicateIds[$id] = $true }
             if ($read.Recovered) { Write-BridgeLog "Recovered content board '$id' from its backup." 'WARN' }
             $script:ContentBoards[$id] = $board
+            $script:ContentBoardPaths[$id] = $file.FullName
         }
         catch { Write-BridgeLog "Could not read content board $($file.Name): $($_.Exception.Message)" 'WARN' }
     }
@@ -82,17 +87,41 @@ function Save-ContentBoard {
 }
 
 function Remove-ContentBoardFile {
-    <# A deleted board takes its file with it. Leaving it behind would have the
-       directory - which IS the index - still listing a board nobody can reach. #>
     param([Parameter(Mandatory)][string]$BoardId)
+    if ($BoardId.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) { return $false }
+    if ($script:ContentBoardDuplicateIds.ContainsKey($BoardId)) {
+        Write-BridgeLog "Cannot delete content board '$BoardId': more than one file declares this ID." 'WARN'
+        return $false
+    }
     $path = Get-BoardFilePath -BoardId $BoardId
-    foreach ($target in @($path, "$path.bak")) {
-        if (Test-Path -LiteralPath $target) {
+    $discarded = "$path.deleted-$([guid]::NewGuid().ToString('N'))"
+    # The directory is the index. Rename the primary out of the index before
+    # changing memory or touching the backup. A locked primary leaves both intact.
+    try { [IO.File]::Move($path, $discarded) }
+    catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] { $discarded = $null }
+    catch {
+        Write-BridgeLog "Could not delete content board '$BoardId': $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+    $script:ContentBoards.Remove($BoardId) | Out-Null
+    $script:ContentBoardPaths.Remove($BoardId)
+    foreach ($target in @("$path.bak", $discarded)) {
+        if ($target -and (Test-Path -LiteralPath $target)) {
             try { Remove-Item -LiteralPath $target -Force -ErrorAction Stop }
             catch { Write-BridgeLog "Could not remove $target`: $($_.Exception.Message)" 'WARN' }
         }
     }
-    $script:ContentBoards.Remove($BoardId) | Out-Null
+    return $true
+}
+
+function Remove-ReviewedContentBoard {
+    param([Parameter(Mandatory)][string]$BoardId, [int]$Revision)
+    $board = Get-ContentBoard -BoardId $BoardId
+    if (-not $board) { return (New-BoardResult $false $null 'not_found') }
+    if ($Revision -ne (Get-BoardProperty $board 'Revision')) { return (New-BoardResult $false $null 'board_stale') }
+    $savedId = [string](Get-BoardProperty $board 'Id')
+    if (-not (Remove-ContentBoardFile -BoardId $savedId)) { return (New-BoardResult $false $null 'board_delete_failed') }
+    return (New-BoardResult $true $board)
 }
 
 function Get-ContentBoard {
@@ -812,6 +841,21 @@ function Get-WebProgrammeBoards {
         })
     return @{ ok = $true; data = @{ items = $items; total = $boards.Count; page = $window.Page; pageCount = $window.PageCount
             canCreate = (Test-Admin -ChatId $actor -UserId $actor) } }
+}
+
+function Remove-WebProgrammeBoard {
+    param([System.Collections.IDictionary]$Arguments)
+    $actor = [long](Get-JsonProp $Arguments 'actor')
+    if (-not (Test-Authorized -ChatId $actor -UserId $actor) -or -not (Test-Admin -ChatId $actor -UserId $actor)) {
+        return @{ ok = $false; error = 'forbidden' }
+    }
+    if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
+    $id = [string](Get-JsonProp $Arguments 'id')
+    if (-not $id) { return @{ ok = $false; error = 'not_found' } }
+    $result = Remove-ReviewedContentBoard -BoardId $id -Revision ([int](Get-JsonProp $Arguments 'revision'))
+    if (-not $result.Success) { return @{ ok = $false; error = $result.ErrorCode } }
+    Add-AuditEntry "Web programme board deleted by $(Format-UserAuditActor -UserId $actor) ($($result.Value.Id))"
+    return @{ ok = $true }
 }
 
 function Get-WebProgrammeBoardEditor {

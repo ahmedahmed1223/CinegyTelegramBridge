@@ -27,6 +27,9 @@ internal static class ProgrammeBoardEndpoints
             .Produces<ProgrammeBoardPasteResult>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
+        boards.MapDelete("/{id}", Delete)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
     }
 
     private static async Task<IResult> List(int? page, IBridgeChannel bridge, HttpContext http)
@@ -69,6 +72,12 @@ internal static class ProgrammeBoardEndpoints
         return TypedResults.Ok(reply.Data.Deserialize<ProgrammeBoardPasteResult>(JsonDefaults.Options));
     }
 
+    private static async Task<IResult> Delete(string id, int revision, IBridgeChannel bridge, HttpContext http)
+    {
+        var reply = await bridge.SendAsync("board.delete", new { actor = http.User.UserId(), id, revision }, http.RequestAborted);
+        return reply.Ok ? TypedResults.NoContent() : Error(reply.Error);
+    }
+
     private static IResult Error(string code) => code switch
     {
         "forbidden" => ApiErrors.Of(403, code),
@@ -78,7 +87,7 @@ internal static class ProgrammeBoardEndpoints
             or "board_paste_invalid"
             => ApiErrors.Of(400, code),
         "board_stale" or "board_at_edge" or "board_capacity" => ApiErrors.Of(409, code),
-        "board_save_failed" => ApiErrors.Of(503, code),
+        "board_save_failed" or "board_delete_failed" => ApiErrors.Of(503, code),
         _ => ApiErrors.BridgeUnavailable(),
     };
 }

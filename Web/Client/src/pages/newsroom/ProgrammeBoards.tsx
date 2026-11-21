@@ -151,8 +151,21 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     setSaved(true)
   }
   const write = useMutation({ mutationFn: writeBoard, onSuccess: acceptSaved })
+  const removeBoard = useMutation({
+    mutationFn: async ({ boardId, revision }: { boardId: string; revision: number }) => {
+      const { error, response } = await api.DELETE('/api/content/boards/{id}', {
+        params: { path: { id: boardId }, query: { revision } },
+      })
+      if (!response.ok) throw new Error(errorCode(error, response))
+    },
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: listKey })
+      cache.removeQueries({ queryKey: ['programme-board', id] })
+      onBack()
+    },
+  })
   const board = query.data
-  const busy = write.isPending || query.isFetching
+  const busy = write.isPending || removeBoard.isPending || query.isFetching
   const editing = !!draft || !!role || pasting
   const blocked = busy || editing
   function startRow(row?: Row) {
@@ -180,6 +193,18 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     })
   }
 
+  function confirmBoardDeletion() {
+    if (!board) return
+    removeBoard.reset()
+    modals.openConfirmModal({
+      title: 'حذف لوحة البرنامج',
+      children: <Text dir="auto">ستُحذف لوحة «{board.name}» مع صفوفها المحفوظة ({number.format(board.total)}).</Text>,
+      labels: { confirm: 'حذف اللوحة', cancel: 'إلغاء' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => removeBoard.mutate({ boardId: board.id, revision: board.revision }),
+    })
+  }
+
   function editRow(rank?: number, key = 'draft') {
     if (!board || !draft) return null
     return <Table.Tr key={key}>
@@ -198,9 +223,9 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
 
   return <Stack gap="md">
     <Group justify="space-between">
-      <Button variant="subtle" leftSection={<IconArrowRight size={16} />} onClick={onBack} disabled={write.isPending}>لوحات البرامج</Button>
-      <Button variant="default" leftSection={<IconRefresh size={16} />} disabled={editing || write.isPending}
-        loading={query.isFetching} onClick={() => { setSaved(false); write.reset(); void query.refetch() }}>تحديث</Button>
+      <Button variant="subtle" leftSection={<IconArrowRight size={16} />} onClick={onBack} disabled={write.isPending || removeBoard.isPending}>لوحات البرامج</Button>
+      <Button variant="default" leftSection={<IconRefresh size={16} />} disabled={editing || write.isPending || removeBoard.isPending}
+        loading={query.isFetching} onClick={() => { setSaved(false); write.reset(); removeBoard.reset(); void query.refetch() }}>تحديث</Button>
     </Group>
     {query.isPending && <Skeleton h={82} aria-label="جارٍ تحميل لوحة البرنامج" />}
     {query.error && <Alert color="red" role="alert">{messageFor(query.error.message)}</Alert>}
@@ -218,6 +243,8 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
             setSaved(false); write.reset(); setPasting(true)
           }}>لصق صفوف</Button>}
           {board.canEdit && board.fields.length > 0 && <Button disabled={blocked} leftSection={<IconPlus size={16} />} onClick={() => startRow()}>إضافة صف</Button>}
+          {board.canManage && <Button variant="subtle" color="red" disabled={blocked} loading={removeBoard.isPending}
+            leftSection={<IconTrash size={16} />} onClick={confirmBoardDeletion}>حذف اللوحة</Button>}
         </Group>
       </Group>
       {pasting && <ProgrammeBoardPaste board={board} onSave={(nextPage) => {
@@ -244,6 +271,9 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
       {!board.fields.length && <Alert color="orange">لا يحتوي قالب اللوحة الآن على حقول نصية قابلة للتحرير.</Alert>}
       {saved && <Text size="sm" role="status">حُفظت التغييرات.</Text>}
       {write.error && <Alert color={write.error.message === 'board_stale' ? 'orange' : 'red'} role="alert">{messageFor(write.error.message)}</Alert>}
+      {removeBoard.error && <Alert color={removeBoard.error.message === 'board_stale' ? 'orange' : 'red'} role="alert">
+        {removeBoard.error.message === 'board_stale' ? 'تغيّرت اللوحة بعد فتحها. حدّثها وراجع عدد الصفوف قبل تأكيد الحذف.' : messageFor(removeBoard.error.message)}
+      </Alert>}
       {(board.total > 0 || draft) && <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا للوصول إلى بقية الحقول والإجراءات.</Text>}
       {(!board.total && !draft) ? <Text c="dimmed">لا توجد صفوف في اللوحة.</Text> : <Paper withBorder radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {

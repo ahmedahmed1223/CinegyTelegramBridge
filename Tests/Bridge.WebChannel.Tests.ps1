@@ -1594,6 +1594,52 @@ Describe 'Web channel: the pipe' {
         }
     }
 
+    It 'deletes only the programme board revision reviewed by an administrator' {
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $UserId -eq 4321 }
+        Mock Test-BoardsAvailable { $true }
+        Mock Get-BoardsDirectory { Join-Path $TestDrive 'programme-board-delete' }
+        $board = (New-ContentBoard -Name 'لوحة للحذف التجريبي' -TemplateKey 'Programme').Value
+        $id = $board.Id
+        try {
+            Save-ContentBoard -Board $board | Should -BeTrue
+            $path = Join-Path (Get-BoardsDirectory) 'imported-programme.json'
+            Move-Item -LiteralPath (Get-BoardFilePath -BoardId $id) -Destination $path
+            Copy-Item -LiteralPath $path -Destination "$path.bak"
+            Import-ContentBoards
+            $request = @{ actor = 4322; id = $id; revision = $board.Revision }
+            $send = {
+                $line = @{ op = 'board.delete'; args = $request } | ConvertTo-Json -Compress
+                Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+            }
+            (& $send).error | Should -Be 'forbidden'
+            $request.actor = 4321
+            $request.revision++
+            (& $send).error | Should -Be 'board_stale'
+            Test-Path -LiteralPath $path | Should -BeTrue
+            $request.revision = $board.Revision
+            $duplicate = Join-Path (Get-BoardsDirectory) 'another-import.json'
+            Copy-Item -LiteralPath $path -Destination $duplicate
+            Import-ContentBoards
+            (& $send).error | Should -Be 'board_delete_failed'
+            Test-Path -LiteralPath $path | Should -BeTrue
+            Test-Path -LiteralPath $duplicate | Should -BeTrue
+            Remove-Item -LiteralPath $duplicate
+            Import-ContentBoards
+            $handle = [IO.File]::Open($path, 'Open', 'Read', 'Read')
+            try { (& $send).error | Should -Be 'board_delete_failed' }
+            finally { $handle.Dispose() }
+            (Get-ContentBoard -BoardId $id).Revision | Should -Be $board.Revision
+            Test-Path -LiteralPath "$path.bak" | Should -BeTrue
+            (& $send).ok | Should -BeTrue
+            Test-Path -LiteralPath $path | Should -BeFalse
+            Test-Path -LiteralPath "$path.bak" | Should -BeFalse
+            Import-ContentBoards
+            Get-ContentBoard -BoardId $id | Should -BeNullOrEmpty
+        }
+        finally { Remove-ContentBoardFile -BoardId $id | Out-Null }
+    }
+
     It 'reviews a programme board paste and commits the same rows once' {
         Mock Test-Authorized { $UserId -in 4321, 4322 }
         Mock Test-Admin { $UserId -eq 4321 }

@@ -368,6 +368,7 @@ function Invoke-WebChannelOperation {
         'bulletin.paste' { return Invoke-WebBulletinPaste -Arguments $arguments }
         'board.list' { return Get-WebProgrammeBoards -Arguments $arguments }
         'board.edit' { return Invoke-WebProgrammeBoardEdit -Arguments $arguments }
+        'board.delete' { return Remove-WebProgrammeBoard -Arguments $arguments }
         'board.paste' { return Invoke-WebProgrammeBoardPaste -Arguments $arguments }
         'relay.control' { return Invoke-WebRelayControl -Arguments $arguments }
         'media.capture' { return Invoke-WebCapture -Arguments $arguments }

@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '8.141.0'; Items = @('Write web headlines right to left and control individual urgent displays from the row.') },
                 @{ Version = '8.140.0'; Items = @('Choose the navy web appearance from the account menu.') },
                 @{ Version = '8.139.0'; Items = @('Choose TIFF pictures for web bulletin rows and preview them after saving.') },
                 @{ Version = '8.138.0'; Items = @('See how many rows were omitted from the usage digest tables.') },
@@ -381,6 +382,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '8.141.0'; Items = @('اكتب في حقول الويب من اليمين واعرض العاجل مباشرة أو بمؤقّت وأخفه من الصف.') },
                 @{ Version = '8.140.0'; Items = @('اختر المظهر الكحلي للويب من قائمة الحساب.') },
                 @{ Version = '8.139.0'; Items = @('اختر صور TIFF لصفوف الموجز في الويب، وعاينها بعد الحفظ.') },
                 @{ Version = '8.138.0'; Items = @('اعرف عدد الصفوف المتبقية في جدولي ملخص الاستخدام.') },

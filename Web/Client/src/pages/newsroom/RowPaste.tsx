@@ -81,7 +81,7 @@ function RowPaste({ title, fields, alternative, submit, onCancel }: {
                 ترتيب الأعمدة <strong>{fields.map((field) => field.label).join('، ')}</strong>. اترك الخلية فارغة عند الحاجة.
               </Text>
               <Textarea label="الصفوف المنسوخة" aria-describedby="row-paste-instructions"
-                dir="auto" autosize minRows={4} maxRows={9}
+                dir="rtl" autosize minRows={4} maxRows={9}
                 autoFocus disabled={paste.isPending} value={text} onChange={(event) => setText(event.currentTarget.value)} />
               <Text size="xs" c="dimmed">حتى ٤٠ صفًا و٨٠٠٠ حرف في الدفعة الواحدة.</Text>
               {exceedsLimit && <Alert color="yellow" role="alert">النص أطول من ٨٠٠٠ حرف. قسّمه إلى دفعات قبل المعاينة.</Alert>}

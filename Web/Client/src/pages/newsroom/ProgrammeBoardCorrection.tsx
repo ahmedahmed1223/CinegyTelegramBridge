@@ -35,7 +35,7 @@ export function ProgrammeBoardCorrection({ board, row, onClose, onChanged }: {
                 setSelected(event.currentTarget.checked ? [...selected, name] : selected.filter(field => field !== name))
               }} />
               {selected.includes(name) && <Textarea aria-label={`القيمة الجديدة لـ ${label}`}
-                dir="auto" autosize minRows={2} maxRows={5} value={values[name] ?? ''} maxLength={board.maxFieldLength}
+                dir="rtl" autosize minRows={2} maxRows={5} value={values[name] ?? ''} maxLength={board.maxFieldLength}
                 onChange={(event) => setValues({ ...values, [name]: event.currentTarget.value })} />}
             </Stack>
           ))}

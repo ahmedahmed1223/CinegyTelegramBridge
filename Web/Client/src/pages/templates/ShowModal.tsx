@@ -111,7 +111,7 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
                 value={variables[f.name] || ''}
                 onChange={(e) => handleFieldChange(f.name, e.currentTarget.value)}
                 placeholder={`اكتب ${f.label || f.name}...`}
-                dir="auto"
+                dir="rtl"
               />
             ))
           )}

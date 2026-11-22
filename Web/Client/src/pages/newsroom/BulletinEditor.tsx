@@ -179,7 +179,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
       }
       return <Text size="sm" c="dimmed">—</Text>
     }
-    return <Text size="sm" dir="auto" className={classes.bulletinCellText}>{row?.values[field.name] || '—'}</Text>
+    return <Text size="sm" dir="rtl" className={classes.bulletinCellText}>{row?.values[field.name] || '—'}</Text>
   }
 
   function editRow(active: EditRow, rank?: number) {
@@ -195,7 +195,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
         {fields.map((field) => (
           <Table.Td key={field.name} className={field.kind === 'text' ? classes.urgentCell : undefined}>
             {field.kind === 'text' ? (
-              <Textarea aria-label={field.label} dir="auto" autosize minRows={2} maxRows={6} maxLength={4096}
+              <Textarea aria-label={field.label} dir="rtl" autosize minRows={2} maxRows={6} maxLength={4096}
                 autoFocus={field === textFields[0]} disabled={busy} value={active.values[field.name] ?? ''}
                 onChange={(event) => setRowEdit({ ...active, values: { ...active.values, [field.name]: event.currentTarget.value } })} />
             ) : field.name === bulletin?.imageField ? (

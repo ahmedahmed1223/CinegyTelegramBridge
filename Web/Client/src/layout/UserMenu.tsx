@@ -1,9 +1,11 @@
 import { Avatar, Badge, Group, Menu, Text, UnstyledButton, useComputedColorScheme, useMantineColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
+import { notifications } from '@mantine/notifications'
 import { IconKey, IconLogout, IconMoon, IconSun } from '@tabler/icons-react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { api, type CurrentUser } from '../api/client'
+import { api, setCsrfToken, type CurrentUser } from '../api/client'
 import { roleLabel, sessionKey } from '../api/session'
 import { ChangePasswordModal } from '../components/ChangePasswordModal'
 
@@ -11,15 +13,26 @@ export function UserMenu({ user }: { user: CurrentUser }) {
   const { setColorScheme } = useMantineColorScheme()
   const colorScheme = useComputedColorScheme('light')
   const [passwordOpen, password] = useDisclosure()
+  const [signingOut, setSigningOut] = useState(false)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const dark = colorScheme === 'dark'
 
   async function signOut() {
-    await api.POST('/api/auth/logout')
-    queryClient.clear()
-    await queryClient.invalidateQueries({ queryKey: sessionKey })
-    navigate('/login', { replace: true })
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      const { response } = await api.POST('/api/auth/logout')
+      if (!response.ok && response.status !== 401) throw new Error('logout_failed')
+      queryClient.clear()
+      setCsrfToken('')
+      await queryClient.invalidateQueries({ queryKey: sessionKey })
+      navigate('/login', { replace: true })
+    } catch {
+      notifications.show({ color: 'red', message: 'تعذّر تسجيل الخروج. تحقّق من الاتصال وحاول مجددًا من قائمة حسابي.' })
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   return (
@@ -58,8 +71,8 @@ export function UserMenu({ user }: { user: CurrentUser }) {
             {dark ? 'المظهر الفاتح' : 'المظهر الكحلي'}
           </Menu.Item>
           <Menu.Divider />
-          <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={signOut}>
-            تسجيل الخروج
+          <Menu.Item color="red" leftSection={<IconLogout size={16} />} disabled={signingOut} onClick={signOut}>
+            {signingOut ? 'جارٍ تسجيل الخروج…' : 'تسجيل الخروج'}
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>

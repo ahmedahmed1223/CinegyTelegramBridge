@@ -8,20 +8,30 @@ import { UrgentTimingStepper } from './UrgentTimingStepper'
 
 const format = new Intl.NumberFormat('ar')
 
-export function UrgentManual({ itemId, fields, onClose, onChanged }: {
+export function UrgentManual({ itemId, mode, fields, onClose, onChanged }: {
   itemId: string
+  mode: 'direct' | 'timed'
   fields: Schemas['TemplateFieldDto'][]
   onClose: () => void
   onChanged: () => Promise<void>
 }) {
   const client = useQueryClient()
-  const [choice, setChoice] = useState('0')
+  const [choice, setChoice] = useState<string | null>(null)
   const [rehearsal, setRehearsal] = useState(false)
   const [custom, setCustom] = useState(1)
-  const [review, setReview] = useState<Schemas['UrgentManualPreview'] | null>(null)
+  const [requestedReview, setReview] = useState<Schemas['UrgentManualPreview'] | null>(null)
+  const direct = mode === 'direct' && !rehearsal
   const options = useQuery({ queryKey: [...manualKey, 'options', itemId],
     retry: false, queryFn: () => sendUrgentManual({ action: 'options', itemId }) })
-  const duration = choice === 'custom' ? custom : Number(choice)
+  const directReview = useQuery({
+    queryKey: ['urgent-manual-direct-review', itemId], enabled: direct, retry: false, gcTime: 0,
+    refetchOnMount: 'always', refetchOnWindowFocus: false, refetchOnReconnect: false,
+    queryFn: () => sendUrgentManual({ action: 'preview', itemId, autoHideSeconds: 0 }),
+  })
+  const durations = options.data?.durations?.filter((seconds) => seconds > 0) ?? []
+  const durationChoice = choice ?? (durations.length ? String(durations[0]) : 'custom')
+  const duration = direct ? 0 : durationChoice === 'custom' ? custom : Number(durationChoice)
+  const review = direct ? (directReview.isSuccess && !directReview.isFetching ? directReview.data.preview : null) : requestedReview
   const send = useMutation({
     mutationFn: (token?: string) => sendUrgentManual({
       action: rehearsal ? (token ? 'rehearse' : 'rehearse-preview') : (token ? 'show' : 'preview'),
@@ -44,8 +54,7 @@ export function UrgentManual({ itemId, fields, onClose, onChanged }: {
     },
   })
   const labels = [
-    { value: '0', label: 'عرض عادي' },
-    ...(options.data?.durations ?? []).map((seconds) => ({ value: String(seconds), label: `${format.format(seconds)} ثانية` })),
+    ...durations.map((seconds) => ({ value: String(seconds), label: `${format.format(seconds)} ثانية` })),
     { value: 'custom', label: 'مدة أخرى' },
   ]
   const selectDestination = (next: boolean) => {
@@ -55,19 +64,21 @@ export function UrgentManual({ itemId, fields, onClose, onChanged }: {
     send.reset()
   }
   return (
-    <Modal opened title="عرض عاجل منفرد" onClose={() => { if (!send.isPending) onClose() }}>
+    <Modal opened title={mode === 'direct' ? 'عرض عاجل مباشر' : 'عرض عاجل بمؤقّت'} onClose={() => { if (!send.isPending) onClose() }}>
       <Stack gap="md">
-        {options.isPending && <Text size="sm" role="status">جارٍ قراءة مدد العرض…</Text>}
-        {options.error && <Alert color="orange" role="alert">{options.error.message}</Alert>}
+        {direct && directReview.isFetching && <Text size="sm" role="status">جارٍ مراجعة العرض المباشر…</Text>}
+        {direct && directReview.error && <Alert color="orange" role="alert">{directReview.error.message}</Alert>}
+        {!direct && options.isPending && <Text size="sm" role="status">جارٍ قراءة مدد العرض…</Text>}
+        {!direct && options.error && <Alert color="orange" role="alert">{options.error.message}</Alert>}
         {options.data?.canRehearse && <Group grow gap="xs" role="group" aria-label="وجهة عرض العاجل">
           <Button type="button" variant={rehearsal ? 'default' : 'light'} aria-pressed={!rehearsal}
             disabled={send.isPending} onClick={() => selectDestination(false)}>البث</Button>
           <Button type="button" variant={rehearsal ? 'light' : 'default'} aria-pressed={rehearsal}
             disabled={send.isPending} onClick={() => selectDestination(true)}>البروفة</Button>
         </Group>}
-        {options.data && !rehearsal && <NativeSelect label="مدة العرض" data={labels} value={choice} disabled={send.isPending}
+        {mode === 'timed' && options.data && !rehearsal && <NativeSelect label="مدة العرض" data={labels} value={durationChoice} disabled={send.isPending}
           onChange={(event) => { setChoice(event.currentTarget.value); setReview(null); send.reset() }} />}
-        {!rehearsal && choice === 'custom' && <Stack gap="xs">
+        {mode === 'timed' && options.data && !rehearsal && durationChoice === 'custom' && <Stack gap="xs">
           <Text size="sm" aria-live="polite">المدة · {format.format(custom)} ثانية</Text>
           <UrgentTimingStepper label="مدة العرض" value={custom} minimum={1} maximum={86400} disabled={send.isPending}
             onChange={(value) => { setCustom(value); setReview(null); send.reset() }} />
@@ -75,7 +86,7 @@ export function UrgentManual({ itemId, fields, onClose, onChanged }: {
         {review && <Stack gap="xs">
           {fields.map((field) => review.values[field.name] && <div key={field.name}>
             <Text size="xs" c="dimmed">{field.label}</Text>
-            <Text size="sm" dir="auto">{review.values[field.name]}</Text>
+            <Text size="sm" dir="rtl">{review.values[field.name]}</Text>
           </div>)}
           <Alert color={review.rehearsal ? 'blue' : 'orange'}>
             <Text size="sm">{review.rehearsal ? 'طبقة التجربة' : 'الطبقة'} {format.format(review.layer)}. {review.autoHideSeconds > 0
@@ -87,8 +98,10 @@ export function UrgentManual({ itemId, fields, onClose, onChanged }: {
         </Stack>}
         {send.error && <Alert color="orange" role="alert">{send.error.message}</Alert>}
         <Group justify="flex-end" gap="xs">
-          <Button variant="default" disabled={!options.data || send.isPending}
-            onClick={() => { setReview(null); send.mutate(undefined) }}>{rehearsal ? 'مراجعة البروفة' : 'مراجعة العرض'}</Button>
+          {direct ? <Button variant="default" disabled={send.isPending || directReview.isFetching}
+            onClick={() => { send.reset(); void directReview.refetch() }}>إعادة المراجعة</Button>
+            : <Button variant="default" disabled={!options.data || send.isPending}
+              onClick={() => { setReview(null); send.mutate(undefined) }}>{rehearsal ? 'مراجعة البروفة' : 'مراجعة العرض'}</Button>}
           {review && <Button color={review.rehearsal ? 'blue' : 'red'} disabled={send.isPending || !!send.error} loading={send.isPending}
             onClick={() => send.mutate(review.review)}>{review.rehearsal ? 'بدء البروفة' : 'عرض على الهواء'}</Button>}
         </Group>

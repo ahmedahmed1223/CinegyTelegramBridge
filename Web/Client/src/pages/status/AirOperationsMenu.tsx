@@ -14,7 +14,7 @@ export function AirOperationsMenu({ disabled, onCopyStatus }: { disabled: boolea
     <>
       <Menu position="bottom-end" width={210} shadow="md">
         <Menu.Target>
-          <Button variant="default" disabled={disabled} leftSection={<IconDotsVertical size={16} />}>
+          <Button variant="default" disabled={disabled && !onCopyStatus} leftSection={<IconDotsVertical size={16} />}>
             إجراءات الهواء
           </Button>
         </Menu.Target>
@@ -23,14 +23,14 @@ export function AirOperationsMenu({ disabled, onCopyStatus }: { disabled: boolea
             نسخ ملخّص حالة الهواء
           </Menu.Item>}
           {isAdmin(session) && (
-            <Menu.Item leftSection={<IconTool size={16} />} onClick={() => setOpen('maintenance')}>
+            <Menu.Item disabled={disabled} leftSection={<IconTool size={16} />} onClick={() => setOpen('maintenance')}>
               صيانة البث
             </Menu.Item>
           )}
-          <Menu.Item leftSection={<IconListCheck size={16} />} onClick={() => setOpen('hide-all-scope')}>
+          <Menu.Item disabled={disabled} leftSection={<IconListCheck size={16} />} onClick={() => setOpen('hide-all-scope')}>
             نطاق إخفاء الكل
           </Menu.Item>
-          <Menu.Item color="red" leftSection={<IconEyeOff size={16} />} onClick={() => setOpen('emergency')}>
+          <Menu.Item disabled={disabled} color="red" leftSection={<IconEyeOff size={16} />} onClick={() => setOpen('emergency')}>
             إخفاء الطوارئ
           </Menu.Item>
         </Menu.Dropdown>

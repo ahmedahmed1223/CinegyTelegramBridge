@@ -36,6 +36,10 @@ body {
   outline-color: var(--cgb-accent);
 }
 
+input[dir="rtl"], textarea[dir="rtl"] {
+  text-align: start;
+}
+
 .mantine-Paper-root:where(:not(.mantine-Skeleton-root)),
 .mantine-Card-root {
   --paper-bg: var(--cgb-panel);

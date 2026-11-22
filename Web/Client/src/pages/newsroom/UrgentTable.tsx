@@ -1,6 +1,6 @@
-import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { IconArrowDown, IconArrowUp, IconClock, IconEdit, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconClockPlay, IconEdit, IconPlayerPlay, IconPlayerStop, IconPlus, IconSettings, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
@@ -29,7 +29,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
 }) {
   const [edit, setEdit] = useState<Edit | null>(null)
   const [timingEdit, setTimingEdit] = useState<{ item: ContentItem; revision: number } | null>(null)
-  const [manualId, setManualId] = useState<string | null>(null)
+  const [manualAction, setManualAction] = useState<{ itemId: string; mode: 'direct' | 'timed' } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const fields = board.fields ?? []
@@ -110,7 +110,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
           <Table.Td key={field.name} className={classes.urgentCell}>
             <Textarea
               aria-label={field.label}
-              dir="auto"
+              dir="rtl"
               autosize
               minRows={2}
               maxRows={5}
@@ -151,7 +151,8 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
       {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
       {liveManual && <Group justify="space-between">
         <Text size="sm">عرض فردي على الطبقة {liveManual.layer}</Text>
-        <Button color="red" variant="light" size="sm" disabled={busy} onClick={confirmHide}>إخفاء العاجل المعروض</Button>
+        <Button color="red" variant="light" size="sm" leftSection={<IconPlayerStop size={17} />}
+          disabled={busy || !manual.isSuccess} onClick={confirmHide}>إيقاف العرض وإخفاء العاجل</Button>
       </Group>}
       <Paper radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
@@ -184,6 +185,9 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                   if (edit && edit.id === item.id) return editorRow(edit)
                   const rank = board.page * 20 + index + 1
                   const state = status[item.state]
+                  const itemId = item.id
+                  const displayed = !!itemId && liveManual?.itemId === itemId
+                  const canShow = !!itemId && item.enabled && !edit && !busy
                   return (
                     <Table.Tr key={item.id ?? rank}>
                       <Table.Td>
@@ -197,22 +201,38 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                       <Table.Td className="cgb-mono">{rank}</Table.Td>
                       {fields.map((field) => (
                         <Table.Td key={field.name} className={classes.urgentCell}>
-                          <Text dir="auto" size="sm" className={classes.headline}>{item.values?.[field.name] || '—'}</Text>
+                          <Text dir="rtl" size="sm" className={classes.headline}>{item.values?.[field.name] || '—'}</Text>
                         </Table.Td>
                       ))}
                       <Table.Td>{state && <Badge color={state.color} variant="light">{state.label}</Badge>}</Table.Td>
                       <Table.Td>
-                        <Group wrap="nowrap" gap={4}>
-                          <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
-                          <ActionIcon variant="subtle" aria-label={`عرض العاجل ${rank}`} disabled={!item.id || !item.enabled || !!edit || busy}
-                            onClick={() => setManualId(item.id ?? null)}><IconPlayerPlay size={17} /></ActionIcon>
-                          <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
-                            aria-label={`توقيت العاجل ${rank}`} disabled={!item.id || !!edit || busy}
-                            onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconClock size={17} /></ActionIcon>
-                          <ActionIcon variant="subtle" aria-label={`رفع العاجل ${rank}`} disabled={rank === 1 || !item.id || !!edit || busy} onClick={() => rowAction(item, 'up')}><IconArrowUp size={17} /></ActionIcon>
-                          <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === board.total || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
-                          <ActionIcon variant="subtle" color="red" aria-label={`حذف العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => rowAction(item, 'remove')}><IconTrash size={17} /></ActionIcon>
-                        </Group>
+                        <Stack gap={4}>
+                          <Group wrap="nowrap" gap={4} aria-label="إجراءات العرض" role="group">
+                            <Tooltip label="عرض مباشر">
+                              <ActionIcon size={44} variant="light" aria-label={`عرض مباشر للعاجل ${rank}`} disabled={!canShow}
+                                onClick={() => { if (itemId) setManualAction({ itemId, mode: 'direct' }) }}><IconPlayerPlay size={17} /></ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="عرض بمؤقّت">
+                              <ActionIcon size={44} variant="light" aria-label={`عرض العاجل ${rank} بمؤقّت`} disabled={!canShow}
+                                onClick={() => { if (itemId) setManualAction({ itemId, mode: 'timed' }) }}><IconClockPlay size={17} /></ActionIcon>
+                            </Tooltip>
+                            {displayed && <Tooltip label="إيقاف العرض وإخفاء العاجل">
+                              <ActionIcon size={44} color="red" variant="light" aria-label={`إيقاف وإخفاء العاجل ${rank}`} disabled={busy || !manual.isSuccess}
+                                onClick={confirmHide}><IconPlayerStop size={17} /></ActionIcon>
+                            </Tooltip>}
+                          </Group>
+                          <Group wrap="nowrap" gap={4} aria-label="إجراءات التحرير" role="group">
+                            <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
+                            <Tooltip label="توقيت الصف في الدورة">
+                              <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
+                                aria-label={`توقيت العاجل ${rank} في الدورة`} disabled={!item.id || !!edit || busy}
+                                onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconSettings size={17} /></ActionIcon>
+                            </Tooltip>
+                            <ActionIcon variant="subtle" aria-label={`رفع العاجل ${rank}`} disabled={rank === 1 || !item.id || !!edit || busy} onClick={() => rowAction(item, 'up')}><IconArrowUp size={17} /></ActionIcon>
+                            <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === board.total || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
+                            <ActionIcon variant="subtle" color="red" aria-label={`حذف العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => rowAction(item, 'remove')}><IconTrash size={17} /></ActionIcon>
+                          </Group>
+                        </Stack>
                       </Table.Td>
                     </Table.Tr>
                   )
@@ -228,7 +248,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
       {timingEdit && <UrgentRowTiming title={timingEdit.item.title} timing={timingEdit.item.timing} busy={busy}
         stale={timingEdit.revision !== board.revision} error={error} onClose={() => { setTimingEdit(null); setError('') }}
         onSave={(timing) => void write({ action: 'timing', id: timingEdit.item.id, revision: timingEdit.revision, timing })} />}
-      {manualId && <UrgentManual itemId={manualId} fields={fields} onClose={() => setManualId(null)} onChanged={() => onSaved(false)} />}
+      {manualAction && <UrgentManual {...manualAction} fields={fields} onClose={() => setManualAction(null)} onChanged={() => onSaved(false)} />}
     </Stack>
   )
 }

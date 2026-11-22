@@ -151,9 +151,11 @@ export function StatusPage() {
         <Group justify="space-between">
           <Group gap="xs">
             <Title order={2}>الطبقات على الهواء</Title>
-            <Badge variant={layers.length > 0 ? 'filled' : 'default'} color="red" radius="sm" className="cgb-mono">
-              {layers.length}
-            </Badge>
+            {(fresh || layers.length > 0) && (
+              <Badge variant={layers.length > 0 ? 'filled' : 'default'} color="red" radius="sm" className="cgb-mono">
+                {layers.length}
+              </Badge>
+            )}
           </Group>
           {!fresh && layers.length > 0 && (
             <Badge color="yellow" variant="light">
@@ -163,7 +165,7 @@ export function StatusPage() {
         </Group>
         {layers.length === 0 ? (
           <Paper p="xl" radius="lg" ta="center">
-            <Text fw={600}>لا شيء على الهواء</Text>
+            <Text fw={600}>{fresh ? 'لا شيء على الهواء' : 'حالة الطبقات غير مؤكَّدة'}</Text>
             <Text size="sm" c="dimmed" mt={4}>
               {fresh ? 'المحرك لا يعرض أي قالب من الجسر الآن.' : 'لا قراءة مؤكَّدة بعد، فلا يُجزم بأن الطبقات فارغة.'}
             </Text>

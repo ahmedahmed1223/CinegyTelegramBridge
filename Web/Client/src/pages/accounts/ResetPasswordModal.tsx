@@ -4,7 +4,11 @@ import { useState, type FormEvent } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 
-export function ResetPasswordModal({ account, onClose }: { account: Schemas['WebAccountResponse'] | null; onClose: () => void }) {
+export function ResetPasswordModal({ account, onClose, onReset }: {
+  account: Schemas['WebAccountResponse'] | null
+  onClose: () => void
+  onReset: () => void
+}) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -17,29 +21,37 @@ export function ResetPasswordModal({ account, onClose }: { account: Schemas['Web
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!account) return
+    if (!account || busy) return
+    setError('')
     setBusy(true)
-    const { error: failure, response } = await api.PUT('/api/accounts/{username}/password', {
-      params: { path: { username: account.username } },
-      body: { password },
-    })
-    setBusy(false)
-    if (response.ok) {
+    try {
+      const { error: failure, response } = await api.PUT('/api/accounts/{username}/password', {
+        params: { path: { username: account.username } },
+        body: { password },
+      })
+      if (!response.ok) {
+        setError(messageFor(errorCode(failure, response)))
+        return
+      }
       notifications.show({ color: 'green', message: `تغيّرت كلمة مرور ${account.displayName}.` })
+      onReset()
       close()
-      return
+    } catch {
+      setError('تعذّر الاتصال بالخادم. تحقّق من الاتصال وحاول مجددًا.')
+    } finally {
+      setBusy(false)
     }
-    setError(messageFor(errorCode(failure, response)))
   }
 
   return (
-    <Modal opened={account !== null} onClose={close} title="كلمة مرور جديدة" centered>
+    <Modal opened={account !== null} onClose={close} title="كلمة مرور جديدة" centered
+      closeOnClickOutside={!busy} closeOnEscape={!busy} withCloseButton={!busy}>
       <form onSubmit={submit}>
         <Stack>
           <Text size="sm" c="dimmed">
             لـ {account?.displayName}. من دخل بكلمة المرور القديمة يُسجَّل خروجه.
           </Text>
-          {error && <Alert color="red">{error}</Alert>}
+          {error && <Alert color="red" role="alert">{error}</Alert>}
           <PasswordInput
             label="كلمة المرور الجديدة"
             description="عشرة أحرف على الأقل"
@@ -47,11 +59,12 @@ export function ResetPasswordModal({ account, onClose }: { account: Schemas['Web
             onChange={(e) => setPassword(e.currentTarget.value)}
             autoComplete="new-password"
             minLength={10}
+            disabled={busy}
             required
             data-autofocus
           />
           <Group justify="flex-end">
-            <Button variant="default" onClick={close}>
+            <Button variant="default" disabled={busy} onClick={close}>
               إلغاء
             </Button>
             <Button type="submit" loading={busy}>

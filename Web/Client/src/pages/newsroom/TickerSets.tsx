@@ -94,7 +94,7 @@ export function TickerSets({ draft, disabled, onLoad }: {
             if (canSave && name.trim()) command.mutate({ action: 'save', name, draftRevision: draft.revision })
           }}>
             <Group align="flex-end" gap="xs">
-              <TextInput label="اسم المجموعة الجديدة" dir="auto" value={name} maxLength={40}
+              <TextInput label="اسم المجموعة الجديدة" dir="rtl" value={name} maxLength={40}
                 disabled={!canSave || library.data.items.length >= library.data.maxSets}
                 onChange={(event) => setName(event.currentTarget.value)} />
               <Button type="submit" size="sm" disabled={!canSave || !name.trim() || library.data.items.length >= library.data.maxSets}>حفظ المسودة كمجموعة</Button>

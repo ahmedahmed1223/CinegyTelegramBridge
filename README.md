@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.141.0
+
+Editorial text fields keep right-to-left direction when text begins with a number or Latin word. The breaking-news grid has separate direct and timed show actions and a stop-and-hide control for the active individual headline. Both show actions use the existing on-air review and confirmation.
+
+Newsroom editors retain draft input when switching tabs. The air board distinguishes unavailable status from a fresh empty board, and supports copying a cached summary while offline. The schedule form can retry loading templates. Account controls show failed logout attempts without clearing the session and refresh the account list after password resets.
+
 ## Version 8.140.0
 
 The web account menu offers a navy appearance for the newsroom, live player and management screens. The browser remembers the appearance selected in the account menu.

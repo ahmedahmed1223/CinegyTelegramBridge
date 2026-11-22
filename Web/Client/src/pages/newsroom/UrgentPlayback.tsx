@@ -1,5 +1,6 @@
 import { Alert, Badge, Button, Group, Modal, Paper, Stack, Text, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
+import { IconPlayerStop } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
@@ -99,8 +100,8 @@ export function UrgentPlayback({ selected }: { selected: string[] }) {
                   </Button>
                 </>
               )}
-              <Button color="red" variant="light" disabled={busy || !status.isSuccess} onClick={confirmStop}>
-                {run.state === 'stop_unconfirmed' ? 'إعادة محاولة الإيقاف' : 'إيقاف الدورة'}
+              <Button color="red" variant="light" leftSection={<IconPlayerStop size={17} />} disabled={busy || !status.isSuccess} onClick={confirmStop}>
+                {run.state === 'stop_unconfirmed' ? 'إعادة محاولة الإيقاف' : 'إيقاف الدورة وإخفاء العاجل'}
               </Button>
             </Group>
           </Stack>

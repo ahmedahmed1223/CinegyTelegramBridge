@@ -231,7 +231,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     return <Table.Tr key={key}>
       <Table.Td>{rank === undefined ? 'جديد' : number.format(rank)}</Table.Td>
       {board.fields.map(({ name, label }, index) => <Table.Td key={name} className={classes.urgentCell}>
-        <Textarea aria-label={label} dir="auto" minRows={2} autosize maxRows={5} maxLength={board.maxFieldLength}
+        <Textarea aria-label={label} dir="rtl" minRows={2} autosize maxRows={5} maxLength={board.maxFieldLength}
           autoFocus={index === 0} disabled={write.isPending} value={draft.values[name] ?? ''}
           onChange={(event) => setDraft({ ...draft, values: { ...draft.values, [name]: event.currentTarget.value } })} />
       </Table.Td>)}
@@ -337,7 +337,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
                         }}>عرض</Button>}
                   </Stack></Table.Td>
                   {board.fields.map(({ name }) => <Table.Td key={name} className={classes.urgentCell}>
-                    <Text size="sm" dir="auto" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{row.values[name] || '—'}</Text>
+                    <Text size="sm" dir="rtl" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{row.values[name] || '—'}</Text>
                   </Table.Td>)}
                   <Table.Td><Button variant="subtle" size="compact-xs" color={row.enabled ? 'teal' : 'gray'} disabled={blocked}
                     aria-label={`${row.enabled ? 'تعطيل' : 'تفعيل'} الصف ${number.format(row.number)}`}

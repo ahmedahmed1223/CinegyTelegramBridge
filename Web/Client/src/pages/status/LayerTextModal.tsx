@@ -149,7 +149,7 @@ function LayerTextEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () 
                     }} />
                   {selected.includes(field.name) && <>
                     {field.lastKnownValue && <Text size="xs" c="dimmed">آخر قيمة لدى الجسر <bdi>{field.lastKnownValue}</bdi></Text>}
-                    <Textarea label={`القيمة الجديدة لحقل ${field.label || field.name}`} dir="auto" autosize minRows={2} maxRows={5}
+                    <Textarea label={`القيمة الجديدة لحقل ${field.label || field.name}`} dir="rtl" autosize minRows={2} maxRows={5}
                       required={field.required} disabled={busy} value={Object.hasOwn(values, field.name) ? values[field.name] : ''}
                       description={field.maxLength ? `الحد الأقصى ${number.format(field.maxLength)} حرفًا` : undefined}
                       onChange={event => {

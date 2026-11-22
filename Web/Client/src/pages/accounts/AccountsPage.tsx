@@ -165,7 +165,11 @@ export function AccountsPage() {
           onCreated={() => queryClient.invalidateQueries({ queryKey: accountsKey })}
         />
       )}
-      <ResetPasswordModal account={resetting} onClose={() => setResetting(null)} />
+      <ResetPasswordModal
+        account={resetting}
+        onClose={() => setResetting(null)}
+        onReset={() => void queryClient.invalidateQueries({ queryKey: accountsKey })}
+      />
     </Stack>
   )
 }

@@ -210,7 +210,7 @@ function RerunEditor({ kind, plan, onClose, onReload }: {
                     required={field.required} autoComplete="new-password" disabled={busy}
                     visibilityToggleButtonProps={{ 'aria-label': 'إظهار القيمة الحسّاسة أو إخفاؤها' }} />
                 ) : <TextInput key={field.name} label={label} description={description} required={field.required}
-                  disabled={busy} dir="auto" value={publicValues[field.name] ?? ''}
+                  disabled={busy} dir="rtl" value={publicValues[field.name] ?? ''}
                   onChange={event => {
                     const value = event.currentTarget.value
                     setPublicValues(current => ({ ...current, [field.name]: value }))

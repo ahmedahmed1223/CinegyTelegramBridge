@@ -189,7 +189,7 @@ function ScheduleDialog({ stationTimeZone, selection, materialsEnabled, onClose,
   })
   const review = preview.data
   const busy = preview.isPending || confirm.isPending
-  const error = review ? confirm.error : (preview.error ?? (operation === 'create' ? templates.error : null) ?? materials.error)
+  const error = review ? confirm.error : (preview.error ?? (operation === 'create' && templates.isRefetchError ? templates.error : null) ?? materials.error)
 
   function requestReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -284,10 +284,19 @@ function ScheduleDialog({ stationTimeZone, selection, materialsEnabled, onClose,
           <form onSubmit={requestReview}>
             <Stack gap="md">
               {item && <Text fw={600} dir="auto">{item.key}</Text>}
-              {operation === 'create' && (templates.isPending ? <Skeleton h={60} aria-label="جارٍ تحميل القوالب" /> :
+              {operation === 'create' && (templates.isPending ? <Skeleton h={60} aria-label="جارٍ تحميل القوالب" /> : templates.isLoadingError ? (
+                <Alert color="orange" title="تعذّر تحميل القوالب" role="alert">
+                  <Stack gap="xs" align="start">
+                    <Text size="sm">{scheduleMessage(templates.error)}</Text>
+                    <Button type="button" variant="default" size="xs" loading={templates.isFetching}
+                      onClick={() => void templates.refetch()}>إعادة تحميل القوالب</Button>
+                  </Stack>
+                </Alert>
+              ) : (
                 <Select label="القالب" placeholder="اختر قالبًا" searchable allowDeselect={false}
                   nothingFoundMessage="لا توجد قوالب مطابقة" data={choices} value={templateKey} required disabled={busy}
-                  onChange={(value) => { setTemplateKey(value); setValues({}); preview.reset() }} />)}
+                  onChange={(value) => { setTemplateKey(value); setValues({}); preview.reset() }} />
+              ))}
               {operation === 'create' && template?.fields.map((field) => {
                 const props = {
                   label: field.label || field.name,
@@ -302,7 +311,7 @@ function ScheduleDialog({ stationTimeZone, selection, materialsEnabled, onClose,
                 }
                 return field.sensitive
                   ? <TextInput key={field.name} type="password" autoComplete="off" {...props} />
-                  : <Textarea key={field.name} dir="auto" autosize minRows={2} maxRows={5} {...props} />
+                  : <Textarea key={field.name} dir="rtl" autosize minRows={2} maxRows={5} {...props} />
               })}
               {operation !== 'cancel' && <>
               <SegmentedControl fullWidth aria-label="طريقة تحديد الموعد" value={timeMode} disabled={busy}

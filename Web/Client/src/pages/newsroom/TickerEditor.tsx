@@ -198,7 +198,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
         <Stack gap="xs">
           <Textarea
             label={current.index === null ? 'الخبر الجديد' : 'نص الخبر'}
-            dir="auto" autosize minRows={2} maxRows={6} required autoFocus
+            dir="rtl" autosize minRows={2} maxRows={6} required autoFocus
             maxLength={editor?.maxItemLength}
             value={current.text}
             onChange={(event) => setEdit({ ...current, text: event.currentTarget.value })}

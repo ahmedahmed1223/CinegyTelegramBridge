@@ -1,4 +1,5 @@
 import { Alert, Badge, Button, Group, Pagination, Paper, Skeleton, Stack, Tabs, Text, Title } from '@mantine/core'
+import { useDebouncedValue } from '@mantine/hooks'
 import { useQuery } from '@tanstack/react-query'
 import { IconRefresh } from '@tabler/icons-react'
 import { useState } from 'react'
@@ -11,6 +12,7 @@ import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
 import { BulletinEditor, BulletinNameForm } from './BulletinEditor'
 import { ProgrammeBoards } from './ProgrammeBoards'
+import { EditorialSearch, type EditorialOrder } from './EditorialSearch'
 import classes from './NewsroomPage.module.css'
 
 const views = {
@@ -68,14 +70,18 @@ export function NewsroomPage() {
 
 function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
   const [page, setPage] = useState(0)
+  const [search, setSearch] = useState('')
+  const [searchTerm] = useDebouncedValue(search.trim(), 250)
+  const [order, setOrder] = useState<EditorialOrder>('sequence')
+  const [urgentEditing, setUrgentEditing] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   const [bulletinId, setBulletinId] = useState<string | null>(null)
   const [creatingBulletin, setCreatingBulletin] = useState(false)
   const content = useQuery({
-    queryKey: ['newsroom', view, page],
+    queryKey: ['newsroom', view, page, searchTerm, order],
     queryFn: async ({ signal }) => {
       const { data, error, response } = await api.GET('/api/content/{view}', {
-        params: { path: { view }, query: { page } },
+        params: { path: { view }, query: { page, search: searchTerm || undefined, order } },
         signal,
       })
       if (!data) throw new Error(errorCode(error, response))
@@ -86,6 +92,10 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
   })
   const current = views[view]
   const result = content.data
+  const filters = <EditorialSearch label={view === 'ticker' ? 'بحث في الشريط المنشور' : `بحث في ${current.label}`}
+    sequenceLabel={view === 'ticker' ? 'ترتيب الشريط' : 'الترتيب المحفوظ'} search={search} order={order}
+    disabled={urgentEditing || creatingBulletin}
+    onSearch={(value) => { setSearch(value); setPage(0) }} onOrder={(value) => { setOrder(value); setPage(0) }} />
 
   return view === 'bulletins' && bulletinId ? (
     <BulletinEditor key={bulletinId} id={bulletinId} onBack={() => setBulletinId(null)} onSaved={(value) => {
@@ -96,7 +106,9 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
     <Group justify="space-between" align="center">
       <div>
         <Title order={2}>{current.title}</Title>
-        {result && view !== 'ticker' && <Text size="sm" c="dimmed">{number.format(result.total)} في القائمة</Text>}
+        {result && view !== 'ticker' && <Text size="sm" c="dimmed" role="status">
+          {number.format(result.total)} {searchTerm ? 'نتيجة' : 'في القائمة'}
+        </Text>}
       </div>
       {view !== 'ticker' && (
         <Group gap="xs">
@@ -123,7 +135,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
         <Group justify="space-between">
           <div>
             <Title order={4}>الشريط المنشور</Title>
-            {result && <Text size="sm" c="dimmed">{number.format(result.total)} خبرًا</Text>}
+            {result && <Text size="sm" c="dimmed" role="status">{number.format(result.total)} {searchTerm ? 'نتيجة' : 'خبرًا'}</Text>}
           </div>
           <Button variant="default" onClick={() => content.refetch()} loading={content.isFetching} leftSection={<IconRefresh size={16} />}>
             تحديث المنشور
@@ -131,6 +143,8 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
         </Group>
       </>
     )}
+
+    {filters}
 
     {content.isError ? (
       <Alert color={content.error.message === 'content_disabled' ? 'gray' : 'red'} role="alert">
@@ -149,11 +163,16 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
         <UrgentTable
           key={result.page}
           board={result}
+          filtered={!!searchTerm}
+          searchPending={search.trim() !== searchTerm}
+          onEditingChange={setUrgentEditing}
           selected={selected}
           onToggle={(id) => setSelected((previous) => previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id])}
           onClear={() => setSelected([])}
           onSaved={async (added) => {
-            const nextPage = added ? Math.floor(result.total / 20) : result.page
+            const total = result.collectionTotal ?? result.total
+            const nextPage = added ? Math.floor(total / 20) : result.page
+            if (added) { setSearch(''); setOrder('sequence') }
             if (nextPage !== result.page) setPage(nextPage)
             await content.refetch()
           }}
@@ -165,7 +184,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
           {result.items.map((item, index) => {
             const state = states[item.state]
             return (
-              <li key={item.id ?? index} className={classes.row}>
+              <li key={item.id ?? index} value={item.position ?? undefined} className={classes.row}>
                 <div className={classes.entry}>
                   <Text component="span" className={classes.headline} dir="auto">{item.title}</Text>
                   {(item.rows != null || state) && (
@@ -185,7 +204,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
         </ol>
       </Paper>
     ) : (
-      <Paper p="xl" radius="lg"><Text c="dimmed">{current.empty}</Text></Paper>
+      <Paper p="xl" radius="lg"><Text c="dimmed">{searchTerm ? 'لا توجد نتائج تطابق البحث.' : current.empty}</Text></Paper>
     )}
 
     {result && result.pageCount > 1 && (

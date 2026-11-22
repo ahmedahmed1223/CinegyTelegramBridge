@@ -154,9 +154,17 @@ public static class ContentEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
-    private static async Task<IResult> List(string view, int? page, IBridgeChannel bridge, HttpContext http)
+    private static async Task<IResult> List(string view, int? page, string? search, string? order, IBridgeChannel bridge, HttpContext http)
     {
-        var reply = await bridge.SendAsync("content.list", new { actor = http.User.UserId(), view, page = page ?? 0 }, http.RequestAborted);
+        var arguments = new Dictionary<string, object>
+        {
+            ["actor"] = http.User.UserId(),
+            ["view"] = view,
+            ["page"] = page ?? 0,
+        };
+        if (search is not null) arguments["search"] = search;
+        if (order is not null) arguments["order"] = order;
+        var reply = await bridge.SendAsync("content.list", arguments, http.RequestAborted);
         if (reply.Ok)
         {
             http.Response.Headers.CacheControl = "no-store";
@@ -329,7 +337,7 @@ public static class ContentEndpoints
         var reply = await bridge.SendAsync("ticker.edit", new
         {
             actor = http.User.UserId(), request.Action, request.Revision, request.Index, request.Text, request.Review,
-            request.PublishAtMs, request.PausedPage
+            request.PublishAtMs, request.PausedPage, request.Destination
         }, http.RequestAborted);
         if (reply.Ok)
         {

@@ -41,6 +41,18 @@ Run on Windows with PowerShell 7:
 Get-FileHash .\dist\CinegyTelegramBridge-<version>.zip -Algorithm SHA256
 ```
 
+To produce the complete Windows distribution with the manager and web UI:
+
+```powershell
+.\scripts\Build-BridgeManager.ps1 -OutputDirectory .\artifacts\BridgeManager
+.\scripts\Build-BridgeWeb.ps1 -OutputDirectory .\artifacts\web
+.\Build-Release.ps1 -OutputDirectory .\artifacts\release `
+  -ManagerBundleDirectory .\artifacts\BridgeManager -WebBundleDirectory .\artifacts\web
+Get-FileHash .\artifacts\release\CinegyTelegramBridge-<version>.zip -Algorithm SHA256
+```
+
+The archive places the manager at `dist/BridgeManager/BridgeManager.exe` and the web server and its static files under `dist/web/`. The build outputs used here can be kept outside the current station installation.
+
 Compare the result with the adjacent `.zip.sha256` file. To Authenticode-sign
 the copied PowerShell files before packaging, provide a code-signing
 certificate installed in `Cert:\CurrentUser\My`:

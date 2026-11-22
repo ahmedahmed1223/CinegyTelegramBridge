@@ -49,7 +49,8 @@ export function ResetPasswordModal({ account, onClose, onReset }: {
       <form onSubmit={submit}>
         <Stack>
           <Text size="sm" c="dimmed">
-            لـ {account?.displayName}. من دخل بكلمة المرور القديمة يُسجَّل خروجه.
+            لـ {account?.displayName} <Text span dir="ltr" className="cgb-mono">{account?.username}</Text>.
+            {' '}من دخل بكلمة المرور القديمة يُسجَّل خروجه.
           </Text>
           {error && <Alert color="red" role="alert">{error}</Alert>}
           <PasswordInput

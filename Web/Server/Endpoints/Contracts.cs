@@ -61,8 +61,10 @@ public sealed record TemplateMaxAirConfirm(string Review);
 public sealed record TemplateMaxAirResult(string Key, int Seconds);
 public sealed record OutputCapture(string Id, string State, string Kind, string Source, long CompletedAt, long ExpiresAt);
 
-public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values, UrgentItemTiming? Timing = null);
-public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision, IReadOnlyList<TemplateFieldDto>? Fields);
+public sealed record ContentItem(string Title, string State, int? Rows, string? Id, bool? Enabled, Dictionary<string, string>? Values,
+    UrgentItemTiming? Timing = null, int? Position = null);
+public sealed record ContentPage(IReadOnlyList<ContentItem> Items, int Page, int PageCount, int Total, int? Revision,
+    IReadOnlyList<TemplateFieldDto>? Fields, int? CollectionTotal = null);
 public sealed record ProgrammeBoardSummary(string Id, string Name, int Rows);
 public sealed record ProgrammeBoardList(ProgrammeBoardSummary[] Items, int Total, int Page, int PageCount, bool CanCreate);
 public sealed record ProgrammeBoardTemplate(string Key, string Label, int Layer);
@@ -70,7 +72,8 @@ public sealed record ProgrammeBoardTemplates(ProgrammeBoardTemplate[] Templates)
 public sealed record ProgrammeBoardField(string Name, string Label);
 public sealed record ProgrammeBoardRow(string Id, int Number, Dictionary<string, string> Values, bool Enabled);
 public sealed record ProgrammeBoardEditor(string Id, string Name, int Revision, bool CanEdit, bool CanManage, string EditRole, ProgrammeBoardField[] Fields,
-    string[] SceneMedia, ProgrammeBoardRow[] Rows, int Total, int Page, int PageCount, int MaxFieldLength, string? LiveRowId);
+    string[] SceneMedia, ProgrammeBoardRow[] Rows, int Total, int Page, int PageCount, int MaxFieldLength, string? LiveRowId,
+    ProgrammeBoardRow? LiveRow = null, int? CollectionTotal = null);
 public sealed record ProgrammeBoardEditRequest(string Action, string? Id = null, int? Revision = null, int? Page = null,
     string? RowId = null, Dictionary<string, string>? Values = null, string? Name = null, string? Template = null, string? Role = null);
 public sealed record ProgrammeBoardPasteRequest(string Action, string Id, int Revision, string Format, string Text, string? Review);
@@ -132,7 +135,7 @@ public sealed record UrgentTimingBounds(int Minimum, int Maximum);
 public sealed record UrgentTimingState(string Revision, int IntervalSeconds, int Repeats, int TotalSeconds, int ExitGapSeconds,
     string Mode, string RepeatMode, double FloorSeconds, bool CanEdit, Dictionary<string, UrgentTimingBounds> Bounds);
 public sealed record TickerDraftRequest(string Action, string? Revision = null, int? Index = null, string? Text = null, string? Review = null,
-    long? PublishAtMs = null, int? PausedPage = null);
+    long? PublishAtMs = null, int? PausedPage = null, int? Destination = null);
 public sealed record TickerPausedPage(string[] Items, int Page, int PageCount, int Total, int Offset);
 public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused, bool CanClear);
 public sealed record TickerConflict(string Review, string[] Items);

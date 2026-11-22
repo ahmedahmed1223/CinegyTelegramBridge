@@ -1569,6 +1569,20 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11584,6 +11598,20 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11593,6 +11621,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProgrammeBoardList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -11700,6 +11738,20 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11709,6 +11761,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProgrammeBoardEditor"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -14649,6 +14711,12 @@
           },
           "timing": {
             "$ref": "#/components/schemas/UrgentItemTiming"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
           }
         }
       },
@@ -14691,6 +14759,12 @@
             "items": {
               "$ref": "#/components/schemas/TemplateFieldDto"
             },
+            "nullable": true
+          },
+          "collectionTotal": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
             "nullable": true
           }
         }
@@ -16290,6 +16364,15 @@
           "liveRowId": {
             "type": "string",
             "nullable": true
+          },
+          "liveRow": {
+            "$ref": "#/components/schemas/ProgrammeBoardRow2"
+          },
+          "collectionTotal": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
           }
         }
       },
@@ -16510,6 +16593,35 @@
             "type": "boolean"
           }
         }
+      },
+      "ProgrammeBoardRow2": {
+        "required": [
+          "id",
+          "number",
+          "values",
+          "enabled"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "default": null,
+        "nullable": true
       },
       "ProgrammeBoardSummary": {
         "required": [
@@ -20129,6 +20241,12 @@
             "nullable": true
           },
           "pausedPage": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "destination": {
             "type": "integer",
             "format": "int32",
             "default": null,

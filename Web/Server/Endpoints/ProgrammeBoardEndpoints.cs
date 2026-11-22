@@ -11,14 +11,14 @@ internal static class ProgrammeBoardEndpoints
         var boards = app.MapGroup("/api/content/boards").WithTags("Content").RequireAuthorization();
         boards.MapGet("", List)
             .Produces<ProgrammeBoardList>()
-            .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
         boards.MapGet("/templates", Templates)
             .Produces<ProgrammeBoardTemplates>()
             .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
-        boards.MapGet("/editor", (string id, int? page, IBridgeChannel bridge, HttpContext http) =>
-                Edit(new("read", id, Page: page), bridge, http))
+        boards.MapGet("/editor", (string id, int? page, string? search, string? order, IBridgeChannel bridge, HttpContext http) =>
+                SendEditor(new("read", id, Page: page), bridge, http, search, order))
             .Produces<ProgrammeBoardEditor>()
-            .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
+            .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(503);
         boards.MapPost("/editor", Edit)
             .Produces<ProgrammeBoardEditor>()
             .Produces<ErrorResponse>(400).Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
@@ -36,21 +36,25 @@ internal static class ProgrammeBoardEndpoints
             .Produces<ErrorResponse>(403).Produces<ErrorResponse>(404).Produces<ErrorResponse>(409).Produces<ErrorResponse>(503);
     }
 
-    private static async Task<IResult> List(int? page, IBridgeChannel bridge, HttpContext http)
+    private static async Task<IResult> List(int? page, string? search, string? order, IBridgeChannel bridge, HttpContext http)
     {
-        var reply = await bridge.SendAsync("board.list", new { actor = http.User.UserId(), page }, http.RequestAborted);
+        var reply = await bridge.SendAsync("board.list", new { actor = http.User.UserId(), page, search, order }, http.RequestAborted);
         if (!reply.Ok) return Error(reply.Error);
         http.Response.Headers.CacheControl = "no-store";
         return TypedResults.Ok(reply.Data.Deserialize<ProgrammeBoardList>(JsonDefaults.Options));
     }
 
-    private static async Task<IResult> Edit(ProgrammeBoardEditRequest request, IBridgeChannel bridge, HttpContext http)
+    private static Task<IResult> Edit(ProgrammeBoardEditRequest request, IBridgeChannel bridge, HttpContext http) =>
+        SendEditor(request, bridge, http, null, null);
+
+    private static async Task<IResult> SendEditor(ProgrammeBoardEditRequest request, IBridgeChannel bridge, HttpContext http,
+        string? search, string? order)
     {
         if (string.Equals(request.Action, "options", StringComparison.OrdinalIgnoreCase)) return Error("board_invalid");
         var reply = await bridge.SendAsync("board.edit", new
         {
             actor = http.User.UserId(), request.Action, request.Id, request.Revision, request.Page, request.RowId, request.Values,
-            request.Name, request.Template, request.Role
+            request.Name, request.Template, request.Role, search, order
         }, http.RequestAborted);
         if (!reply.Ok) return Error(reply.Error);
         http.Response.Headers.CacheControl = "no-store";

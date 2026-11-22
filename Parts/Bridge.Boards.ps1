@@ -885,7 +885,13 @@ function Get-WebProgrammeBoards {
     $actor = [long](Get-JsonProp $Arguments 'actor')
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     if (-not (Test-BoardsAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
-    $boards = @(Get-ContentBoards | Sort-Object Name, Id)
+    $search = ([string](Get-JsonProp $Arguments 'search')).Trim().Replace('ـ', '')
+    $order = [string](Get-JsonProp $Arguments 'order')
+    if ($search.Length -gt 120 -or ($order -and $order -notin 'sequence', 'title-asc', 'title-desc')) {
+        return @{ ok = $false; error = 'board_invalid' }
+    }
+    $boards = @(Get-ContentBoards | Where-Object { Test-WebEditorialSearch -Values $_.Name -Search $search } |
+        Sort-Object -Property Name, Id -Stable -Culture ar -Descending:($order -eq 'title-desc'))
     $window = Get-BridgePageWindow -ItemCount $boards.Count -Page ([int](Get-JsonProp $Arguments 'page'))
     $items = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
             $board = $boards[$index]
@@ -911,8 +917,15 @@ function Remove-WebProgrammeBoard {
     return @{ ok = $true }
 }
 
+function ConvertTo-WebProgrammeBoardRow {
+    param($Item, [int]$Number, [string[]]$TextFields)
+    $values = if ($TextFields.Count) { Get-BoardItemValues -Item $Item -TextFields $TextFields } else { @{} }
+    return @{ id = [string](Get-BoardProperty $Item 'Id'); number = $Number; values = $values
+        enabled = [bool](Get-BoardProperty $Item 'Enabled' $true) }
+}
+
 function Get-WebProgrammeBoardEditor {
-    param($Board, [long]$Actor, [int]$Page)
+    param($Board, [long]$Actor, [int]$Page, [string]$Search, [string]$Order)
     $template = [string](Get-BoardProperty $Board 'TemplateKey' '')
     $layer = [int](Get-JsonProp (Get-TemplateStore).Map[$template] 'Layer')
     $textFields = @(Get-BoardTextFields -TemplateKey $template)
@@ -921,20 +934,43 @@ function Get-WebProgrammeBoardEditor {
         })
     $fields = @(foreach ($name in $textFields) { @{ name = $name; label = Get-MojazFieldLabel -TemplateKey $template -FieldName $name } })
     $items = @(Get-BoardProperty $Board 'Items' @())
-    $window = Get-BridgePageWindow -ItemCount $items.Count -Page $Page
-    $rows = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
-            $item = $items[$index]
-            $values = if ($textFields.Count) { Get-BoardItemValues -Item $item -TextFields $textFields } else { @{} }
-            @{ id = [string](Get-BoardProperty $item 'Id'); number = $index + 1; values = $values
-                enabled = [bool](Get-BoardProperty $item 'Enabled' $true) }
-        })
+    if ($Search -or $Order -in 'title-asc', 'title-desc') {
+        $matchingRows = @(for ($index = 0; $index -lt $items.Count; $index++) {
+                $row = ConvertTo-WebProgrammeBoardRow -Item $items[$index] -Number ($index + 1) -TextFields $textFields
+                if (Test-WebEditorialSearch -Values @($row.values.get_Values()) -Search $Search) { $row }
+            })
+        if ($textFields.Count -and $Order -in 'title-asc', 'title-desc') {
+            $firstField = $textFields[0]
+            $matchingRows = @($matchingRows | Sort-Object -Property { [string]$_.values[$firstField] } -Stable -Culture ar -Descending:($Order -eq 'title-desc'))
+        }
+        $total = $matchingRows.Count
+        $window = Get-BridgePageWindow -ItemCount $total -Page $Page
+        $rows = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) { $matchingRows[$index] })
+    }
+    else {
+        $total = $items.Count
+        $window = Get-BridgePageWindow -ItemCount $total -Page $Page
+        $rows = @(for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
+                ConvertTo-WebProgrammeBoardRow -Item $items[$index] -Number ($index + 1) -TextFields $textFields
+            })
+    }
+    $boardId = [string](Get-BoardProperty $Board 'Id')
+    $liveRowId = Get-ConfirmedBoardLiveRowId -BoardId $boardId -Key $template -Layer $layer
+    $liveRow = $null
+    if ($liveRowId) {
+        $livePosition = Get-BoardItemPosition -Board $Board -ItemId $liveRowId
+        if ($livePosition -ge 0) {
+            $liveRow = ConvertTo-WebProgrammeBoardRow -Item $items[$livePosition] -Number ($livePosition + 1) -TextFields $textFields
+        }
+    }
     return @{
-        id = [string](Get-BoardProperty $Board 'Id'); name = [string](Get-BoardProperty $Board 'Name')
+        id = $boardId; name = [string](Get-BoardProperty $Board 'Name')
         revision = [int](Get-BoardProperty $Board 'Revision'); canEdit = (Test-BoardEditAllowed -Board $Board -ChatId $Actor -UserId $Actor)
         editRole = [string](Get-BoardProperty $Board 'EditRole' 'all'); canManage = (Test-Admin -ChatId $Actor -UserId $Actor)
-        fields = $fields; sceneMedia = $sceneMedia; rows = $rows; total = $items.Count; page = $window.Page; pageCount = $window.PageCount
+        fields = $fields; sceneMedia = $sceneMedia; rows = $rows; total = $total; collectionTotal = $items.Count
+        page = $window.Page; pageCount = $window.PageCount
         maxFieldLength = Get-SettingInt 'MaxFieldLength' 1
-        liveRowId = Get-ConfirmedBoardLiveRowId -BoardId ([string](Get-BoardProperty $Board 'Id')) -Key $template -Layer $layer
+        liveRowId = $liveRowId; liveRow = $liveRow
     }
 }
 
@@ -1200,7 +1236,14 @@ function Invoke-WebProgrammeBoardEdit {
     $board = Get-ContentBoard -BoardId $boardId
     if (-not $board) { return @{ ok = $false; error = 'not_found' } }
     $page = [int](Get-JsonProp $Arguments 'page')
-    if ($action -eq 'read') { return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $board -Actor $actor -Page $page } }
+    if ($action -eq 'read') {
+        $search = ([string](Get-JsonProp $Arguments 'search')).Trim().Replace('ـ', '')
+        $order = [string](Get-JsonProp $Arguments 'order')
+        if ($search.Length -gt 120 -or ($order -and $order -notin 'sequence', 'title-asc', 'title-desc')) {
+            return @{ ok = $false; error = 'board_invalid' }
+        }
+        return @{ ok = $true; data = Get-WebProgrammeBoardEditor -Board $board -Actor $actor -Page $page -Search $search -Order $order }
+    }
     if ($action -notin @('add', 'update', 'remove', 'up', 'down', 'enable', 'disable', 'role')) { return @{ ok = $false; error = 'board_invalid' } }
     if ($action -in @('add', 'update', 'remove') -and -not (Test-BoardEditAllowed -Board $board -ChatId $actor -UserId $actor)) {
         return @{ ok = $false; error = 'forbidden' }

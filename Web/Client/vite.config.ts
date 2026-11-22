@@ -26,6 +26,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Fork workers can stall when the Windows release checks open the test pool.
+    pool: 'vmThreads',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
   },

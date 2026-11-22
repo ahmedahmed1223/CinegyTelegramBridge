@@ -259,14 +259,20 @@ function Remove-NewsTickerDraftItem { param([long]$ChatId,[long]$UserId,[int]$In
 }
 
 function Move-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[int]$Delta)
+    return (Set-NewsTickerDraftItemPosition -UserId $UserId -Index $Index -Destination ($Index + $Delta))
+}
+
+function Set-NewsTickerDraftItemPosition {
+    param([long]$UserId, [int]$Index, [int]$Destination)
     $draft = Get-NewsTickerDraft -UserId $UserId
-    $target = $Index + $Delta
-    if (-not $draft -or $Index -lt 0 -or $target -lt 0 -or $Index -ge @($draft.Items).Count -or $target -ge @($draft.Items).Count) { return $false }
-    $items = @($draft.Items | ForEach-Object { [string]$_ })
-    $swap = $items[$target]
-    $items[$target] = $items[$Index]
-    $items[$Index] = $swap
-    return (Set-NewsTickerDraftItems -Draft $draft -Items $items)
+    if (-not $draft) { return $false }
+    $items = [Collections.Generic.List[string]]::new([string[]]@($draft.Items))
+    if ($Index -lt 0 -or $Destination -lt 0 -or $Index -ge $items.Count -or $Destination -ge $items.Count) { return $false }
+    if ($Index -eq $Destination) { return $true }
+    $headline = $items[$Index]
+    $items.RemoveAt($Index)
+    $items.Insert($Destination, $headline)
+    return (Set-NewsTickerDraftItems -Draft $draft -Items $items.ToArray())
 }
 
 function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[ValidateSet('replace','append')][string]$Mode='replace')

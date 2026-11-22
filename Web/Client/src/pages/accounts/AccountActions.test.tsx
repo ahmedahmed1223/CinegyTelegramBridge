@@ -1,7 +1,8 @@
 import { MantineProvider } from '@mantine/core'
+import { ModalsProvider } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api, type CurrentUser } from '../../api/client'
@@ -14,7 +15,7 @@ vi.mock('react-router', () => ({ useNavigate: () => navigate }))
 vi.mock('@mantine/notifications', () => ({ notifications: { show: vi.fn() } }))
 vi.mock('../../api/client', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../api/client')>(),
-  api: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn() },
+  api: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() },
 }))
 
 const user: CurrentUser = { id: 1, name: 'مشرف الوردية', role: 'owner', method: 'password', webOnly: true }
@@ -24,7 +25,7 @@ function renderAuthenticated(element: ReactNode) {
   client.setQueryData(sessionKey, user)
   render(
     <MantineProvider env="test">
-      <QueryClientProvider client={client}>{element}</QueryClientProvider>
+      <QueryClientProvider client={client}><ModalsProvider>{element}</ModalsProvider></QueryClientProvider>
     </MantineProvider>,
   )
   return client
@@ -81,4 +82,51 @@ it('refreshes a locked account after its password is reset', async () => {
 
   await waitFor(() => expect(screen.queryByText('مقفل')).not.toBeInTheDocument())
   expect(api.GET).toHaveBeenCalledTimes(2)
+})
+
+it('recovers the account list and resolves actions against the account found after filtering', async () => {
+  const operator = { username: 'editor-news', userId: 2, displayName: 'مُحرّر الأخبار', webOnly: true, role: 'operator',
+    createdAt: '2026-01-01T00:00:00Z', lastLoginAt: null, lockedUntil: null }
+  const admin = { ...operator, username: 'desk-admin', userId: 3, displayName: 'مشرف التحرير', role: 'admin' }
+  vi.mocked(api.GET).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    .mockResolvedValue({ data: { accounts: [operator, admin], bridgeUsers: [] }, response: new Response() })
+  renderAuthenticated(<AccountsPage />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'إعادة المحاولة' }))
+  await screen.findByText(operator.displayName)
+  const search = screen.getByRole('searchbox', { name: 'بحث في الحسابات' })
+  fireEvent.change(search, { target: { value: 'desk-admin' } })
+  expect(screen.queryByText(operator.displayName)).not.toBeInTheDocument()
+  expect(screen.getByText(admin.displayName)).toBeInTheDocument()
+  fireEvent.change(search, { target: { value: 'محرر' } })
+  expect(screen.queryByText(admin.displayName)).not.toBeInTheDocument()
+  fireEvent.change(screen.getByRole('combobox', { name: 'الدور' }), { target: { value: 'admin' } })
+  expect(screen.getByText('لا توجد حسابات تطابق البحث والتصفية.')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'مسح البحث والتصفية' }))
+  fireEvent.change(screen.getByRole('combobox', { name: 'الدور' }), { target: { value: 'operator' } })
+  fireEvent.click(screen.getByRole('button', { name: `إجراءات ${operator.displayName}` }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'كلمة مرور جديدة' }))
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByText(/editor-news/)).toBeInTheDocument()
+})
+
+it('keeps the account visible and asks for a refresh when a deletion cannot be confirmed', async () => {
+  const account = { username: 'desk-editor', userId: 2, displayName: 'محرر الوردية', webOnly: false, role: 'operator',
+    createdAt: '2026-01-01T00:00:00Z', lastLoginAt: null, lockedUntil: null }
+  vi.mocked(api.GET).mockResolvedValueOnce({ data: { accounts: [account], bridgeUsers: [] }, response: new Response() })
+    .mockResolvedValueOnce({ data: { accounts: [], bridgeUsers: [] }, response: new Response() })
+  vi.mocked(api.DELETE).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  renderAuthenticated(<AccountsPage />)
+
+  fireEvent.click(await screen.findByRole('button', { name: `إجراءات ${account.displayName}` }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'حذف' }))
+  const dialog = await screen.findByRole('dialog', { name: 'حذف حساب الويب' })
+  expect(within(dialog).getByText(account.username)).toBeInTheDocument()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'حذف' }))
+  await waitFor(() => expect(notifications.show).toHaveBeenCalledWith(expect.objectContaining({
+    color: 'red', message: expect.stringContaining('تعذّر تأكيد الحذف'),
+  })))
+  expect(screen.getByText(account.displayName)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'تحديث' }))
+  expect(await screen.findByText('لا حسابات بكلمة مرور بعد')).toBeInTheDocument()
 })

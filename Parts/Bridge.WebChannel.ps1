@@ -1422,6 +1422,17 @@ function Invoke-WebAirExit {
     return @{ ok = $true }
 }
 
+function Test-WebEditorialSearch {
+    param([string[]]$Values, [string]$Search)
+    if (-not $Search) { return $true }
+    $compare = [Globalization.CultureInfo]::GetCultureInfo('ar').CompareInfo
+    $comparison = [Globalization.CompareOptions]::IgnoreCase -bor [Globalization.CompareOptions]::IgnoreNonSpace
+    foreach ($value in $Values) {
+        if ($null -ne $value -and $compare.IndexOf($value.Replace('ـ', ''), $Search, $comparison) -ge 0) { return $true }
+    }
+    return $false
+}
+
 function Get-WebContentPage {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -1457,10 +1468,32 @@ function Get-WebContentPage {
         default { return @{ ok = $false; error = 'bad_view' } }
     }
 
-    $window = Get-BridgePageWindow -ItemCount $entries.Count -Page ([int](Get-JsonProp $Arguments 'page'))
+    $search = ([string](Get-JsonProp $Arguments 'search')).Trim().Replace('ـ', '')
+    $order = [string](Get-JsonProp $Arguments 'order')
+    if ($search.Length -gt 120 -or ($order -and $order -notin 'sequence', 'title-asc', 'title-desc')) {
+        return @{ ok = $false; error = 'bad_view' }
+    }
+    $filteredEntries = @(for ($sourceIndex = 0; $sourceIndex -lt $entries.Count; $sourceIndex++) {
+            $source = $entries[$sourceIndex]
+            $title = switch ($view) {
+                'urgent' { [string](Get-JsonProp $source 'Text') }
+                'bulletins' { [string](Get-JsonProp $source 'Name') }
+                'ticker' { [string]$source }
+            }
+            $searchValues = @($title)
+            if ($search -and $view -eq 'urgent') { $searchValues += @( (Get-UrgentItemVariables -Item $source).Values ) }
+            if (Test-WebEditorialSearch -Values $searchValues -Search $search) {
+                @{ Entry = $source; Title = $title; Position = $sourceIndex + 1 }
+            }
+        })
+    if ($order -in 'title-asc', 'title-desc') {
+        $filteredEntries = @($filteredEntries | Sort-Object -Property Title -Stable -Culture ar -Descending:($order -eq 'title-desc'))
+    }
+    $window = Get-BridgePageWindow -ItemCount $filteredEntries.Count -Page ([int](Get-JsonProp $Arguments 'page'))
     $items = @(
         for ($index = $window.StartIndex; $index -le $window.EndIndex; $index++) {
-            $entry = $entries[$index]
+            $match = $filteredEntries[$index]
+            $entry = $match.Entry
             switch ($view) {
                 'urgent' {
                     $id = [string](Get-JsonProp $entry 'Id')
@@ -1471,6 +1504,7 @@ function Get-WebContentPage {
                     @{
                         id = $id
                         title = [string](Get-JsonProp $entry 'Text')
+                        position = $match.Position
                         enabled = [bool](Get-UrgentProperty $entry 'Enabled' $true)
                         state = $state
                         values = Get-UrgentItemVariables -Item $entry
@@ -1484,14 +1518,16 @@ function Get-WebContentPage {
                 'bulletins' {
                     $state = if (Test-MojazOnAir -Bulletin $entry) { 'on_air' } else { 'saved' }
                     $rows = @(Get-JsonProp $entry 'Rows' | Where-Object { $null -ne $_ }).Count
-                    @{ id = [string](Get-JsonProp $entry 'Id'); title = Get-NewsScreenLine -Text ([string](Get-JsonProp $entry 'Name')) -Length 120; state = $state; rows = $rows }
+                    @{ id = [string](Get-JsonProp $entry 'Id'); title = Get-NewsScreenLine -Text $match.Title -Length 120
+                        position = $match.Position; state = $state; rows = $rows }
                 }
-                'ticker' { @{ title = Get-NewsScreenLine -Text ([string]$entry) -Length 240; state = 'published' } }
+                'ticker' { @{ title = Get-NewsScreenLine -Text $match.Title -Length 240; position = $match.Position; state = 'published' } }
             }
         }
     )
     return @{ ok = $true; data = @{
-        items = $items; page = $window.Page; pageCount = $window.PageCount; total = $entries.Count; revision = $revision; fields = $fields
+        items = $items; page = $window.Page; pageCount = $window.PageCount; total = $filteredEntries.Count; collectionTotal = $entries.Count
+        revision = $revision; fields = $fields
     } }
 }
 
@@ -3033,6 +3069,13 @@ function Invoke-WebTickerEdit {
         }
         'up' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta -1 }
         'down' { $saved = Move-NewsTickerDraftItem -UserId $actor -Index $index -Delta 1 }
+        'move' {
+            $destination = Get-JsonProp $Arguments 'destination'
+            if (($destination -isnot [int] -and $destination -isnot [long]) -or $destination -lt 0 -or $destination -ge @($draft.Items).Count) {
+                return @{ ok = $false; error = 'ticker_invalid' }
+            }
+            $saved = Set-NewsTickerDraftItemPosition -UserId $actor -Index $index -Destination ([int]$destination)
+        }
         'pause' { $saved = Suspend-NewsTickerDraftItem -UserId $actor -Index $index }
         'resume' {
             if ($index -lt 0 -or $index -ge $script:NewsPaused.Count -or

@@ -104,3 +104,25 @@ Describe 'Release package safety' {
         $readme | Should -Match ([regex]::Escape("## Version $($manifest.Version)"))
     }
 }
+
+Describe 'Packaged web and manager' {
+    It 'puts the verified web and manager builds where the manager can find them without copying runtime data' {
+        $root = Split-Path -Parent $PSScriptRoot
+        $web = Join-Path $TestDrive 'fixture-web'
+        $manager = Join-Path $TestDrive 'fixture-manager'
+        New-Item -ItemType Directory -Path (Join-Path $web 'wwwroot/assets'), $manager | Out-Null
+        foreach ($fixtureFile in @('CinegyBridge.Web.exe', 'wwwroot/index.html', 'wwwroot/assets/index.js', 'config.json', 'wwwroot/assets/session.json')) {
+            Set-Content -LiteralPath (Join-Path $web $fixtureFile) -Value 'test fixture'
+        }
+        Set-Content -LiteralPath (Join-Path $manager 'BridgeManager.exe') -Value 'test fixture'
+        Set-Content -LiteralPath (Join-Path $manager 'BridgeManager-selftest.log') -Value 'test fixture'
+        $build = & (Join-Path $root 'Build-Release.ps1') -SkipChecks -OutputDirectory (Join-Path $TestDrive 'bundle') `
+            -WebBundleDirectory $web -ManagerBundleDirectory $manager
+        $archive = [IO.Compression.ZipFile]::OpenRead($build.ZipPath)
+        try { $names = @($archive.Entries.FullName) }
+        finally { $archive.Dispose() }
+        foreach ($requiredPath in @('dist/web/CinegyBridge.Web.exe', 'dist/web/wwwroot/index.html', 'dist/web/wwwroot/assets/index.js',
+                'dist/BridgeManager/BridgeManager.exe')) { $names | Should -Contain $requiredPath }
+        ($names -join "`n") | Should -Not -Match '(?m)(^|/)(config\.json|session\.json|BridgeManager-selftest\.log)$'
+    }
+}

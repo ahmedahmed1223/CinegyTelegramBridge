@@ -1,7 +1,7 @@
 import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { IconArrowDown, IconArrowUp, IconClockPlay, IconEdit, IconPlayerPlay, IconPlayerStop, IconPlus, IconSettings, IconTrash } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import classes from './NewsroomPage.module.css'
@@ -20,12 +20,15 @@ const status: Record<string, { label: string; color: string }> = {
   ready: { label: 'جاهز', color: 'teal' },
 }
 
-export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
+export function UrgentTable({ board, filtered, searchPending, selected, onToggle, onClear, onSaved, onEditingChange }: {
   board: ContentPage
+  filtered: boolean
+  searchPending: boolean
   selected: string[]
   onToggle: (id: string) => void
   onClear: () => void
   onSaved: (added: boolean) => Promise<void>
+  onEditingChange: (editing: boolean) => void
 }) {
   const [edit, setEdit] = useState<Edit | null>(null)
   const [timingEdit, setTimingEdit] = useState<{ item: ContentItem; revision: number } | null>(null)
@@ -35,6 +38,11 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
   const fields = board.fields ?? []
   const manual = useUrgentManual()
   const liveManual = manual.data?.live
+  const editing = !!edit || !!timingEdit || !!manualAction || busy
+  useEffect(() => {
+    onEditingChange(editing)
+    return () => onEditingChange(false)
+  }, [editing, onEditingChange])
 
   function confirmHide() {
     if (!liveManual) return
@@ -144,7 +152,7 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
         <Text size="sm" c="dimmed">الأعمدة من قالب العواجل. تُستخدم التعديلات في التشغيل التالي.</Text>
         <Group gap="xs">
           {!!selected.length && <Button variant="subtle" size="sm" onClick={onClear}>إلغاء التحديد</Button>}
-          <Button leftSection={<IconPlus size={17} />} disabled={!!edit || busy} onClick={() => startEdit()}>إضافة عاجل</Button>
+          <Button leftSection={<IconPlus size={17} />} disabled={!!edit || busy || searchPending} onClick={() => startEdit()}>إضافة عاجل</Button>
         </Group>
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
@@ -183,11 +191,11 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                 {edit && !edit.id && editorRow(edit)}
                 {board.items.map((item, index) => {
                   if (edit && edit.id === item.id) return editorRow(edit)
-                  const rank = board.page * 20 + index + 1
+                  const rank = item.position ?? board.page * 20 + index + 1
                   const state = status[item.state]
                   const itemId = item.id
                   const displayed = !!itemId && liveManual?.itemId === itemId
-                  const canShow = !!itemId && item.enabled && !edit && !busy
+                  const canShow = !!itemId && item.enabled && !edit && !busy && !searchPending
                   return (
                     <Table.Tr key={item.id ?? rank}>
                       <Table.Td>
@@ -222,14 +230,14 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                             </Tooltip>}
                           </Group>
                           <Group wrap="nowrap" gap={4} aria-label="إجراءات التحرير" role="group">
-                            <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
+                            <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy || searchPending} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
                             <Tooltip label="توقيت الصف في الدورة">
                               <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
-                                aria-label={`توقيت العاجل ${rank} في الدورة`} disabled={!item.id || !!edit || busy}
+                                aria-label={`توقيت العاجل ${rank} في الدورة`} disabled={!item.id || !!edit || busy || searchPending}
                                 onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconSettings size={17} /></ActionIcon>
                             </Tooltip>
                             <ActionIcon variant="subtle" aria-label={`رفع العاجل ${rank}`} disabled={rank === 1 || !item.id || !!edit || busy} onClick={() => rowAction(item, 'up')}><IconArrowUp size={17} /></ActionIcon>
-                            <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === board.total || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
+                            <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === (board.collectionTotal ?? board.total) || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
                             <ActionIcon variant="subtle" color="red" aria-label={`حذف العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => rowAction(item, 'remove')}><IconTrash size={17} /></ActionIcon>
                           </Group>
                         </Stack>
@@ -238,7 +246,9 @@ export function UrgentTable({ board, selected, onToggle, onClear, onSaved }: {
                   )
                 })}
                 {!board.items.length && !edit && (
-                  <Table.Tr><Table.Td colSpan={fields.length + 4}><Text c="dimmed" ta="center" py="sm">الجدول فارغ. أضف أول عاجل.</Text></Table.Td></Table.Tr>
+                  <Table.Tr><Table.Td colSpan={fields.length + 4}><Text c="dimmed" ta="center" py="sm">
+                    {filtered ? 'لا توجد عواجل تطابق البحث.' : 'الجدول فارغ. أضف أول عاجل.'}
+                  </Text></Table.Td></Table.Tr>
                 )}
               </Table.Tbody>
             </Table>

@@ -4,6 +4,8 @@ param(
     [string]$Version = '',
     [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist'),
     [string]$CodeSigningThumbprint = '',
+    [string]$WebBundleDirectory = '',
+    [string]$ManagerBundleDirectory = '',
     [switch]$SkipChecks
 )
 
@@ -49,6 +51,28 @@ $allowList = @(
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md', 'docs\VERSION-6.md'
 )
 $forbiddenNames = @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json', 'autohide.json', 'template-reminders.json')
+$distributables = [ordered]@{}
+foreach ($relativePath in $allowList) { $distributables[$relativePath] = Join-Path $root $relativePath }
+if ($ManagerBundleDirectory) {
+    $distributables['dist/BridgeManager/BridgeManager.exe'] = Join-Path $ManagerBundleDirectory 'BridgeManager.exe'
+}
+if ($WebBundleDirectory) {
+    foreach ($expected in @('CinegyBridge.Web.exe', 'wwwroot/index.html')) {
+        $distributables["dist/web/$expected"] = Join-Path $WebBundleDirectory $expected
+    }
+    $favicon = Join-Path $WebBundleDirectory 'wwwroot/favicon.svg'
+    if (Test-Path -LiteralPath $favicon -PathType Leaf) { $distributables['dist/web/wwwroot/favicon.svg'] = $favicon }
+    # Copy the built client files explicitly. Publish folders may also contain
+    # logs, appsettings overrides, or state from a previous run.
+    $assetExtensions = @('.css', '.js', '.mjs', '.woff', '.woff2', '.svg', '.webp', '.png', '.jpeg', '.jpg', '.ico', '.wasm')
+    $assets = @(Get-ChildItem -LiteralPath (Join-Path $WebBundleDirectory 'wwwroot/assets') -File |
+            Where-Object { $_.Extension -in $assetExtensions -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) })
+    if (-not ($assets.Extension -contains '.js')) { throw 'The supplied web build has no client JavaScript assets.' }
+    foreach ($asset in $assets) { $distributables["dist/web/wwwroot/assets/$($asset.Name)"] = $asset.FullName }
+}
+foreach ($relativePath in $distributables.Keys) {
+    if (-not (Test-Path -LiteralPath $distributables[$relativePath] -PathType Leaf)) { throw "Required release file missing: $relativePath" }
+}
 $releaseRoot = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version"
 $zipPath = Join-Path $OutputDirectory "CinegyTelegramBridge-$Version.zip"
 $checksumPath = "$zipPath.sha256"
@@ -57,9 +81,8 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 if (Test-Path -LiteralPath $releaseRoot) { Remove-Item -LiteralPath $releaseRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 
-foreach ($relativePath in $allowList) {
-    $source = Join-Path $root $relativePath
-    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required release file missing: $relativePath" }
+foreach ($relativePath in $distributables.Keys) {
+    $source = $distributables[$relativePath]
     $destination = Join-Path $releaseRoot $relativePath
     $destinationDirectory = Split-Path -Parent $destination
     if (-not (Test-Path -LiteralPath $destinationDirectory)) { New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null }

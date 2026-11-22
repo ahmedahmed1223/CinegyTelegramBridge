@@ -15,6 +15,26 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.0.0
+
+The Arabic web newsroom combines template-driven editorial tables, right-to-left entry, search and sorting, and live monitoring with a floating player or browser picture-in-picture. Operators can review direct or timed urgent playout, manage the ticker draft and publication order, upload bulletin images and correct the confirmed live programme row.
+
+Multiple image fields on a bulletin row can be filled from the same dialog with mixed JPEG and PNG files. The web editor saves each field against the latest confirmed bulletin revision and keeps successful uploads if a later file fails. The same workspace provides template browsing, layer status and schedule controls, account management, diagnostics, reports, and shift handover. A Windows distribution with the manager and web binaries can be built using the instructions in [RELEASE.md](RELEASE.md).
+
+## Version 8.144.0
+
+The web account list can be searched by display name or username, filtered by role, and sorted by name or last login. Account reset and deletion confirmations show the username to distinguish similar display names. The list offers retry when loading fails and refresh when a deletion outcome is uncertain.
+
+## Version 8.143.0
+
+Find a programme board by name, then search every text field across all its pages. Sorting the search results preserves stored row numbers and does not change publication order. The confirmed live row remains available for correction even when the search hides it.
+
+## Version 8.142.0
+
+Web operators can search across all pages of breaking news, the bulletin library, and the published ticker. Alphabetical display sorting preserves the saved position of each row and its editing and playout controls.
+
+The ticker draft supports search, display sorting, adding several headlines in succession, and moving a headline to a specific publication position. Programme boards expose correction for the confirmed live row on every page of the board.
+
 ## Version 8.141.0
 
 Editorial text fields keep right-to-left direction when text begins with a number or Latin word. The breaking-news grid has separate direct and timed show actions and a stop-and-hide control for the active individual headline. Both show actions use the existing on-air review and confirmation.

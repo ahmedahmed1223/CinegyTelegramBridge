@@ -264,10 +264,12 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             }} />}
           {sceneImageRow && <BulletinSceneImageDialog id={id} {...sceneImageRow} onClose={() => setSceneImageRow(null)}
             onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
-          {photoRow && <BulletinPhotoDialog id={id} {...photoRow} onClose={() => setPhotoRow(null)}
+          {photoRow && <BulletinPhotoDialog id={id} {...photoRow}
+            otherFields={bulletin.fields.filter(field => field.kind === 'media' && field.name !== photoRow.field)}
+            onClose={() => setPhotoRow(null)}
             onSaved={(value) => {
               acceptSaved(value)
-              setSavedNote(photoRow.rowId ? 'حُفظت صورة الصف.' : 'أُضيف الصف إلى الموجز.')
+              setSavedNote(photoRow.rowId ? 'حُفظت مرفقات الصف.' : 'أُضيف الصف إلى الموجز.')
             }} />}
           {designChange && <Paper withBorder p="md" radius="lg">
             <form onSubmit={(event) => {

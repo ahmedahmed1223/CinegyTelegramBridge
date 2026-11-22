@@ -1,7 +1,7 @@
-import { ActionIcon, Alert, Button, Group, Menu, Modal, Pagination, Paper, ScrollArea, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
+import { ActionIcon, Alert, Button, Group, Menu, Modal, NumberInput, Pagination, Paper, ScrollArea, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
-import { IconArrowDown, IconArrowUp, IconCalendarTime, IconEdit, IconFolders, IconHistory, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconCalendarTime, IconEdit, IconFolders, IconHistory, IconListNumbers, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
@@ -13,6 +13,7 @@ import { TickerPaste } from './TickerPaste'
 import { TickerSheet } from './TickerSheet'
 import { TickerSets } from './TickerSets'
 import { TickerTxt } from './TickerTxt'
+import { EditorialSearch, type EditorialOrder } from './EditorialSearch'
 
 type Request = Schemas['TickerDraftRequest']
 type Draft = Schemas['TickerDraft']
@@ -20,13 +21,16 @@ type Conflict = Schemas['TickerConflict']
 type Edit = { revision: string; index: number | null; text: string }
 type Review = { draft: Draft; conflict?: Conflict }
 type Schedule = { revision: string; time: string }
+type Move = { revision: string; index: number; text: string; position: number | string }
 const draftKey = ['ticker-draft']
 const pageSize = 20
 const number = new Intl.NumberFormat('ar')
+const alphabet = new Intl.Collator('ar', { sensitivity: 'base', numeric: true })
+const searchText = (text: string) => text.normalize('NFKD').replace(/[\p{M}\u0640]/gu, '').toLowerCase().trim()
 
 async function tickerCommand(body: Pick<Request, 'action'> & Partial<Request>) {
   const { data, error, response } = await api.POST('/api/content/ticker/draft', {
-    body: { revision: null, index: null, text: null, review: null, publishAtMs: null, pausedPage: null, ...body },
+    body: { revision: null, index: null, text: null, review: null, publishAtMs: null, pausedPage: null, destination: null, ...body },
   })
   if (!data) throw new Error(errorCode(error, response))
   return data
@@ -46,6 +50,8 @@ function ReviewItems({ items }: { items: string[] }) {
 export function TickerEditor({ onPublished }: { onPublished: () => Promise<unknown> }) {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [order, setOrder] = useState<EditorialOrder>('sequence')
   const [pausedPage, setPausedPage] = useState(1)
   const [showPaused, setShowPaused] = useState(false)
   const [showSets, setShowSets] = useState(false)
@@ -55,9 +61,11 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const [showTxt, setShowTxt] = useState(false)
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [edit, setEdit] = useState<Edit | null>(null)
+  const [move, setMove] = useState<Move | null>(null)
   const [review, setReview] = useState<Review | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [savedMessage, setSavedMessage] = useState('')
   const lastScheduledAt = useRef<string | null>(null)
   const status = useQuery({
     queryKey: [...draftKey, pausedPage],
@@ -77,9 +85,18 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const draft = editor?.draft
   const lock = editor?.lock
   const items = draft?.items ?? []
-  const pageCount = Math.max(1, Math.ceil(items.length / pageSize))
+  const needle = searchText(search)
+  const matching = items.map((text, index) => ({ text, index }))
+    .filter(({ text }) => !needle || searchText(text).includes(needle))
+  if (order !== 'sequence') {
+    const direction = order === 'title-asc' ? 1 : -1
+    matching.sort((left, right) => direction * alphabet.compare(left.text, right.text))
+  }
+  const pageCount = Math.max(1, Math.ceil(matching.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const offset = (currentPage - 1) * pageSize
+  const destination = typeof move?.position === 'number' && Number.isInteger(move.position) ? move.position - 1 : -1
+  const canMove = move && move.revision === draft?.revision && destination >= 0 && destination < items.length && destination !== move.index
 
   useEffect(() => {
     if (!editor) return
@@ -88,10 +105,11 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
     if (previous && !lastScheduledAt.current && Date.parse(previous) <= Date.now()) void onPublished()
   }, [editor, draft?.scheduledAt, onPublished])
 
-  async function send(body: Pick<Request, 'action'> & Partial<Request>) {
+  async function send(body: Pick<Request, 'action'> & Partial<Request>, addAnother = false) {
     if (busy) return
     setBusy(true)
     setError('')
+    setSavedMessage('')
     try {
       await queryClient.cancelQueries({ queryKey: draftKey })
       const updated = await tickerCommand({ ...body, pausedPage })
@@ -99,10 +117,18 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
       await queryClient.invalidateQueries({ queryKey: draftKey, refetchType: 'none' })
       queryClient.setQueryData([...draftKey, updatedPage], updated)
       setPausedPage(updatedPage)
-      setEdit(null)
+      const savedDraft = updated.draft
+      setEdit(addAnother && savedDraft && savedDraft.items.length < savedDraft.maxItems
+        ? { index: null, text: '', revision: savedDraft.revision } : null)
+      if (body.action === 'add' || body.action === 'update') setSavedMessage('حُفظ الخبر في المسودة.')
+      if (body.action === 'move' && body.destination != null) {
+        setMove(null)
+        setSavedMessage(`نُقل الخبر إلى الموضع ${number.format(body.destination + 1)} في المسودة.`)
+        if (!needle && order === 'sequence') setPage(Math.floor(body.destination / pageSize) + 1)
+      }
       setReview(null)
       setSchedule(null)
-      if (body.action === 'start') setPage(1)
+      if (body.action === 'start') { setPage(1); setSearch(''); setOrder('sequence') }
       if (body.action === 'publish' || body.action === 'append' || body.action === 'replace') {
         notifications.show({
           color: updated.sheetFailed ? 'orange' : 'teal',
@@ -191,9 +217,11 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
 
   function editForm(current: Edit) {
     return (
-      <form onSubmit={(event) => {
+      <form key={current.revision} onSubmit={(event) => {
         event.preventDefault()
-        void send({ action: current.index === null ? 'add' : 'update', ...current })
+        if (!current.text.trim()) return
+        const submitter = (event.nativeEvent as SubmitEvent).submitter
+        void send({ action: current.index === null ? 'add' : 'update', ...current }, submitter?.getAttribute('value') === 'another')
       }}>
         <Stack gap="xs">
           <Textarea
@@ -205,7 +233,10 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             disabled={busy}
           />
           <Group gap="xs">
-            <Button type="submit" size="sm" loading={busy}>حفظ الخبر</Button>
+            <Button type="submit" size="sm" loading={busy} disabled={!current.text.trim()}>حفظ الخبر</Button>
+            {current.index === null && <Button type="submit" value="another" variant="light" size="sm" disabled={busy || !current.text.trim()}>
+              حفظ وإضافة خبر آخر
+            </Button>}
             <Button variant="subtle" size="sm" disabled={busy} onClick={() => { setEdit(null); setError('') }}>إلغاء</Button>
           </Group>
         </Stack>
@@ -240,7 +271,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             <Button variant="subtle" size="compact-sm" onClick={() => void status.refetch()}>إعادة المحاولة</Button>
           </Alert>
         )}
-        {!review && !schedule && error && <Alert color="red" role="alert">{error}</Alert>}
+        {!review && !schedule && !move && error && <Alert color="red" role="alert">{error}</Alert>}
         {editor?.state === 'locked' && (
           <Alert color="orange" title="المسودة قيد التحرير">
             <Stack gap="xs">
@@ -275,14 +306,21 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
         {draft && (
           <>
             {edit?.index === null && editForm(edit)}
-            <ol className={classes.tickerItems} start={offset + 1}>
-              {items.slice(offset, offset + pageSize).map((item, pageIndex) => {
-                const index = offset + pageIndex
+            {savedMessage && <Text size="sm" c="teal" role="status">{savedMessage}</Text>}
+            {(items.length > 0 || search) && <EditorialSearch label="بحث في المسودة" sequenceLabel="ترتيب الشريط"
+              search={search} order={order} disabled={!!edit || busy}
+              onSearch={(value) => { setSearch(value); setPage(1) }}
+              onOrder={(value) => { setOrder(value); setPage(1) }} />}
+            {!matching.length && !edit && <Text size="sm" c="dimmed">
+              {needle ? 'لا توجد أخبار تطابق البحث.' : 'المسودة فارغة.'}
+            </Text>}
+            {!!matching.length && <ol className={classes.tickerItems}>
+              {matching.slice(offset, offset + pageSize).map(({ text: item, index }) => {
                 return (
-                  <li key={index}>
+                  <li key={index} value={index + 1}>
                     {edit?.index === index ? editForm(edit) : (
                       <div className={classes.tickerEntry}>
-                        <Text dir="auto" className={classes.headline}>{item}</Text>
+                        <Text dir="rtl" className={classes.headline}>{item}</Text>
                         <Group gap={2} wrap="nowrap">
                           <ActionIcon variant="subtle" aria-label={`تعديل الخبر ${index + 1}`} disabled={busy || !!edit}
                             onClick={() => { setError(''); setEdit({ index, text: item, revision: draft.revision }) }}><IconEdit size={16} /></ActionIcon>
@@ -290,6 +328,9 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
                             onClick={() => void send({ action: 'up', revision: draft.revision, index })}><IconArrowUp size={16} /></ActionIcon>
                           <ActionIcon variant="subtle" aria-label={`خفض الخبر ${index + 1}`} disabled={busy || !!edit || index + 1 === items.length}
                             onClick={() => void send({ action: 'down', revision: draft.revision, index })}><IconArrowDown size={16} /></ActionIcon>
+                          <ActionIcon variant="subtle" title="نقل إلى موضع محدد" aria-label={`نقل الخبر ${index + 1} إلى موضع محدد`}
+                            disabled={busy || !!edit || items.length < 2}
+                            onClick={() => { setError(''); setMove({ index, position: index + 1, text: item, revision: draft.revision }) }}><IconListNumbers size={16} /></ActionIcon>
                           <ActionIcon variant="subtle" title="إيقاف مؤقتًا" aria-label={`إيقاف الخبر ${index + 1} مؤقتًا`} disabled={busy || !!edit}
                             onClick={() => void send({ action: 'pause', revision: draft.revision, index })}><IconPlayerPause size={16} /></ActionIcon>
                           {draft.canRemove && (
@@ -302,8 +343,28 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
                   </li>
                 )
               })}
-            </ol>
+            </ol>}
             {pageCount > 1 && <Pagination total={pageCount} value={currentPage} onChange={setPage} disabled={!!edit || busy} />}
+            <Modal opened={!!move} title="نقل خبر في ترتيب الشريط" onClose={() => { setMove(null); setError('') }}
+              closeOnEscape={!busy} closeOnClickOutside={!busy} withCloseButton={!busy}>
+              {move && <form onSubmit={(event) => {
+                event.preventDefault()
+                if (canMove) void send({ action: 'move', index: move.index, revision: move.revision, destination })
+              }}>
+                <Stack gap="sm">
+                  <Text size="sm" dir="rtl">{move.text}</Text>
+                  <NumberInput label="الموضع الجديد" min={1} max={items.length} value={move.position} disabled={busy}
+                    allowDecimal={false} allowNegative={false} onChange={(position) => setMove({ ...move, position })} />
+                  {(error || move.revision !== draft.revision) && <Alert color="red" role="alert">
+                    {error || messageFor('ticker_stale')}
+                  </Alert>}
+                  <Group justify="flex-end">
+                    <Button variant="default" disabled={busy} onClick={() => { setMove(null); setError('') }}>إلغاء</Button>
+                    <Button type="submit" disabled={!canMove} loading={busy}>نقل الخبر</Button>
+                  </Group>
+                </Stack>
+              </form>}
+            </Modal>
             {draft.paused && (draft.paused.total > 0 || showPaused) && (
               <Stack gap="xs" className={classes.tickerTools}>
                 <Group justify="space-between" align="center">

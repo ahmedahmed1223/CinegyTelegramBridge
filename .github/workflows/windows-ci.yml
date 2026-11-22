@@ -83,7 +83,9 @@ jobs:
         run: .\scripts\Build-BridgeWeb.ps1 -OutputDirectory .\artifacts\web
       - name: Build allow-listed release package
         shell: pwsh
-        run: .\Build-Release.ps1 -SkipChecks -OutputDirectory .\artifacts\release
+        run: |
+          .\Build-Release.ps1 -SkipChecks -OutputDirectory .\artifacts\release `
+            -ManagerBundleDirectory .\artifacts\BridgeManager -WebBundleDirectory .\artifacts\web
       - name: Upload verification artifacts
         if: always()
         uses: actions/upload-artifact@v7

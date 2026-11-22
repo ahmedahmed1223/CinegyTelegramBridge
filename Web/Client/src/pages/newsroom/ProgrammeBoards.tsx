@@ -2,6 +2,7 @@ import {
   ActionIcon, Alert, Badge, Button, Group, NativeSelect, Pagination, Paper, Skeleton,
   Stack, Table, Text, Textarea, TextInput, Title, Tooltip,
 } from '@mantine/core'
+import { useDebouncedValue } from '@mantine/hooks'
 import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { IconArrowDown, IconArrowRight, IconArrowUp, IconEdit, IconPlayerPlay, IconPlayerStop, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
@@ -11,6 +12,7 @@ import { messageFor } from '../../api/messages'
 import { ProgrammeBoardPaste } from './RowPaste'
 import { ProgrammeBoardCorrection } from './ProgrammeBoardCorrection'
 import { ProgrammeBoardPlayout, type BoardAirResult, type BoardAirTarget } from './ProgrammeBoardPlayout'
+import { EditorialSearch, type EditorialOrder } from './EditorialSearch'
 import classes from './NewsroomPage.module.css'
 
 type Board = Schemas['ProgrammeBoardEditor']
@@ -23,7 +25,7 @@ const roles = [
   { value: 'owner', label: 'المالك فقط' },
 ]
 const listKey = ['programme-boards']
-const editorKey = (id: string, page: number) => ['programme-board', id, page]
+const editorKey = (id: string, page: number, search = '', order: EditorialOrder = 'sequence') => ['programme-board', id, page, search, order]
 
 async function writeBoard(body: Edit) {
   const { data, error, response } = await api.POST('/api/content/boards/editor', {
@@ -75,15 +77,20 @@ function CreateBoard({ onCancel, onCreated }: { onCancel: () => void; onCreated:
 
 export function ProgrammeBoards() {
   const [page, setPage] = useState(0)
+  const [search, setSearch] = useState('')
+  const [searchTerm] = useDebouncedValue(search.trim(), 250)
+  const [order, setOrder] = useState<EditorialOrder>('title-asc')
   const [open, setOpen] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const cache = useQueryClient()
   const query = useQuery({
-    queryKey: [...listKey, page],
+    queryKey: [...listKey, page, searchTerm, order],
     enabled: !open,
     retry: false,
     queryFn: async ({ signal }) => {
-      const { data, error, response } = await api.GET('/api/content/boards', { params: { query: { page } }, signal })
+      const { data, error, response } = await api.GET('/api/content/boards', {
+        params: { query: { page, search: searchTerm || undefined, order } }, signal,
+      })
       if (!data) throw new Error(errorCode(error, response))
       return data
     },
@@ -95,9 +102,12 @@ export function ProgrammeBoards() {
       <Title order={2}>لوحات البرامج</Title>
       <Group gap="xs">
         <Button variant="default" leftSection={<IconRefresh size={16} />} loading={query.isFetching} onClick={() => void query.refetch()}>تحديث</Button>
-        {boards?.canCreate && <Button leftSection={<IconPlus size={16} />} disabled={creating} onClick={() => setCreating(true)}>إنشاء لوحة</Button>}
+        {boards?.canCreate && <Button leftSection={<IconPlus size={16} />} disabled={creating || search.trim() !== searchTerm}
+          onClick={() => setCreating(true)}>إنشاء لوحة</Button>}
       </Group>
     </Group>
+    <EditorialSearch label="بحث عن لوحة" titleLabel="الاسم" search={search} order={order} disabled={creating}
+      onSearch={(value) => { setSearch(value); setPage(0) }} onOrder={(value) => { setOrder(value); setPage(0) }} />
     {query.isPending && <Skeleton h={68} aria-label="جارٍ تحميل لوحات البرامج" />}
     {query.error && <Alert color={query.error.message === 'content_disabled' ? 'gray' : 'red'} role="alert">
       {query.error.message === 'content_disabled' ? 'لوحات البرامج معطّلة في إعدادات الجسر.' : messageFor(query.error.message)}
@@ -108,7 +118,7 @@ export function ProgrammeBoards() {
       setCreating(false)
       setOpen(board.id)
     }} />}
-    {boards && !boards.total && !creating && <Text c="dimmed">لا توجد لوحات برامج محفوظة.</Text>}
+    {boards && !boards.total && !creating && <Text c="dimmed">{searchTerm ? 'لا توجد لوحات تطابق البحث.' : 'لا توجد لوحات برامج محفوظة.'}</Text>}
     {!!boards?.items.length && <Paper radius="lg" withBorder>
       <ul className={classes.list}>
         {boards.items.map((board) => <li key={board.id} className={classes.row}>
@@ -128,6 +138,9 @@ export function ProgrammeBoards() {
 
 function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const [page, setPage] = useState(0)
+  const [search, setSearch] = useState('')
+  const [searchTerm] = useDebouncedValue(search.trim(), 250)
+  const [order, setOrder] = useState<EditorialOrder>('sequence')
   const [draft, setDraft] = useState<{ rowId?: string; revision: number; values: Record<string, string> } | null>(null)
   const [role, setRole] = useState<{ value: string; revision: number } | null>(null)
   const [pasting, setPasting] = useState(false)
@@ -137,9 +150,11 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const [saved, setSaved] = useState(false)
   const cache = useQueryClient()
   const query = useQuery({
-    queryKey: editorKey(id, page),
+    queryKey: editorKey(id, page, searchTerm, order),
     queryFn: async ({ signal }) => {
-      const { data, error, response } = await api.GET('/api/content/boards/editor', { params: { query: { id, page } }, signal })
+      const { data, error, response } = await api.GET('/api/content/boards/editor', {
+        params: { query: { id, page, search: searchTerm || undefined, order } }, signal,
+      })
       if (!data) throw new Error(errorCode(error, response))
       return data
     },
@@ -147,10 +162,12 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     refetchOnWindowFocus: false,
     refetchInterval: 10_000,
   })
-  function acceptSaved(board: Board) {
+  function acceptSaved(board: Board, change: Edit) {
+    void cache.invalidateQueries({ queryKey: ['programme-board', id] })
     cache.setQueryData(editorKey(id, board.page), board)
     void cache.invalidateQueries({ queryKey: listKey })
-    setPage(board.page)
+    if (change.action === 'add') { setSearch(''); setOrder('sequence'); setPage(board.page) }
+    else if (!searchTerm && order === 'sequence') setPage(board.page)
     setDraft(null)
     setRole(null)
     setPasting(false)
@@ -173,8 +190,9 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
   const board = query.data
   const busy = write.isPending || removeBoard.isPending || query.isFetching
   const editing = !!draft || !!role || pasting
-  const blocked = busy || editing
+  const blocked = busy || editing || search.trim() !== searchTerm
   const liveRow = board?.rows.find(row => row.id === board.liveRowId)
+    ?? (board?.liveRow?.id === board?.liveRowId ? board?.liveRow : null)
   function acceptAirChange(action: BoardAirTarget['action'], result?: BoardAirResult) {
     if (result) {
       cache.setQueriesData<Board>({ queryKey: ['programme-board', id] },
@@ -219,7 +237,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
     removeBoard.reset()
     modals.openConfirmModal({
       title: 'حذف لوحة البرنامج',
-      children: <Text dir="auto">ستُحذف لوحة «{board.name}» مع صفوفها المحفوظة ({number.format(board.total)}).</Text>,
+      children: <Text dir="auto">ستُحذف لوحة «{board.name}» مع صفوفها المحفوظة ({number.format(board.collectionTotal ?? board.total)}).</Text>,
       labels: { confirm: 'حذف اللوحة', cancel: 'إلغاء' },
       confirmProps: { color: 'red' },
       onConfirm: () => removeBoard.mutate({ boardId: board.id, revision: board.revision }),
@@ -248,6 +266,9 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
       <Button variant="default" leftSection={<IconRefresh size={16} />} disabled={editing || write.isPending || removeBoard.isPending}
         loading={query.isFetching} onClick={() => { setSaved(false); write.reset(); removeBoard.reset(); void query.refetch() }}>تحديث</Button>
     </Group>
+    <EditorialSearch label="بحث في صفوف اللوحة" titleLabel={board?.fields[0]?.label ?? 'الحقل الأول'} sequenceLabel="ترتيب الصفوف"
+      search={search} order={order} disabled={editing || write.isPending || removeBoard.isPending || !!air || !!correction}
+      onSearch={(value) => { setSearch(value); setPage(0) }} onOrder={(value) => { setOrder(value); setPage(0) }} />
     {query.isPending && <Skeleton h={82} aria-label="جارٍ تحميل لوحة البرنامج" />}
     {query.error && <Alert color="red" role="alert">{messageFor(query.error.message)}</Alert>}
     {board && <>
@@ -271,6 +292,8 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
       {pasting && <ProgrammeBoardPaste board={board} onSave={(nextPage) => {
         void cache.invalidateQueries({ queryKey: ['programme-board', id] })
         void cache.invalidateQueries({ queryKey: listKey })
+        setSearch('')
+        setOrder('sequence')
         setPage(nextPage)
         setPasting(false)
         setSaved(true)
@@ -291,7 +314,9 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
       {!!board.sceneMedia.length && <Text size="sm" c="dimmed">وسائط من القالب: {board.sceneMedia.join('، ')}</Text>}
       {!board.fields.length && <Alert color="orange">لا يحتوي قالب اللوحة الآن على حقول نصية قابلة للتحرير.</Alert>}
       {board.liveRowId && <Group justify="space-between">
-        <Badge color="red" variant="light">صف من اللوحة على الهواء</Badge>
+        <Badge color="red" variant="light">
+          {liveRow ? `الصف ${number.format(liveRow.number)} على الهواء` : 'صف من اللوحة على الهواء'}
+        </Badge>
         <Group gap="xs">
           {board.canEdit && liveRow && <Button variant="light" size="compact-sm" leftSection={<IconEdit size={16} />}
             disabled={blocked || !board.fields.length} onClick={() => { setAirNotice(null); setCorrection(liveRow) }}>تصحيح على الهواء</Button>}
@@ -309,7 +334,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
         {removeBoard.error.message === 'board_stale' ? 'تغيّرت اللوحة بعد فتحها. حدّثها وراجع عدد الصفوف قبل تأكيد الحذف.' : messageFor(removeBoard.error.message)}
       </Alert>}
       {(board.total > 0 || draft) && <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا للوصول إلى بقية الحقول والإجراءات.</Text>}
-      {(!board.total && !draft) ? <Text c="dimmed">لا توجد صفوف في اللوحة.</Text> : <Paper withBorder radius="lg" className={classes.urgentGrid}>
+      {(!board.total && !draft) ? <Text c="dimmed">{searchTerm ? 'لا توجد صفوف تطابق البحث.' : 'لا توجد صفوف في اللوحة.'}</Text> : <Paper withBorder radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
           event.preventDefault()
           if (!draft || busy) return
@@ -346,7 +371,7 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
                     <Tooltip label="رفع الصف"><ActionIcon variant="subtle" aria-label={`رفع الصف ${number.format(row.number)}`}
                       disabled={blocked || row.number === 1} onClick={() => changeRow('up', row)}><IconArrowUp size={16} /></ActionIcon></Tooltip>
                     <Tooltip label="خفض الصف"><ActionIcon variant="subtle" aria-label={`خفض الصف ${number.format(row.number)}`}
-                      disabled={blocked || row.number === board.total} onClick={() => changeRow('down', row)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
+                      disabled={blocked || row.number === (board.collectionTotal ?? board.total)} onClick={() => changeRow('down', row)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
                     {board.canEdit && <>
                       <Tooltip label="تحرير الصف"><ActionIcon variant="subtle" aria-label={`تحرير الصف ${number.format(row.number)}`}
                         disabled={blocked || !board.fields.length} onClick={() => startRow(row)}><IconEdit size={16} /></ActionIcon></Tooltip>

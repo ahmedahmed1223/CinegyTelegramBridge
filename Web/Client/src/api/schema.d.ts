@@ -1740,6 +1740,8 @@ export interface paths {
             parameters: {
                 query?: {
                     page?: number;
+                    search?: string;
+                    order?: string;
                 };
                 header?: never;
                 path: {
@@ -12004,6 +12006,8 @@ export interface paths {
             parameters: {
                 query?: {
                     page?: number;
+                    search?: string;
+                    order?: string;
                 };
                 header?: never;
                 path?: never;
@@ -12018,6 +12022,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ProgrammeBoardList"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Forbidden */
@@ -12131,6 +12144,8 @@ export interface paths {
                 query: {
                     id: string;
                     page?: number;
+                    search?: string;
+                    order?: string;
                 };
                 header?: never;
                 path?: never;
@@ -12145,6 +12160,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ProgrammeBoardEditor"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Forbidden */
@@ -13307,6 +13331,11 @@ export interface components {
                 [key: string]: string;
             } | null;
             timing?: components["schemas"]["UrgentItemTiming"];
+            /**
+             * Format: int32
+             * @default null
+             */
+            position: number | null;
         };
         ContentPage: {
             items: components["schemas"]["ContentItem"][];
@@ -13319,6 +13348,11 @@ export interface components {
             /** Format: int32 */
             revision: number | null;
             fields: components["schemas"]["TemplateFieldDto"][] | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            collectionTotal: number | null;
         };
         CreateAccountRequest: {
             kind: string;
@@ -13779,6 +13813,12 @@ export interface components {
             /** Format: int32 */
             maxFieldLength: number;
             liveRowId: string | null;
+            liveRow?: components["schemas"]["ProgrammeBoardRow2"];
+            /**
+             * Format: int32
+             * @default null
+             */
+            collectionTotal: number | null;
         };
         ProgrammeBoardEditRequest: {
             action: string;
@@ -13852,6 +13892,16 @@ export interface components {
             };
             enabled: boolean;
         };
+        /** @default null */
+        ProgrammeBoardRow2: {
+            id: string;
+            /** Format: int32 */
+            number: number;
+            values: {
+                [key: string]: string;
+            };
+            enabled: boolean;
+        } | null;
         ProgrammeBoardSummary: {
             id: string;
             name: string;
@@ -14950,6 +15000,11 @@ export interface components {
              * @default null
              */
             pausedPage: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            destination: number | null;
         };
         TickerEditorState: {
             state: string;

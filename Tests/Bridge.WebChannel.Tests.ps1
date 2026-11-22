@@ -2983,6 +2983,12 @@ Describe 'Web channel: the pipe' {
         $reply.data.pageCount | Should -Be 2
         $reply.data.items.Count | Should -Be 14
         $reply.data.items[0].title | Should -Be 'خبر 21'
+
+        $query = @{ op = 'content.list'; args = @{ actor = 4321; view = 'ticker'; page = 0; search = 'خَبَر 3'; order = 'title-desc' } } | ConvertTo-Json -Compress
+        $filtered = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $query | ConvertFrom-Json
+        $filtered.data.total | Should -Be 6
+        $filtered.data.collectionTotal | Should -Be 34
+        $filtered.data.items.position | Should -Be @(34, 33, 32, 31, 30, 3)
     }
 
     It 'shares the ticker draft with the bot and protects its ownership, revision, and publication' {
@@ -3035,6 +3041,14 @@ Describe 'Web channel: the pipe' {
             (& $requestTicker @{ actor = 4321; action = 'remove'; revision = $mine.revision; index = 0 }).error | Should -Be 'forbidden'
             $moved = & $requestTicker @{ actor = 4321; action = 'up'; revision = $mine.revision; index = 1 }
             $moved.data.draft.items | Should -Be @('حرره البوت', 'أول')
+
+            $third = & $requestTicker @{ actor = 4321; action = 'add'; revision = $moved.data.draft.revision; text = 'خبر ثالث' }
+            $newOrder = @{ actor = 4321; action = 'move'; revision = $third.data.draft.revision; index = 2; destination = 0 }
+            (& $requestTicker $newOrder).data.draft.items | Should -Be @('خبر ثالث', 'حرره البوت', 'أول')
+            (& $requestTicker $newOrder).error | Should -Be 'ticker_stale'
+            $latestDraft = Get-NewsTickerDraft -UserId 4321
+            Set-NewsTickerDraftItems -Draft $latestDraft -Items @('حرره البوت', 'أول') | Should -BeTrue
+            $moved = & $requestTicker @{ actor = 4321; action = 'status' }
 
             $paused = & $requestTicker @{ actor = 4321; action = 'pause'; revision = $moved.data.draft.revision; index = 1 }
             $paused.data.draft.items | Should -Be @('حرره البوت')
@@ -3905,6 +3919,10 @@ Describe 'Web channel: the pipe' {
         $board = (New-ContentBoard -Name 'برنامج العرض' -TemplateKey 'Programme' -EditRole 'admin').Value
         $board = (Add-BoardItem -Board $board -TextFields @('programme.title', 'programme.guest') -Values @{
                 'programme.title' = 'الفقرة الأولى'; 'programme.guest' = 'الضيف الأول' } -MaxFieldLength 100).Value
+        for ($number = 2; $number -le 21; $number++) {
+            $board = (Add-BoardItem -Board $board -TextFields @('programme.title', 'programme.guest') -Values @{
+                    'programme.title' = "الفقرة $number" } -MaxFieldLength 100).Value
+        }
         $boardId = $board.Id
         try {
             Save-ContentBoard -Board $board | Should -BeTrue
@@ -3936,6 +3954,26 @@ Describe 'Web channel: the pipe' {
             $shown = & $sendBoardAir
             $shown.ok | Should -BeTrue
             $shown.data.liveRowId | Should -Be $request.rowId
+            $editorRequest = @{ op = 'board.edit'; args = @{ actor = 4321; action = 'read'; id = $boardId; page = 1 } } | ConvertTo-Json -Compress
+            $offPage = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $editorRequest | ConvertFrom-Json
+            $offPage.ok | Should -BeTrue
+            $offPage.data.page | Should -Be 1
+            $offPage.data.rows.id | Should -Not -Contain $request.rowId
+            $liveRow = Get-JsonProp $offPage.data 'liveRow'
+            $liveRow | Should -Not -BeNullOrEmpty
+            $liveRow.id | Should -Be $request.rowId
+            $liveRow.number | Should -Be 1
+            $liveRow.values.'programme.guest' | Should -Be 'الضيف الأول'
+            $filteredRequest = @{ op = 'board.edit'; args = @{ actor = 4321; action = 'read'; id = $boardId; search = 'الفقرة 21'; order = 'title-desc' } } | ConvertTo-Json -Compress
+            $filteredBoard = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $filteredRequest | ConvertFrom-Json
+            $filteredBoard.ok | Should -BeTrue
+            $filteredBoard.data.rows.number | Should -Be @(21)
+            $filteredBoard.data.total | Should -Be 1
+            $filteredBoard.data.collectionTotal | Should -Be 21
+            $filteredBoard.data.liveRow.id | Should -Be $request.rowId
+            $guestRequest = @{ op = 'board.edit'; args = @{ actor = 4321; action = 'read'; id = $boardId; search = 'الضَّيف الأول' } } | ConvertTo-Json -Compress
+            $byGuest = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $guestRequest | ConvertFrom-Json
+            $byGuest.data.rows.id | Should -Be @($request.rowId)
             (& $sendBoardAir).error | Should -Be 'board_stale'
             Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
                 $Key -eq 'Programme' -and $ExpectedLayer -eq 7 -and $ExpectedLayerStamp -eq 'active:incoming' -and -not $RequireEventIdentity -and
@@ -3965,6 +4003,8 @@ Describe 'Web channel: the pipe' {
             $hidden = & $sendBoardAir
             $hidden.ok | Should -BeTrue
             $hidden.data.liveRowId | Should -BeNullOrEmpty
+            $afterHide = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $editorRequest | ConvertFrom-Json
+            (Get-JsonProp $afterHide.data 'liveRow') | Should -BeNullOrEmpty
             Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 -and $ExpectedLayerStamp -eq 'active:show-1' }
 
             $script:BoardAirHasIdentity = $false
@@ -4168,6 +4208,10 @@ Describe 'Web channel: the pipe' {
             $list = & $sendBoard 'board.list' @{ actor = 4322 }
             $list.ok | Should -BeTrue
             $list.data.items.Id | Should -Contain $boardId
+            $none = & $sendBoard 'board.list' @{ actor = 4322; search = 'عنوان غائب من جميع اللوحات 5423' }
+            $none.data.total | Should -Be 0
+            $matchByName = & $sendBoard 'board.list' @{ actor = 4322; search = 'المَساء'; order = 'title-desc' }
+            $matchByName.data.items.Id | Should -Contain $boardId
             $read = & $sendBoard 'board.edit' @{ actor = 4322; action = 'read'; id = $boardId }
             $read.data.canEdit | Should -BeFalse
             $read.data.fields.name | Should -Be @('programme.title', 'programme.guest[1]')

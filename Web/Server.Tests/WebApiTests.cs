@@ -437,6 +437,11 @@ public sealed class AccountTests : IDisposable
         Assert.Equal("خبر منشور", Assert.Single(page.Items).Title);
         Assert.Contains(_app.Bridge.Calls, call => call.Op == "content.list" &&
             call.Args == """{"actor":33,"view":"ticker","page":1}""");
+
+        var filtered = await browser.Client.GetAsync("/api/content/ticker?page=2&search=desk&order=newest");
+        filtered.EnsureSuccessStatusCode();
+        Assert.Contains(_app.Bridge.Calls, call => call.Op == "content.list" &&
+            call.Args == """{"actor":33,"view":"ticker","page":2,"search":"desk","order":"newest"}""");
     }
 
     [Fact]

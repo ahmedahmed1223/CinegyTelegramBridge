@@ -31,6 +31,12 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.0.0'; Items = @('Use the right-to-left web newsroom with editorial tables, search and sorting, and live picture-in-picture.',
+                        'Show or hide an individual urgent headline, edit and review the ticker, save JPG and PNG in separate bulletin fields from one form, and correct the live programme row.',
+                        'Browse templates, manage schedules and accounts, and review air status, reports, and shift handover.') },
+                @{ Version = '8.144.0'; Items = @('Find web accounts by name or username, filter them by role, and see the username when confirming account changes.') },
+                @{ Version = '8.143.0'; Items = @('Find a programme board by name and search its rows across every text field.') },
+                @{ Version = '8.142.0'; Items = @('Search and sort newsroom lists, move a ticker headline to a specific position, and correct a live programme row from any page.') },
                 @{ Version = '8.141.0'; Items = @('Write web headlines right to left and control individual urgent displays from the row.') },
                 @{ Version = '8.140.0'; Items = @('Choose the navy web appearance from the account menu.') },
                 @{ Version = '8.139.0'; Items = @('Choose TIFF pictures for web bulletin rows and preview them after saving.') },
@@ -382,6 +388,12 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.0.0'; Items = @('حرّر الأخبار من جداول عربية تدعم البحث والترتيب، وتابع البث في نافذة عائمة أثناء العمل.',
+                        'اعرض العاجل مباشرة أو بمؤقّت وأخفه من صفه. راجع الشريط، واحفظ JPG وPNG في حقول صور الموجز من نافذة واحدة، وصحّح صف البرنامج المعروض.',
+                        'تصفّح القوالب، وأدر المواعيد والحسابات، وراجع حالة الطبقات والتقارير وتسليم المناوبة.') },
+                @{ Version = '8.144.0'; Items = @('ابحث عن حساب بالاسم أو باسم المستخدم، وصفِّ الحسابات حسب الدور، وتحقّق من اسم المستخدم عند تأكيد التغيير.') },
+                @{ Version = '8.143.0'; Items = @('ابحث عن لوحة برنامج بالاسم، وابحث في كل الحقول النصية لصفوفها ورتّب النتائج.') },
+                @{ Version = '8.142.0'; Items = @('ابحث في قوائم غرفة الأخبار ورتّبها، وانقل خبر الشريط إلى موضع محدد، وصحّح صف البرنامج المعروض من أي صفحة.') },
                 @{ Version = '8.141.0'; Items = @('اكتب في حقول الويب من اليمين واعرض العاجل مباشرة أو بمؤقّت وأخفه من الصف.') },
                 @{ Version = '8.140.0'; Items = @('اختر المظهر الكحلي للويب من قائمة الحساب.') },
                 @{ Version = '8.139.0'; Items = @('اختر صور TIFF لصفوف الموجز في الويب، وعاينها بعد الحفظ.') },

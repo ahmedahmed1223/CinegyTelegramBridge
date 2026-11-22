@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 8.140.0
+
+The web account menu offers a navy appearance for the newsroom, live player and management screens. The browser remembers the appearance selected in the account menu.
+
 ## Version 8.139.0
 
 The web bulletin editor accepts TIFF files in picture fields and in new rows created from a picture. The shared bridge converter sizes and stores the result as PNG for Cinegy and the web preview.

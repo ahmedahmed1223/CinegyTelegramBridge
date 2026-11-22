@@ -37,6 +37,7 @@ function Invoke-WebOperatorHelp {
     # The shared release ledger owns versions and order. A release may mix
     # several audiences in one Bot line, so expose only reviewed Web summaries.
     $publicUpdates = @{
+        '8.140.0' = 'اختر المظهر الكحلي من قائمة الحساب.'
         '8.137.0' = 'راجع تسجيل مشهد خارجي بديل من نافذة مقارنة الطبقات.'
         '8.135.0' = 'اعرض المادة الجارية والتالية، أو انسخ ملخّص الحالة من لوحة الهواء.'
         '8.130.0' = 'افتح دليل الويب للعثور على خطوات العمل والانتقال إلى الصفحة المناسبة.'

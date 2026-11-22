@@ -7,16 +7,16 @@
 }
 
 body {
-  --cgb-canvas: light-dark(#f7f5f0, #1b1d19);
-  --cgb-panel: light-dark(#fffefa, #272923);
-  --cgb-sidebar: light-dark(#eeebe3, #22241f);
-  --cgb-line: light-dark(#d7d2c6, #43463d);
-  --cgb-tab-active: light-dark(#d6e4fb, #273853);
-  --cgb-tab-ink: light-dark(#183568, #ccddfa);
+  --cgb-canvas: light-dark(#f7f5f0, var(--mantine-color-dark-9));
+  --cgb-panel: light-dark(#fffefa, var(--mantine-color-dark-7));
+  --cgb-sidebar: light-dark(#eeebe3, var(--mantine-color-dark-8));
+  --cgb-line: light-dark(#d7d2c6, var(--mantine-color-dark-6));
+  --cgb-tab-active: light-dark(#d6e4fb, #28466e);
+  --cgb-tab-ink: light-dark(#183568, #d9e9ff);
   --cgb-accent: light-dark(#214ea5, #9ab9ee);
   --cgb-accent-ink: light-dark(#ffffff, #122748);
-  --mantine-color-text: light-dark(#202720, #edeee7);
-  --mantine-color-dimmed: light-dark(#565950, #bdc0b6);
+  --mantine-color-text: light-dark(#202720, var(--mantine-color-dark-0));
+  --mantine-color-dimmed: light-dark(#565950, var(--mantine-color-dark-2));
   --mantine-color-default: var(--cgb-panel);
   --mantine-color-default-border: var(--cgb-line);
   --mantine-color-default-hover: var(--cgb-sidebar);

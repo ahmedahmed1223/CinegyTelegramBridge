@@ -55,7 +55,7 @@ export function UserMenu({ user }: { user: CurrentUser }) {
             تغيير كلمة المرور
           </Menu.Item>
           <Menu.Item leftSection={dark ? <IconSun size={16} /> : <IconMoon size={16} />} onClick={() => setColorScheme(dark ? 'light' : 'dark')}>
-            {dark ? 'المظهر الفاتح' : 'المظهر الداكن'}
+            {dark ? 'المظهر الفاتح' : 'المظهر الكحلي'}
           </Menu.Item>
           <Menu.Divider />
           <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={signOut}>

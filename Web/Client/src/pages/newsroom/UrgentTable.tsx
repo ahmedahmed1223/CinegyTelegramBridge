@@ -149,7 +149,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
   return (
     <Stack gap="sm">
       <Group justify="space-between">
-        <Text size="sm" c="dimmed">الأعمدة من قالب العواجل. تُستخدم التعديلات في التشغيل التالي.</Text>
+        <Text size="sm" c="dimmed">جدول مشترك مع بوت Telegram. الأعمدة من قالب العواجل.</Text>
         <Group gap="xs">
           {!!selected.length && <Button variant="subtle" size="sm" onClick={onClear}>إلغاء التحديد</Button>}
           <Button leftSection={<IconPlus size={17} />} disabled={!!edit || busy || searchPending} onClick={() => startEdit()}>إضافة عاجل</Button>

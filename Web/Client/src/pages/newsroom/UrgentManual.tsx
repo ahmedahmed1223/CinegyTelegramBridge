@@ -42,12 +42,15 @@ export function UrgentManual({ itemId, mode, fields, onClose, onChanged }: {
         setReview(answer.preview)
         return
       }
-      if (answer.autoHideFailed) {
+      if (!answer.rehearsalStarted && answer.sceneConfirmed === false) {
+        notifications.show({ color: 'orange', autoClose: false,
+          message: 'أُرسل أمر العرض وتعذّر تأكيد ظهور العاجل في Cinegy. تحقّق من الطبقة.' })
+      } else if (answer.autoHideFailed) {
         notifications.show({ color: 'orange', autoClose: false,
           message: answer.rehearsalStarted ? `تعذّر تأكيد الإخفاء التلقائي للبروفة. تحقّق من طبقة التجربة${review ? ` ${format.format(review.layer)}` : ''} في Cinegy.`
             : 'أُرسل أمر العرض وتعذّر تأكيد مؤقّت الإخفاء. راقب الطبقة واستخدم الإخفاء عند انتهاء المدة.' })
       } else {
-        notifications.show({ color: 'teal', message: answer.rehearsalStarted ? 'بدأت البروفة على طبقة التجربة.' : 'أُرسل أمر عرض العاجل.' })
+        notifications.show({ color: 'teal', message: answer.rehearsalStarted ? 'بدأت البروفة على طبقة التجربة.' : 'ظهر العاجل على الهواء.' })
       }
       onClose()
       await Promise.all([client.invalidateQueries({ queryKey: manualKey }), client.invalidateQueries({ queryKey: ['urgent-playback'] }), onChanged()])

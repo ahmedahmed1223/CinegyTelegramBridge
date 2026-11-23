@@ -7,6 +7,7 @@ Describe 'Full urgent reader and manual single story' {
         $script:PendingState.Clear()
         $script:OnAir = @{}
         $script:UrgentManualLive = @{}
+        $script:UrgentWebNotice = $null
         $script:UrgentManualMode = @{}
         $script:ManualPayload = $null
         $script:ManualText = ('تفاصيل الخبر الطويل <نص> & ' * 8) + 'نهاية الخبر'
@@ -20,6 +21,12 @@ Describe 'Full urgent reader and manual single story' {
         Mock Edit-TelegramMessageText { $script:ManualPayload = @{Text=$Text; Markup=$ReplyMarkup}; $true }
         Mock Invoke-ShowTemplateResult { throw 'No air allowed in reader' }
         Mock Invoke-HideLayer { throw 'No air allowed in reader' }
+        Mock Publish-WebChannelState {}
+        Mock Get-WebUrgentLayerStatus {
+            $scene = $script:OnAir[$Layer]
+            @{ Success = $true; IsOnAir = $null -ne $scene; ActiveId = Get-JsonProp $scene 'ActiveId' }
+        }
+        Mock Get-TemplateNoticeAudience { @() }
     }
     It 'opens a paged full reader with navigation and no air commands' {
         $item = $script:UrgentBoard.Items[0]
@@ -38,8 +45,8 @@ Describe 'Full urgent reader and manual single story' {
         Mock Test-Authorized { $true }
         Mock Test-MaintenanceControl { $true }
         Mock Invoke-ShowTemplateResult {
-            $script:OnAir[7] = @{ Key='urgent'; At=[datetimeoffset]::Now; ActiveId='same-template' }
-            @{ Success=$true }
+            $script:OnAir[7] = @{ Key='urgent'; At=[datetimeoffset]::Now; ActiveId='f691112c-e6a9-4397-9d00-703c977022f3' }
+            @{ Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0) }
         }
         $id = $script:UrgentBoard.Items[0].Id
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id -MessageId 9
@@ -54,8 +61,8 @@ Describe 'Full urgent reader and manual single story' {
         Mock Test-Authorized { $true }
         Mock Test-MaintenanceControl { $true }
         Mock Invoke-ShowTemplateResult {
-            $script:OnAir[7] = @{ Key='urgent'; At=[datetimeoffset]::Now; ActiveId='same-template' }
-            @{ Success=$true }
+            $script:OnAir[7] = @{ Key='urgent'; At=[datetimeoffset]::Now; ActiveId='f691112c-e6a9-4397-9d00-703c977022f3' }
+            @{ Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0) }
         }
         # The story holds the screen 90 s in a sequence, so the picker stars 90.
         $script:UrgentBoard.Items[0].IntervalSeconds = 90
@@ -124,8 +131,8 @@ Describe 'Full urgent reader and manual single story' {
         Mock Test-Authorized { $true }
         Mock Test-MaintenanceControl { $true }
         Mock Invoke-ShowTemplateResult {
-            $script:OnAir[7] = @{ Key='Urgent'; At=[datetimeoffset]::Now; ActiveId='same-template' }
-            @{ Success=$true }
+            $script:OnAir[7] = @{ Key='Urgent'; At=[datetimeoffset]::Now; ActiveId='f691112c-e6a9-4397-9d00-703c977022f3' }
+            @{ Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0) }
         }
         Mock Write-BridgeLog { }
         $id = $script:UrgentBoard.Items[0].Id
@@ -161,8 +168,8 @@ Describe 'Full urgent reader and manual single story' {
         Mock Test-MaintenanceControl { $true }
         Mock Stop-UrgentBoardRun { $script:UrgentBoardRun = $null; $true }
         Mock Invoke-ShowTemplateResult {
-            $script:OnAir[7] = @{ Key='Urgent'; At=[datetimeoffset]::Now; ActiveId='{ALONE}' }
-            @{ Success=$true }
+            $script:OnAir[7] = @{ Key='Urgent'; At=[datetimeoffset]::Now; ActiveId='f691112c-e6a9-4397-9d00-703c977022f3' }
+            @{ Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0) }
         }
         $script:OnAir[7] = @{ Key=[string](Get-UrgentTemplate).Key; At=(Get-Date); ActiveId='{LINE-1}' }
         $script:UrgentBoardRun = @{ Step = 0; Steps = @(@{ Id = 'u_other'; Text = 'x' }); ChatId = 100; UserId = 101 }
@@ -273,11 +280,117 @@ Describe 'Full urgent reader and manual single story' {
         (Get-PendingState -ChatId 100).Mode | Should -Be 'urgent_manual_confirm'
         Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
     }
+    It 'notifies authorized unmuted recipients only after the exact manual event is confirmed' {
+        Mock Test-Authorized { $UserId -in 100, 101, 102, 103, 104 }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $UserId -ne 104 } }
+        Mock Test-AirNoticeMuted { $UserId -eq 103 }
+        Mock Get-TemplateNotifyScope { 'all' }
+        Mock Get-TemplateNoticeAudience {
+            @(100, 102, 103, 104) | Where-Object { $_ -ne $ActorChatId }
+        }
+        Mock Send-AirCollisionWarning { 0 }
+        $script:NoticeButtons = @{}
+        Mock Send-AirNoticeOrHold {
+            $script:NoticeButtons[[long]$ChatId] = $Markup.inline_keyboard[0][0].callback_data
+            $true
+        }
+        $urgentEventId = 'f691112c-e6a9-4397-9d00-703c977022f3'
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = $urgentEventId; At = Get-Date; ScreenCopy = 'محتوى آمن' }
+        $item = $script:UrgentBoard.Items[0].Id
+        try {
+            Set-UrgentManualLiveState -ChatId 100 -UserId 100 -ItemId $item -Layer 7 -Result @{ Success = $true } -AutoHideSeconds 15 | Should -BeNullOrEmpty
+            Get-UrgentWebNoticeId | Should -BeNullOrEmpty
+            Should -Invoke Send-AirNoticeOrHold -Times 0 -Exactly
+
+            $shown = @{ Success = $true; EventIdentityConfirmed = $true; UrgentEventReadConfirmed = $true; EventId = $urgentEventId; AutoHideArmed = $true }
+            Set-UrgentManualLiveState -ChatId 100 -UserId 100 -ItemId $item -Layer 7 -Result $shown -AutoHideSeconds 15 -FromWeb | Out-Null
+            $notice = Get-UrgentWebNoticeId
+            $notice | Should -Match '^[a-f0-9]{32}$'
+            Get-UrgentWebNoticeForActor -Actor 102 | Should -BeExactly $notice
+            Get-UrgentWebNoticeForActor -Actor 100 | Should -BeNullOrEmpty
+            Get-UrgentWebNoticeForActor -Actor 103 | Should -BeNullOrEmpty
+            Get-UrgentWebNoticeForActor -Actor 104 | Should -BeNullOrEmpty
+            Set-UrgentManualLiveState -ChatId 100 -UserId 100 -ItemId $item -Layer 7 -Result $shown -AutoHideSeconds 15 -FromWeb | Out-Null
+            Get-UrgentWebNoticeId | Should -BeExactly $notice
+            Should -Invoke Send-AirNoticeOrHold -Times 2 -Exactly
+            $script:NoticeButtons.Count | Should -Be 2
+            $script:NoticeButtons[100L] | Should -Match '^urgmanual:hide:'
+            $script:NoticeButtons[102L] | Should -Not -Be $script:NoticeButtons[100L]
+            $peerToken = Get-CallbackArg $script:NoticeButtons[102L] 'urgmanual:hide:'
+            (Invoke-UrgentManualHide -ChatId 100 -UserId 100 -Token $peerToken) | Should -Be 'urgent_stale'
+            Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+            Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
+            (Invoke-UrgentManualHide -ChatId 102 -UserId 102 -Token $peerToken) | Should -Be 'hidden'
+            Should -Invoke Invoke-HideLayer -Times 1 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq "active:$urgentEventId" }
+            Get-UrgentManualControl -ChatId 100 -UserId 100 | Should -BeNullOrEmpty
+            Get-UrgentWebNoticeId | Should -BeExactly $notice -Because 'a short timed show still has a notice after leaving air'
+
+            $script:NoticeButtons.Clear()
+            $shown.EventId = '4bc680c0-044d-42a3-b6e7-201a81df24c2'
+            $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = $shown.EventId; At = Get-Date }
+            Set-UrgentManualLiveState -ChatId 100 -UserId 100 -ItemId $item -Layer 7 -Result $shown -AutoHideSeconds 15 | Out-Null
+            $telegramOrigin = Get-UrgentWebNoticeId
+            $telegramOrigin | Should -Not -Be $notice
+            Get-UrgentWebNoticeForActor -Actor 100 | Should -BeExactly $telegramOrigin
+            $script:NoticeButtons.ContainsKey(100L) | Should -BeFalse -Because 'the Telegram actor already sees the show confirmation there'
+            $script:NoticeButtons.ContainsKey(102L) | Should -BeTrue
+        }
+        finally { Remove-Variable -Name NoticeButtons -Scope Script }
+    }
+
+    It 'requires the separate Cinegy reads to identify the same manual urgent event' {
+        $urgentEventId = 'f691112c-e6a9-4397-9d00-703c977022f3'
+        $script:UrgentActiveDetailId = '4bc680c0-044d-42a3-b6e7-201a81df24c2'
+        Mock Get-TitlerLayerStatus {
+            $detail = $script:UrgentActiveDetailId
+            @{ Success = $true; IsOnAir = $true; ActiveId = 'f691112c-e6a9-4397-9d00-703c977022f3'
+               ActiveXml = "<Item Id=`"$detail`" IsEmpty=`"n`" />" }
+        }
+        try {
+            (Get-VerifiedCinegyShowIdentity -Key 'Urgent' -Layer 7 -ExpectedActiveId $urgentEventId -RequireEventIdentity -CaptureUrgentEvent).Success | Should -BeFalse
+            $script:UrgentActiveDetailId = $urgentEventId
+            $identity = Get-VerifiedCinegyShowIdentity -Key 'Urgent' -Layer 7 -ExpectedActiveId $urgentEventId -RequireEventIdentity -CaptureUrgentEvent
+            $identity.ConsistentItem | Should -BeTrue
+            Should -Invoke Get-TitlerLayerStatus -Times 2 -Exactly -ParameterFilter { $RequireConsistentIdentity }
+        }
+        finally { Remove-Variable -Name UrgentActiveDetailId -Scope Script }
+    }
+
+    It 'publishes a browser marker only for a sequence launch whose first event is confirmed' {
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Save-UrgentRunState { $true }
+        Mock Get-UrgentPlanSummary { 'fixture sequence' }
+        Mock Add-AuditEntry {}
+        Mock Write-AuditRecord {}
+        $plan = @{ Steps = @(@{ Text = 'first' }, @{ Text = 'second' }); TotalSeconds = 20 }
+        $script:SequenceEventConfirmed = $false
+        Mock Invoke-ShowTemplateResult {
+            $fixtureEvent = '4bc680c0-044d-42a3-b6e7-201a81df24c2'
+            $script:OnAir[7] = @{ Key = 'Urgent'; At = Get-Date; ActiveId = $fixtureEvent }
+            @{ Success = $true; EventIdentityConfirmed = $true; UrgentEventReadConfirmed = $script:SequenceEventConfirmed; EventId = $fixtureEvent }
+        }
+        try {
+            Start-UrgentBoardRun -ChatId 100 -UserId 101 -ReviewedPlan $plan -Quiet | Should -BeTrue
+            Get-UrgentWebNoticeId | Should -BeNullOrEmpty
+            $script:UrgentBoardRun = $null
+            $script:SequenceEventConfirmed = $true
+            Start-UrgentBoardRun -ChatId 100 -UserId 101 -ReviewedPlan $plan -Quiet | Should -BeTrue
+            $notice = Get-UrgentWebNoticeId
+            $notice | Should -Match '^[a-f0-9]{32}$'
+            Start-UrgentBoardRun -ChatId 100 -UserId 101 -ReviewedPlan $plan -Quiet | Should -BeFalse
+            Get-UrgentWebNoticeId | Should -BeExactly $notice
+            Should -Invoke Publish-WebChannelState -Times 1 -Exactly
+            $script:UrgentManualLive.Count | Should -Be 0
+        }
+        finally { Remove-Variable -Name SequenceEventConfirmed -Scope Script }
+    }
+
     It 'does not hide a newer show even when template and ActiveId are reused' {
         Mock Test-Authorized { $true }
         Mock Test-MaintenanceControl { $true }
-        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
-        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
+        Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $script:UrgentBoard.Items[0].Id
         $token=(Get-PendingState -ChatId 100).Token
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$token" | Should -BeTrue
@@ -316,7 +429,7 @@ Describe 'Full urgent reader and manual single story' {
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
         Mock Confirm-TelegramCallback {}; Mock Update-UserNameFromTelegram {}; Mock Update-UserLastActivity {}
         Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
-        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='reused';At=[datetimeoffset]::Now}; @{Success=$true} }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
         for($n=2;$n -le 4;$n++) { $script:UrgentBoard=(Add-UrgentItem -Board $script:UrgentBoard -Text "خبر $n" -UserId 101).Value }
         $q=@{id='manual-chain';from=@{id=101};message=@{message_id=9;chat=@{id=100;type='private'}};data="urgsingle:$($script:UrgentBoard.Items[0].Id)"}
         Invoke-CallbackQuery $q
@@ -350,8 +463,8 @@ Describe 'Full urgent reader and manual single story' {
     }
     It 'rechecks revoked access before hiding a manually displayed story' {
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
-        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
-        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
+        Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $script:UrgentBoard.Items[0].Id
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
         $button=@($script:ManualPayload.Markup.inline_keyboard | ForEach-Object { $_ } | Where-Object callback_data -like 'urgmanual:hide:*')[0].callback_data
@@ -361,7 +474,7 @@ Describe 'Full urgent reader and manual single story' {
     }
     It 'stops a manually displayed story from the urgent board control' {
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
-        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
         Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
         $id = $script:UrgentBoard.Items[0].Id
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
@@ -373,8 +486,8 @@ Describe 'Full urgent reader and manual single story' {
     }
     It 'keeps the live hide button after canceled replacement and expired unrelated editing' {
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
-        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
-        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
+        Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
         $id=$script:UrgentBoard.Items[0].Id
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
@@ -397,8 +510,8 @@ Describe 'Full urgent reader and manual single story' {
         $script:TestManualFile = Join-Path $env:TEMP "urgent-manual-persist-$(New-Guid).json"
         Mock Get-UrgentManualFile { $script:TestManualFile }
         Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
-        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
-        Mock Invoke-HideLayer { $true }
+        Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
+        Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
         $id=$script:UrgentBoard.Items[0].Id
         Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id
         Invoke-UrgentManualAction -ChatId 100 -UserId 101 -Argument "show:$((Get-PendingState -ChatId 100).Token)" | Should -BeTrue
@@ -414,7 +527,7 @@ Describe 'Full urgent reader and manual single story' {
         Mock Get-UrgentManualFile { $testFile }
         try {
             Mock Test-Authorized { $true }; Mock Test-MaintenanceControl { $true }
-            Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='same';At=[datetimeoffset]::Now}; @{Success=$true} }
+            Mock Invoke-ShowTemplateResult { $script:OnAir[7]=@{Key='urgent';ActiveId='f691112c-e6a9-4397-9d00-703c977022f3';At=[datetimeoffset]::Now}; @{Success=$true; EventIdentityConfirmed=$true; UrgentEventReadConfirmed=$true; EventId='f691112c-e6a9-4397-9d00-703c977022f3'; AutoHideArmed=($AutoHideSeconds -gt 0)} }
             Mock Invoke-HideLayer { $script:OnAir.Remove(7); $true }
             $id=$script:UrgentBoard.Items[0].Id
             Show-UrgentManualConfirm -ChatId 100 -UserId 101 -ItemId $id

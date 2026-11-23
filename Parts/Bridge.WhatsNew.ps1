@@ -31,6 +31,10 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.0'; Items = @('Start a shared ticker draft so several web editors can add or edit headlines at the same time. The draft owner still reviews publication.',
+                        'See urgent headlines added from Telegram or the web in the same table, choose whether to play all or only the selected rows, and review the sequence mode before starting.',
+                        'Receive a notice when an individually selected urgent headline is confirmed on air, whichever interface started it.',
+                        'Update the web server and interface while keeping Manager open.') },
                 @{ Version = '9.0.0'; Items = @('Use the right-to-left web newsroom with editorial tables, search and sorting, and live picture-in-picture.',
                         'Show or hide an individual urgent headline, edit and review the ticker, save JPG and PNG in separate bulletin fields from one form, and correct the live programme row.',
                         'Browse templates, manage schedules and accounts, and review air status, reports, and shift handover.') },
@@ -388,6 +392,10 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.0'; Items = @('ابدأ مسودة شريط مشتركة ليضيف عدة محررين الأخبار ويعدّلوا سطورًا مختلفة في الوقت نفسه. تبقى مراجعة النشر لدى صاحب المسودة.',
+                        'تابع العواجل المضافة من البوت والويب في الجدول نفسه، واختر تشغيل الكل أو المحدد وراجع نمط التسلسل قبل البدء.',
+                        'يصلك إشعار عندما يتأكد ظهور عاجل فردي على الهواء، من الويب أو من البوت.',
+                        'حدّث خادم الويب والواجهة مع إبقاء برنامج التحكم مفتوحًا.') },
                 @{ Version = '9.0.0'; Items = @('حرّر الأخبار من جداول عربية تدعم البحث والترتيب، وتابع البث في نافذة عائمة أثناء العمل.',
                         'اعرض العاجل مباشرة أو بمؤقّت وأخفه من صفه. راجع الشريط، واحفظ JPG وPNG في حقول صور الموجز من نافذة واحدة، وصحّح صف البرنامج المعروض.',
                         'تصفّح القوالب، وأدر المواعيد والحسابات، وراجع حالة الطبقات والتقارير وتسليم المناوبة.') },

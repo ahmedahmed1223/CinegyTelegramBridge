@@ -1,6 +1,6 @@
-import { Alert, Badge, Button, Group, Modal, Paper, Stack, Text, Title } from '@mantine/core'
+import { Alert, Badge, Button, Group, Modal, NativeSelect, Paper, Stack, Text, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { IconPlayerStop } from '@tabler/icons-react'
+import { IconPlayerPlay, IconPlayerStop } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
@@ -9,9 +9,16 @@ import { messageFor } from '../../api/messages'
 type Request = Schemas['UrgentPlaybackRequest']
 type Preview = Schemas['UrgentRunPreview']
 const format = new Intl.NumberFormat('ar', { maximumFractionDigits: 1 })
+const sessionModes = [
+  { value: '', label: 'حسب إعدادات التوقيت' },
+  { value: 'text', label: 'تحديث النص' },
+  { value: 'exit', label: 'خروج قبل الخبر' },
+  { value: 'auto_hide', label: 'إخفاء بعد الخبر' },
+]
 
-export function UrgentPlayback({ selected }: { selected: string[] }) {
-  const [review, setReview] = useState<{ plan: Preview; selected: string[] } | null>(null)
+export function UrgentPlayback({ selected, hasRows = true }: { selected: string[]; hasRows?: boolean }) {
+  const [review, setReview] = useState<{ plan: Preview; selected: string[]; mode: string | null } | null>(null)
+  const [mode, setMode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const status = useQuery({
@@ -32,12 +39,15 @@ export function UrgentPlayback({ selected }: { selected: string[] }) {
     setError('')
     try {
       const { data, error: refusal, response } = await api.POST('/api/content/urgent/playback', {
-        body: { selectedIds: null, review: null, runId: null, step: null, ...body },
+        body: { selectedIds: null, review: null, runId: null, step: null, mode: null, ...body },
       })
       if (!data) {
-        setError(refusal?.message || messageFor(errorCode(refusal, response)))
+        const code = errorCode(refusal, response)
+        setError(refusal?.message || messageFor(code))
+        if (code === 'urgent_stale') setReview(null)
       } else if (body.action === 'preview' && data.preview) {
-        setReview({ plan: data.preview, selected: body.selectedIds ?? [] })
+        setReview({ plan: data.preview, selected: body.selectedIds ?? [], mode: body.mode ?? null })
+        return
       } else {
         setReview(null)
       }
@@ -48,6 +58,12 @@ export function UrgentPlayback({ selected }: { selected: string[] }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  function closeReview() {
+    if (busy) return
+    setReview(null)
+    setError('')
   }
 
   function confirmStop() {
@@ -70,21 +86,39 @@ export function UrgentPlayback({ selected }: { selected: string[] }) {
             <Text size="sm" c="dimmed">
               {status.isPending ? 'جارٍ قراءة حالة التشغيل…'
                 : run ? `الخطوة ${format.format(run.step + 1)} من ${format.format(run.stepCount)}`
-                : 'لا توجد دورة نشطة.'}
+                : status.isError ? 'حالة التشغيل غير مؤكّدة.' : 'لا توجد دورة نشطة.'}
             </Text>
           </Stack>
-          {run ? (
+          {run && (
             <Badge color={run.state === 'playing' ? 'red' : 'orange'} variant="light">
               {run.state === 'playing' ? 'قيد العرض' : run.state === 'paused' ? 'متوقفة مؤقتًا' : 'الإيقاف غير مؤكّد'}
             </Badge>
-          ) : (
-            <Button variant="light" disabled={!status.isSuccess || busy} onClick={() => void send({ action: 'preview', selectedIds: selected })}>
-              {selected.length ? `مراجعة المحدّد (${format.format(selected.length)})` : 'مراجعة تشغيل الكل'}
-            </Button>
           )}
         </Group>
-        {status.isError && <Alert color="orange">{status.error.message}</Alert>}
+        {status.isError && <Alert color="orange" role="alert">
+          <Group justify="space-between">
+            <Text size="sm">{status.error.message}</Text>
+            <Button variant="subtle" size="compact-sm" onClick={() => void status.refetch()}>إعادة قراءة الحالة</Button>
+          </Group>
+        </Alert>}
         {!review && error && <Alert color="red" role="alert">{error}</Alert>}
+        {!run && (
+          <Stack gap="xs" align="flex-start">
+            <NativeSelect label="نمط هذه الدورة" data={sessionModes} value={mode} disabled={!status.isSuccess || busy || !hasRows}
+              onChange={(event) => setMode(event.currentTarget.value)} />
+            <Group gap="xs">
+              <Button variant="light" leftSection={<IconPlayerPlay size={17} aria-hidden />}
+                disabled={!status.isSuccess || busy || !hasRows} onClick={() => void send({ action: 'preview', selectedIds: [], mode: mode || null })}>
+                تشغيل الكل
+              </Button>
+              <Button variant="default" disabled={!status.isSuccess || busy || !hasRows || !selected.length}
+                onClick={() => void send({ action: 'preview', selectedIds: [...selected], mode: mode || null })}>
+                تشغيل المحدد{selected.length > 0 && ` (${format.format(selected.length)})`}
+              </Button>
+            </Group>
+            {busy && !review && <Text size="sm" c="dimmed" role="status">جارٍ إعداد المعاينة…</Text>}
+          </Stack>
+        )}
         {run && (
           <Stack gap="xs">
             {run.current && <Text size="sm" dir="auto"><strong>الحالي</strong> · {run.current}</Text>}
@@ -107,10 +141,14 @@ export function UrgentPlayback({ selected }: { selected: string[] }) {
           </Stack>
         )}
       </Stack>
-      <Modal opened={!!review} onClose={() => { if (!busy) { setReview(null); setError('') } }} title="مراجعة دورة العواجل" size="lg">
+      <Modal opened={!!review} onClose={closeReview}
+        title={review?.selected.length ? 'مراجعة تشغيل المحدد' : 'مراجعة تشغيل الكل'} size="lg">
         {review && (
           <Stack>
             <Text>المدة المتوقعة {format.format(review.plan.totalSeconds)} ثانية · {format.format(review.plan.itemCount)} عاجل</Text>
+            <Text size="sm" c="dimmed">
+              نمط الدورة · {sessionModes.find((option) => option.value === (review.mode ?? ''))?.label}. يُطبّق نمط الصف إذا كان محدّدًا في توقيته.
+            </Text>
             {review.plan.replacesGraphic && (
               <Alert color="orange" title="سيُستبدل المشهد الحالي">
                 الطبقة {format.format(review.plan.layer)} تعرض الآن {review.plan.graphicName || 'مشهدًا قائمًا'}.
@@ -130,7 +168,9 @@ export function UrgentPlayback({ selected }: { selected: string[] }) {
             {review.plan.notes.map((note, index) => <Alert key={index} color="orange">{note}</Alert>)}
             {error && <Alert color="red" role="alert">{error}</Alert>}
             <Group justify="flex-end">
-              <Button color="red" loading={busy} disabled={!!run || !status.isSuccess} onClick={() => void send({ action: 'start', review: review.plan.review, selectedIds: review.selected })}>
+              <Button variant="default" disabled={busy} onClick={closeReview}>العودة</Button>
+              <Button color="red" loading={busy} disabled={!!run || !status.isSuccess}
+                onClick={() => void send({ action: 'start', review: review.plan.review, selectedIds: review.selected, mode: review.mode })}>
                 تشغيل على الهواء
               </Button>
             </Group>

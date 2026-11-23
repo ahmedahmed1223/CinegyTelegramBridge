@@ -237,6 +237,7 @@ function Get-WebStatusSnapshot {
         }
         feed = Get-WebFeedStatus -Now $Now
         layers = @($layers)
+        urgentNoticeId = Get-UrgentWebNoticeId
     }
 }
 
@@ -2491,6 +2492,7 @@ function Invoke-WebUrgentWrite {
     }
     if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
     if (-not (Invoke-UrgentEdit -Result $result -ChatId $actor -Quiet)) { return @{ ok = $false; error = 'urgent_save_failed' } }
+    Update-UrgentHomeScreens -Action edit | Out-Null
     Add-AuditEntry "Web urgent $action by $(Format-UserAuditActor -UserId $actor) ($id)"
     return @{ ok = $true }
 }
@@ -2759,14 +2761,17 @@ function Get-WebTickerEditorState {
     }
     if ($draft -and -not (Test-NewsTickerDraftOpen -Draft $draft)) {
         $owner = [long](Get-JsonProp $draft 'OwnerUserId')
-        if ($owner -ne $Actor) {
+        $isOwner = $owner -eq $Actor
+        $shareId = [string](Get-JsonProp $draft 'WebShareId')
+        $shared = $owner -gt 0 -and $shareId -cmatch '^[a-f0-9]{32}$'
+        if (-not $isOwner -and -not $shared) {
             $data.state = 'locked'
             if ($owner -gt 0) { $data.owner = Get-NewsScreenLine (Get-UserDisplayName -UserId $owner) 64 }
         }
         else {
             $data.state = 'editing'
-            $data.canPullSheet = [bool](Get-Setting 'NewsSheetCsvUrl') -and (Test-NewsSheetPullAccess -ChatId $Actor -UserId $Actor)
-            $pausedTotal = $script:NewsPaused.Count
+            $data.canPullSheet = $isOwner -and [bool](Get-Setting 'NewsSheetCsvUrl') -and (Test-NewsSheetPullAccess -ChatId $Actor -UserId $Actor)
+            $pausedTotal = if ($isOwner) { $script:NewsPaused.Count } else { 0 }
             $window = Get-BridgePageWindow -ItemCount $pausedTotal -Page ([math]::Max(1, $PausedPage) - 1) -PageSize 10
             $pausedItems = @(for ($pausedIndex = $window.StartIndex; $pausedIndex -le $window.EndIndex; $pausedIndex++) {
                     $script:NewsPaused[$pausedIndex]
@@ -2775,10 +2780,19 @@ function Get-WebTickerEditorState {
                 revision = Get-NewsTickerDraftRevision -Draft $draft
                 items = @(Get-JsonProp $draft 'Items' | Where-Object { $null -ne $_ })
                 scheduledAt = Get-NewsPublishAt -Draft $draft
-                canRemove = Test-NewsTickerDeleteAccess -ChatId $Actor -UserId $Actor
-                canClear = Test-NewsTickerClearAccess -ChatId $Actor -UserId $Actor
+                canRemove = $isOwner -and (Test-NewsTickerDeleteAccess -ChatId $Actor -UserId $Actor)
+                canClear = $isOwner -and (Test-NewsTickerClearAccess -ChatId $Actor -UserId $Actor)
                 maxItems = Get-SettingInt 'NewsMaxItems' 1
                 paused = @{ items = $pausedItems; page = $window.Page + 1; pageCount = $window.PageCount; total = $pausedTotal; offset = $window.StartIndex }
+            }
+            if ($shared) {
+                $data.draft.sharedDraftKey = $shareId
+                $data.draft.rowKeys = @(Get-JsonProp $draft 'WebRowKeys')
+                $data.draft.canManage = $isOwner
+                if (-not $isOwner) {
+                    $data.lock = $null
+                    $data.owner = Get-NewsScreenLine (Get-UserDisplayName -UserId $owner) 64
+                }
             }
         }
         return $data
@@ -2991,6 +3005,27 @@ function Invoke-WebTickerLock {
     return @{ ok = $true; data = Get-WebTickerEditorState -Actor $Actor -PausedPage $PausedPage }
 }
 
+function Invoke-WebSharedTickerContribution {
+    param([long]$Actor, [System.Collections.IDictionary]$Draft, [System.Collections.IDictionary]$Arguments, [int]$PausedPage)
+    $review = [string](Get-JsonProp $Arguments 'review')
+    if ($review -cnotmatch '^[a-f0-9]{32}$') { return @{ ok = $false; error = 'ticker_stale' } }
+    $copy = [string](Get-JsonProp $Arguments 'text')
+    $action = [string](Get-JsonProp $Arguments 'action')
+    if ($action -eq 'add') {
+        if ($review -cne (Get-JsonProp $Draft 'WebShareId')) { return @{ ok = $false; error = 'ticker_stale' } }
+        if (@($Draft.Items).Count -ge (Get-SettingInt 'NewsMaxItems' 1)) { return @{ ok = $false; error = 'ticker_full' } }
+        $saved = Add-NewsTickerDraftItem -UserId $Actor -Text $copy -Draft $Draft -SkipDuplicate
+    }
+    else {
+        $index = [Array]::IndexOf([string[]]@(Get-JsonProp $Draft 'WebRowKeys'), $review)
+        if ($index -lt 0) { return @{ ok = $false; error = 'ticker_stale' } }
+        $saved = Update-NewsTickerDraftItem -UserId $Actor -Index $index -Text $copy -Draft $Draft
+    }
+    if (-not $saved) { return @{ ok = $false; error = 'ticker_invalid' } }
+    Add-AuditEntry "Web ticker shared headline ($action) by $(Format-UserAuditActor -UserId $Actor)"
+    return @{ ok = $true; data = Get-WebTickerEditorState -Actor $Actor -PausedPage $PausedPage }
+}
+
 function Invoke-WebTickerEdit {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -3003,17 +3038,37 @@ function Invoke-WebTickerEdit {
     if ($action -in 'request_lock', 'approve_lock', 'deny_lock', 'force_release') {
         return Invoke-WebTickerLock -Actor $actor -Arguments $Arguments -PausedPage $pausedPage
     }
-    if ($action -eq 'start') {
-        if ((Get-WebTickerEditorState -Actor $actor).state -eq 'locked') { return @{ ok = $false; error = 'ticker_locked' } }
-        $started = Start-NewsTickerDraft -ChatId $actor -UserId $actor
+    if ($action -in 'start', 'start_shared') {
+        $state = Get-WebTickerEditorState -Actor $actor
+        if ($state.state -eq 'locked') { return @{ ok = $false; error = 'ticker_locked' } }
+        if ($state.state -eq 'editing' -and $action -eq 'start_shared') {
+            if (Get-JsonProp $state.draft 'sharedDraftKey') { return @{ ok = $true; data = $state } }
+            return @{ ok = $false; error = 'ticker_stale' }
+        }
+        $started = Start-NewsTickerDraft -ChatId $actor -UserId $actor -ShareOnWeb:($action -eq 'start_shared')
         if (-not $started.Success) { return @{ ok = $false; error = 'ticker_start_failed' } }
         return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor }
     }
 
-    $draft = Get-NewsTickerDraft -UserId $actor
+    $draft = Get-NewsTickerDraft
     if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return @{ ok = $false; error = 'ticker_locked' } }
+    $isOwner = [long](Get-JsonProp $draft 'OwnerUserId') -eq $actor
+    $shareId = [string](Get-JsonProp $draft 'WebShareId')
+    if ($shareId -cmatch '^[a-f0-9]{32}$' -and $action -in 'add', 'update' -and
+        (-not $isOwner -or (Get-JsonProp $Arguments 'review'))) {
+        if (-not $isOwner -and (Get-NewsPublishAt -Draft $draft)) { return @{ ok = $false; error = 'ticker_scheduled_readonly' } }
+        return Invoke-WebSharedTickerContribution -Actor $actor -Draft $draft -Arguments $Arguments -PausedPage $pausedPage
+    }
+    if (-not $isOwner) { return @{ ok = $false; error = 'ticker_locked' } }
     if ((Get-NewsTickerDraftRevision -Draft $draft) -cne [string](Get-JsonProp $Arguments 'revision')) {
         return @{ ok = $false; error = 'ticker_stale' }
+    }
+    if ($action -eq 'share') {
+        if ($script:NewsLockRequest -and (Test-NewsLockRequestDraft -Request $script:NewsLockRequest -Draft $draft)) {
+            return @{ ok = $false; error = 'ticker_lock_pending' }
+        }
+        if (-not (Enable-NewsTickerWebSharing -UserId $actor)) { return @{ ok = $false; error = 'ticker_lock_save_failed' } }
+        return @{ ok = $true; data = Get-WebTickerEditorState -Actor $actor -PausedPage $pausedPage }
     }
     if ($action -in 'preview_paste', 'apply_paste') {
         return Invoke-WebTickerPaste -Actor $actor -Draft $draft -Arguments $Arguments -PausedPage $pausedPage
@@ -3571,17 +3626,15 @@ function Invoke-WebLayerReplacement {
 }
 
 function Get-WebUrgentLayerStatus {
-    param([int]$Layer)
-    return Get-WebLayerStatus -Layer $Layer
+    param([int]$Layer, [switch]$RequireConsistentIdentity)
+    return Get-WebLayerStatus -Layer $Layer -RequireConsistentIdentity:$RequireConsistentIdentity
 }
 
 function Get-WebUrgentManualLive {
     param([long]$Actor)
-    $record = $script:UrgentManualLive[$Actor]
-    if (-not $record -or [long](Get-JsonProp $record 'UserId') -ne $Actor) { return $null }
-    $layer = [int](Get-JsonProp $record 'Layer')
-    if ([string](Get-JsonProp $record 'LiveStamp') -cne (Get-UrgentLiveStamp -Layer $layer)) { return $null }
-    return @{ itemId = [string]$record.ItemId; layer = $layer; review = [string]$record.Token }
+    $control = Get-UrgentManualControl -ChatId $Actor -UserId $Actor
+    if (-not $control) { return $null }
+    return @{ itemId = [string]$control.State.ItemId; layer = $control.Layer; review = $control.Token }
 }
 
 function New-WebAirReview {
@@ -3779,28 +3832,15 @@ function Invoke-WebUrgentManual {
     $actor = [long](Get-JsonProp $Arguments 'actor')
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     $action = [string](Get-JsonProp $Arguments 'action')
-    $live = Get-WebUrgentManualLive -Actor $actor
-    if ($action -eq 'status') { return @{ ok = $true; data = @{ live = $live } } }
+    if ($action -eq 'status') {
+        return @{ ok = $true; data = @{ live = Get-WebUrgentManualLive -Actor $actor; noticeId = Get-UrgentWebNoticeForActor -Actor $actor } }
+    }
     if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     if ($action -in 'rehearse-preview', 'rehearse') { return Invoke-WebUrgentRehearsal -Actor $actor -Arguments $Arguments }
     $review = [string](Get-JsonProp $Arguments 'review')
     if ($action -eq 'hide') {
-        if (-not $live -or $review -cne $live.review) { return @{ ok = $false; error = 'urgent_stale' } }
-        $current = $script:OnAir[$live.layer]
-        $key = [string](Get-JsonProp $current 'Key')
-        if (-not (Test-TemplateAccess -Key $key -Layer $live.layer -ChatId $actor -UserId $actor).Allowed) { return @{ ok = $false; error = 'forbidden' } }
-        $expected = Get-CinegyLayerReviewStamp -Status @{ Success = $true; IsOnAir = $true; ActiveId = Get-JsonProp $current 'ActiveId' }
-        $actual = Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $live.layer)
-        if (-not $expected -or $actual -cne $expected) { return @{ ok = $false; error = 'urgent_stale' } }
-        if (-not (Invoke-HideLayer -Layer $live.layer -ChatId $actor -UserId $actor -Quiet -ExpectedLayerStamp $expected)) {
-            return @{ ok = $false; error = 'urgent_manual_hide_unconfirmed' }
-        }
-        if ((Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $live.layer)) -cne 'empty') {
-            return @{ ok = $false; error = 'urgent_manual_hide_unconfirmed' }
-        }
-        $script:UrgentManualLive.Remove($actor) | Out-Null
-        Save-UrgentManualState | Out-Null
-        Publish-WebChannelState -Force
+        $outcome = Invoke-UrgentManualHide -ChatId $actor -UserId $actor -Token $review -Quiet -VerifyEngine
+        if ($outcome -cne 'hidden') { return @{ ok = $false; error = $outcome } }
         return @{ ok = $true; data = @{} }
     }
     if ($action -notin 'options', 'preview', 'show') { return @{ ok = $false; error = 'urgent_invalid' } }
@@ -3853,12 +3893,13 @@ function Invoke-WebUrgentManual {
     }
     if ($pending.Fingerprint -cne $fingerprint) { return @{ ok = $false; error = 'urgent_stale' } }
     $result = Invoke-ShowTemplateResult -Key $template.Key -Variables $variables -ChatId $actor -UserId $actor `
-        -AutoHideSeconds $duration -ExpectedLayerStamp $stamp
+        -AutoHideSeconds $duration -ExpectedLayerStamp $stamp -RequireEventIdentity -ManualUrgent
     if (-not (Get-JsonProp $result 'Success')) { return @{ ok = $false; error = 'refused'; data = [string](Get-JsonProp $result 'Error') } }
-    Set-UrgentManualLiveState -ChatId $actor -UserId $actor -ItemId $itemId -Layer $layer | Out-Null
-    Publish-WebChannelState -Force
+    $confirmed = Set-UrgentManualLiveState -ChatId $actor -UserId $actor -ItemId $itemId -Layer $layer -Result $result `
+        -AutoHideSeconds $effective -FromWeb
     return @{ ok = $true; data = @{
         live = Get-WebUrgentManualLive -Actor $actor
+        sceneConfirmed = $null -ne $confirmed
         autoHideFailed = $effective -gt 0 -and -not (Get-JsonProp $result 'AutoHideArmed')
     } }
 }
@@ -3882,8 +3923,15 @@ function Invoke-WebUrgentPlayback {
         if (-not $policy.Allowed) { return @{ ok = $false; error = 'refused'; data = $policy.Reason } }
         $ids = @(Get-JsonProp $Arguments 'selectedIds' | Where-Object { $null -ne $_ })
         if ($ids.Count -gt 40) { return @{ ok = $false; error = 'urgent_invalid' } }
+        $modeOverride = Get-JsonProp $Arguments 'mode'
+        if ($null -ne $modeOverride) {
+            if ($modeOverride -isnot [string] -or -not (Test-UrgentMode -Mode $modeOverride)) {
+                return @{ ok = $false; error = 'urgent_invalid' }
+            }
+            $modeOverride = $modeOverride.ToLowerInvariant()
+        }
         $selectedOnly = $ids.Count -gt 0
-        $result = New-UrgentBoardPlan -ChatId $actor -SelectedIds $ids -SelectedOnly:$selectedOnly
+        $result = New-UrgentBoardPlan -ChatId $actor -SelectedIds $ids -SelectedOnly:$selectedOnly -ModeOverride $modeOverride
         if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
         $plan = $result.Value
         $live = Get-WebUrgentLayerStatus -Layer $layer
@@ -3893,7 +3941,7 @@ function Invoke-WebUrgentPlayback {
         # the full plan and scene identity so a change cannot silently go on air.
         $reviewed = [ordered]@{
             actor = $actor; revision = Get-UrgentProperty $script:UrgentBoard 'Revision' 0
-            template = $template; scene = $stamp; plan = $plan; selectedOnly = $selectedOnly
+            template = $template; scene = $stamp; plan = $plan; selectedOnly = $selectedOnly; mode = $modeOverride
         } | ConvertTo-Json -Depth 12 -Compress
         $review = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
         if ($action -eq 'preview') {
@@ -3908,7 +3956,7 @@ function Invoke-WebUrgentPlayback {
             } } }
         }
         if ($review -cne [string](Get-JsonProp $Arguments 'review')) { return @{ ok = $false; error = 'urgent_stale' } }
-        if (-not (Start-UrgentBoardRun -ChatId $actor -UserId $actor -ReviewedPlan $plan -ExpectedLayerStamp $stamp -SelectedOnly:$selectedOnly -Quiet)) {
+        if (-not (Start-UrgentBoardRun -ChatId $actor -UserId $actor -ReviewedPlan $plan -ExpectedLayerStamp $stamp -SelectedOnly:$selectedOnly -Quiet -ModeOverride $modeOverride)) {
             return @{ ok = $false; error = 'refused' }
         }
         Publish-WebChannelState -Force

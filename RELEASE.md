@@ -64,6 +64,49 @@ certificate installed in `Cert:\CurrentUser\My`:
 The package is allow-listed and never contains `config.json`, `templates.json`,
 `logs/`, backups, snapshots, audit history, or on-air state.
 
+## Update the web without restarting Manager
+
+Use a complete release ZIP that contains the web build and the SHA-256 provided
+by the trusted release source. The ZIP's `release-manifest.json` gives
+`MinimumWebBridgeVersion`, which defaults to the release's bridge version.
+Set `Build-Release.ps1 -MinimumWebBridgeVersion` to an older version only after
+verifying that the web build works with that version's bridge API.
+
+1. In the open Manager, check the **running bridge** version in its status.
+   If it is below the manifest's minimum, upgrade and restart the bridge
+   before updating the web files. The 9.1.0 web release requires the running
+   bridge to be on 9.1.0 or newer. The Manager version is independent.
+2. Open **واجهة الويب** and use **إيقاف الخادم**. This stops the web server and
+   its tunnel. Leave the Manager, the bridge and its web channel open.
+3. Run the updater from the new release's `scripts` directory in PowerShell 7.
+   Supply the version you saw running in step 1 and the hash from the trusted
+   release checksum file, rather than a hash computed from the ZIP alone.
+
+```powershell
+.\Update-BridgeWeb.ps1 -BridgeRoot 'D:\Bridge' -ReleaseZip 'D:\Downloads\release.zip' `
+  -ExpectedSha256 '<trusted SHA-256>' -RunningBridgeVersion '9.1.0'
+```
+
+The script verifies the ZIP and each selected file, stages a complete web build,
+then replaces the executable and public web assets together. It preserves
+the Manager, bridge scripts, web settings beside the executable, and session
+data under `logs/web`. It retains the previous web files at the printed
+`BackupDirectory` and automatically restores them if the file switch fails.
+If the updater is interrupted after printing that directory, keep the web
+server stopped and use the same rollback command below.
+An installation with custom files in `dist/web/wwwroot` must be reviewed
+before using this updater.
+
+4. Use **تشغيل الخادم** and open the local web link to verify the new interface.
+   If you use a quick tunnel, start it again and share the new link.
+5. If verification fails, stop only the web server again and run the command
+   below with the printed backup directory. Start the server and tunnel from
+   the same open Manager.
+
+```powershell
+.\Update-BridgeWeb.ps1 -BridgeRoot 'D:\Bridge' -RollbackDirectory '<BackupDirectory>'
+```
+
 ## Version 6 merge handoff
 
 The `codex/v6-current-experience` branch is the release handoff branch for

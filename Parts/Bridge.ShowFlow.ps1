@@ -594,6 +594,7 @@ function Invoke-HideLayer {
         [switch]$CaptureRollback,
         [switch]$ReviewedRollback,
         [switch]$ReviewedTimer,
+        [switch]$RequireConsistentIdentity,
         [string]$ExpectedDevicePath = '',
         [long]$Deadline = 0
     )
@@ -648,7 +649,7 @@ function Invoke-HideLayer {
     $verified = $null
     if ($ExpectedLayerStamp) {
         $verified = Get-TitlerLayerStatus @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+            -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -RequireConsistentIdentity:$RequireConsistentIdentity
         if ((Get-CinegyLayerReviewStamp -Status $verified) -cne $ExpectedLayerStamp -or
             ($ExpectedLayerStartedAtTicks -gt 0 -and $ExpectedLayerStartedAtTicks -ne (Get-CinegyStatusStartTicks -Status $verified))) {
             Write-AirOperationResult -OperationId $operation.Id -Action HIDE -Result blocked -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer $Layer -ErrorText 'reviewed scene changed'
@@ -683,7 +684,8 @@ function Invoke-HideLayer {
     $airTimeout = Get-AirTimeout
     if ($ExpectedDevicePath) {
         $finalStatus = Get-TitlerLayerStatus @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress `
-            -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+            -AirChannelNumber $config.AirChannelNumber -Layer $Layer -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) `
+            -RequireConsistentIdentity:$RequireConsistentIdentity
         if ((Get-CinegyLayerReviewStamp -Status $finalStatus) -cne $ExpectedLayerStamp -or
             (Get-CinegyStatusStartTicks -Status $finalStatus) -ne $ExpectedLayerStartedAtTicks -or
             (Resolve-AirGfxDevice -Layer $Layer).StatusPath -cne $ExpectedDevicePath -or

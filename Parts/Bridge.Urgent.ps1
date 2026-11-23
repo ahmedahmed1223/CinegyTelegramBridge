@@ -129,7 +129,9 @@ function Get-UrgentBoardDefaults {
         number that will be edited in one of them and read from the other. An
         item that leaves a field at zero inherits from here.
     #>
+    param([string]$ModeOverride = '')
     $mode = [string](Get-Setting 'UrgentBoardMode')
+    if (Test-UrgentMode -Mode $ModeOverride) { $mode = $ModeOverride.ToLowerInvariant() }
     if (-not (Test-UrgentMode -Mode $mode)) { $mode = 'text' }
     $repeatMode = [string](Get-Setting 'UrgentBoardRepeatMode')
     if (-not (Test-UrgentRepeatMode -RepeatMode $repeatMode)) { $repeatMode = 'cycle' }
@@ -356,7 +358,7 @@ function New-UrgentBoardPlan {
         arithmetic itself stays in one place, so the sentence on the review
         screen and the moments the engine walks come from the same call.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [switch]$SelectedOnly, [string[]]$SelectedIds)
+    param([Parameter(Mandatory)][long]$ChatId, [switch]$SelectedOnly, [string[]]$SelectedIds, [string]$ModeOverride = '')
     $board = $script:UrgentBoard
     # The order on air is the order on the screen. With the "newest" view
     # the table is sorted newest first and numbered that way, and a run
@@ -367,7 +369,7 @@ function New-UrgentBoardPlan {
     if (-not $PSBoundParameters.ContainsKey('SelectedIds')) { $SelectedIds = @(Get-UrgentSelectedIds -ChatId $ChatId) }
     $items = @(Get-UrgentPlayableItems -Board $board -SelectedIds $SelectedIds -SelectedOnly:$SelectedOnly)
     $ceiling = Get-UrgentRunCeiling -Items $items
-    $result = New-UrgentRunPlan -Items $items -Defaults (Get-UrgentBoardDefaults) `
+    $result = New-UrgentRunPlan -Items $items -Defaults (Get-UrgentBoardDefaults -ModeOverride $ModeOverride) `
         -FloorSeconds (Get-UrgentFloorSeconds) -TransitionSeconds (Get-UrgentTransitionSeconds) `
         -MaxSeconds $ceiling.Seconds -MaxReason $ceiling.Reason
     if ($result.Success -and $ceiling.Reason -eq 'autohide') {
@@ -625,7 +627,8 @@ function Get-UrgentBoardKeyboard {
             }
             $rows += , $actionRow
             if ($onAir) {
-                $rows += , @((New-Button (T 'urgent.stopCurrent') 'urgentb:hide' -Style danger))
+                $stop = Get-UrgentStopCallback -ChatId $ChatId -UserId $UserId
+                if ($stop) { $rows += , @((New-Button (T 'urgent.stopCurrent') $stop -Style danger)) }
             }
         }
     }
@@ -872,7 +875,7 @@ function Show-UrgentBoardScreen {
 
 function Update-UrgentHomeScreens {
     <#
-        Every chat's board message, redrawn because the urgent's air changed.
+        Every open urgent board message, redrawn after an air or Web edit.
 
         A board left open read "on air" after another operator had hidden
         the story, or after the engine dropped it, until somebody pressed
@@ -887,9 +890,10 @@ function Update-UrgentHomeScreens {
         rather than on the board has no other way to reach that chat's
         board at all.
     #>
-    param([ValidateSet('show', 'hide')][string]$Action = 'hide', [AllowEmptyString()][string]$ActorName = '', [switch]$EndedOutside)
+    param([ValidateSet('show', 'hide', 'edit')][string]$Action = 'hide', [AllowEmptyString()][string]$ActorName = '', [switch]$EndedOutside)
     if (-not $script:UrgentHomeMessage -or $script:UrgentHomeMessage.Count -eq 0) { return 0 }
-    $notice = if ($Action -eq 'show') { if ($ActorName) { (T 'urg.airShownBy' $ActorName) } else { (T 'urgent.airShown') } }
+    $notice = if ($Action -eq 'edit') { '' }
+        elseif ($Action -eq 'show') { if ($ActorName) { (T 'urg.airShownBy' $ActorName) } else { (T 'urgent.airShown') } }
         elseif ($EndedOutside) { (T 'urgent.airEndedOutside') }
         elseif ($ActorName) { (T 'urg.airHiddenBy' $ActorName) } else { (T 'urgent.airHidden') }
     # Queued, one board per tick. Redrawn here, eight open boards held every
@@ -897,7 +901,10 @@ function Update-UrgentHomeScreens {
     # (station log, 2026-11-14) - each edit is a round trip to Telegram on the
     # thread that answers buttons. A later change replaces a waiting notice:
     # the board is drawn from current state, so only the newest words matter.
-    foreach ($chatId in @($script:UrgentHomeMessage.Keys)) { $script:UrgentHomeRefresh[[long]$chatId] = $notice }
+    foreach ($chatId in @($script:UrgentHomeMessage.Keys)) {
+        if ($Action -eq 'edit' -and $script:UrgentHomeRefresh.ContainsKey([long]$chatId)) { continue }
+        $script:UrgentHomeRefresh[[long]$chatId] = $notice
+    }
     return $script:UrgentHomeMessage.Count
 }
 
@@ -924,7 +931,7 @@ function Get-UrgentItemKeyboard {
     <# One item's own screen. Every override carries the button that puts it
        back to the table's value, because "inherited" and "happens to be the
        same number" must be tellable apart by looking. #>
-    param([Parameter(Mandatory)][int]$Position)
+    param([Parameter(Mandatory)][int]$Position, [long]$ChatId = 0, [long]$UserId = 0)
     $item = Get-UrgentItemByPosition -Position $Position
     $rows = @()
     if (-not $item) { return @{ inline_keyboard = @(, @( (New-Button (T 'urgent.back') 'urgentb:open') )) } }
@@ -932,7 +939,10 @@ function Get-UrgentItemKeyboard {
     $timing = Get-UrgentEffectiveTiming -Item $item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
     $itemId = [string](Get-UrgentProperty $item 'Id' '')
     if (Test-UrgentItemOnAir -Item $item) {
-        $rows += , @( (New-Button (T 'urgent.liveNow') 'urgentb:noop' -Style primary), (New-Button (T 'urgent.stopThis') 'urgentb:hide' -Style danger) )
+        $liveRow = @((New-Button (T 'urgent.liveNow') 'urgentb:noop' -Style primary))
+        $stop = Get-UrgentStopCallback -ChatId $ChatId -UserId $UserId
+        if ($stop) { $liveRow += (New-Button (T 'urgent.stopThis') $stop -Style danger) }
+        $rows += , $liveRow
     }
     else {
         # Two ways on air, side by side: as long as it takes, or for a
@@ -1080,15 +1090,167 @@ function Invoke-UrgentTimedPick {
     return $true
 }
 
+$script:UrgentWebNotice = $null
+
+function Get-UrgentWebNoticeId {
+    if ($script:UrgentWebNotice -and $script:UrgentWebNotice.ExpiresAt -gt [datetimeoffset]::UtcNow) {
+        return $script:UrgentWebNotice.Id
+    }
+    return ''
+}
+
+function Get-UrgentWebNoticeForActor {
+    param([long]$Actor)
+    $id = Get-UrgentWebNoticeId
+    if (-not $id -or -not (Test-Authorized -ChatId $Actor -UserId $Actor) -or
+        (Test-AirNoticeMuted -UserId $Actor)) { return '' }
+    $notice = $script:UrgentWebNotice
+    if (($notice.FromWeb -and $notice.UserId -eq $Actor) -or
+        -not (Test-TemplateAccess -Key $notice.Key -Layer $notice.Layer -ChatId $Actor -UserId $Actor).Allowed) { return '' }
+    $scope = Get-TemplateNotifyScope -Key $notice.Key
+    if ($scope -eq 'all' -or ($scope -eq 'admins' -and (Test-Admin -ChatId $Actor -UserId $Actor))) { return $id }
+    return ''
+}
+
+function Get-UrgentManualControl {
+    param([long]$ChatId, [long]$UserId)
+
+    if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId) -or
+        -not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId) -or $script:UrgentBoardRun) { return }
+    foreach ($entry in $script:UrgentManualLive.GetEnumerator()) {
+        $state = $entry.Value
+        if ((Get-JsonProp $state 'Mode') -cne 'urgent_manual_live') { continue }
+        $own = [long]$entry.Key -eq $ChatId -and [long](Get-JsonProp $state 'UserId') -eq $UserId
+        $eventId = [string](Get-JsonProp $state 'EventId')
+        if (-not $own -and -not $eventId) { continue }
+        $layer = [int](Get-JsonProp $state 'Layer')
+        $stamp = Get-UrgentLiveStamp -Layer $layer
+        if (-not $stamp -or (Get-JsonProp $state 'LiveStamp') -cne $stamp) { continue }
+        $current = $script:OnAir[$layer]
+        $key = [string](Get-JsonProp $current 'Key')
+        if (-not $key -or -not (Test-TemplateAccess -Key $key -Layer $layer -ChatId $ChatId -UserId $UserId).Allowed) { continue }
+        if ($eventId) {
+            # A layer-level HIDE cannot isolate one member of a Multi scene.
+            if ((Get-Setting 'SceneMode') -ne 'Single' -or
+                (Get-UrgentManualDevicePath -Layer $layer) -cne (Get-JsonProp $state 'DevicePath') -or
+                (Get-UrgentManualStationStamp) -cne (Get-JsonProp $state 'StationStamp') -or
+                ([string](Get-JsonProp $current 'ActiveId')).Trim().Trim('{','}') -ne $eventId) { continue }
+        }
+        $token = if ($own) { [string](Get-JsonProp $state 'Token') } else {
+            $secret = [string](Get-JsonProp $state 'ControlSecret')
+            if (-not $secret) { continue }
+            $bytes = [Text.Encoding]::UTF8.GetBytes("$ChatId|${UserId}|$eventId")
+            $mac = [Security.Cryptography.HMACSHA256]::HashData([Text.Encoding]::UTF8.GetBytes($secret), $bytes)
+            [Convert]::ToHexString($mac).Substring(0, 12).ToLowerInvariant()
+        }
+        if ($token) { return @{ State = $state; Token = $token; Layer = $layer } }
+    }
+}
+
+function Get-UrgentStopCallback {
+    param([long]$ChatId, [long]$UserId)
+    if ($script:UrgentBoardRun) { return 'urgentb:hide' }
+    if ($ChatId -eq 0) { return '' }
+    if ($UserId -eq 0) { $UserId = $ChatId }
+    $control = Get-UrgentManualControl -ChatId $ChatId -UserId $UserId
+    if ($control) { return "urgmanual:hide:$($control.Token)" }
+    return ''
+}
+
+function Get-UrgentManualDevicePath {
+    param([int]$Layer)
+    return [string](Resolve-AirGfxDevice -Layer $Layer).StatusPath
+}
+
+function Get-UrgentManualStationStamp {
+    $bytes = [Text.Encoding]::UTF8.GetBytes("$($config.AirServerAddress)|$($config.AirChannelNumber)")
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+}
+
+function Get-ConfirmedUrgentEventId {
+    param($Result, [int]$Layer)
+    if ((Get-JsonProp $Result 'Success') -ne $true -or (Get-JsonProp $Result 'EventIdentityConfirmed') -ne $true -or
+        (Get-JsonProp $Result 'UrgentEventReadConfirmed') -ne $true) { return '' }
+    $confirmedEventId = [guid]::Empty
+    $reported = [guid]::Empty
+    if ([guid]::TryParse([string](Get-JsonProp $Result 'EventId'), [ref]$confirmedEventId) -and
+        [guid]::TryParse([string](Get-JsonProp $script:OnAir[$Layer] 'ActiveId'), [ref]$reported) -and
+        $confirmedEventId -ne [guid]::Empty -and $confirmedEventId -eq $reported) { return $confirmedEventId.ToString('D') }
+    return ''
+}
+
+function Publish-UrgentWebNotice {
+    param([string]$Key, [int]$Layer, [long]$UserId, [switch]$FromWeb)
+    $script:UrgentWebNotice = @{
+        Id = [guid]::NewGuid().ToString('N'); Key = $Key; Layer = $Layer
+        UserId = $UserId; FromWeb = $FromWeb.IsPresent; ExpiresAt = [datetimeoffset]::UtcNow.AddMinutes(1) }
+    Publish-WebChannelState -Force
+}
+
 function Set-UrgentManualLiveState {
-    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$Layer)
+    param([long]$ChatId, [long]$UserId, [string]$ItemId, [int]$Layer, $Result, [int]$AutoHideSeconds,
+        [switch]$FromWeb)
+
+    $eventId = Get-ConfirmedUrgentEventId -Result $Result -Layer $Layer
+    if (-not $eventId) { return }
+    $active = $script:OnAir[$Layer]
     $stamp = Get-UrgentLiveStamp -Layer $Layer
     if (-not $stamp) { return }
+    foreach ($prior in $script:UrgentManualLive.Values) {
+        if ((Get-JsonProp $prior 'EventId') -eq $eventId -and (Get-JsonProp $prior 'LiveStamp') -ceq $stamp) { return $prior }
+    }
+
+    $startedAt = Get-JsonProp $Result 'EngineStartedAtUtc'
+    $startTicks = if ($startedAt -is [datetime]) { $startedAt.ToUniversalTime().Ticks } else { 0L }
     $liveState = @{ Mode = 'urgent_manual_live'; Token = [guid]::NewGuid().ToString('N').Substring(0, 12)
-        StartedAt = Get-Date; UserId = $UserId; ItemId = $ItemId; Layer = $Layer; LiveStamp = $stamp }
+        ControlSecret = [guid]::NewGuid().ToString('N'); EventId = $eventId
+        DevicePath = Get-UrgentManualDevicePath -Layer $Layer; StationStamp = Get-UrgentManualStationStamp
+        EngineStartTicks = $startTicks; StartedAt = Get-Date; UserId = $UserId; ItemId = $ItemId; Layer = $Layer; LiveStamp = $stamp }
     $script:UrgentManualLive[$ChatId] = $liveState
     Save-UrgentManualState | Out-Null
+
+    $key = [string](Get-JsonProp $active 'Key')
+    Publish-UrgentWebNotice -Key $key -Layer $Layer -UserId $UserId -FromWeb:$FromWeb
+    $confirmedSeconds = if (Get-JsonProp $Result 'AutoHideArmed') { $AutoHideSeconds } else { 0 }
+    Send-TemplateAirNotice -Key $key -Layer $Layer -ActorChatId $ChatId -ActorName (Format-UserAuditActor -UserId $UserId) `
+        -Copy ([string](Get-JsonProp $active 'ScreenCopy')) -AutoHideSeconds $confirmedSeconds -ConfirmedManualUrgent -IncludeActor:$FromWeb | Out-Null
     return $liveState
+}
+
+function Invoke-UrgentManualHide {
+    param([long]$ChatId, [long]$UserId, [string]$Token, [switch]$Quiet, [switch]$VerifyEngine)
+
+    if (-not (Test-Authorized -ChatId $ChatId -UserId $UserId) -or
+        -not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId)) { return 'forbidden' }
+    $control = Get-UrgentManualControl -ChatId $ChatId -UserId $UserId
+    if (-not $control -or $control.Token -cne $Token) { return 'urgent_stale' }
+    $layer = $control.Layer
+    $current = $script:OnAir[$layer]
+    $expected = Get-CinegyLayerReviewStamp -Status @{ Success = $true; IsOnAir = $true; ActiveId = Get-JsonProp $current 'ActiveId' }
+    if (-not $expected) { return 'urgent_stale' }
+    $guard = @{}
+    $start = [long](Get-JsonProp $control.State 'EngineStartTicks')
+    $strictIdentity = [bool](Get-JsonProp $control.State 'EventId')
+    if ($VerifyEngine -or $strictIdentity) {
+        $status = Get-WebUrgentLayerStatus -Layer $layer -RequireConsistentIdentity:$strictIdentity
+        $guard.RequireConsistentIdentity = $strictIdentity
+        if ((Get-CinegyLayerReviewStamp -Status $status) -cne $expected -or
+            ($start -gt 0 -and (Get-CinegyStatusStartTicks -Status $status) -ne $start)) { return 'urgent_stale' }
+    }
+    if ($start -gt 0) {
+        $guard.ExpectedDevicePath = [string](Get-JsonProp $control.State 'DevicePath')
+        $guard.ExpectedLayerStartedAtTicks = $start
+    }
+    if (-not (Invoke-HideLayer @guard -Layer $layer -ChatId $ChatId -UserId $UserId -Quiet:$Quiet -ExpectedLayerStamp $expected)) {
+        return 'urgent_manual_hide_unconfirmed'
+    }
+    if (($VerifyEngine -or $strictIdentity) -and
+        (Get-CinegyLayerReviewStamp -Status (Get-WebUrgentLayerStatus -Layer $layer)) -cne 'empty') {
+        return 'urgent_manual_hide_unconfirmed'
+    }
+    Clear-UrgentManualLiveForLayer -Layer $layer | Out-Null
+    Publish-WebChannelState -Force
+    return 'hidden'
 }
 
 function Invoke-UrgentManualAction {
@@ -1097,19 +1259,12 @@ function Invoke-UrgentManualAction {
         -not (Test-MaintenanceControl -ChatId $ChatId -UserId $UserId) -or
         $Argument -notmatch '^(show|hide):([a-f0-9]{12})$') { return $false }
     $action = $Matches[1]; $token = $Matches[2]
-    $state = if ($action -eq 'hide') { $script:UrgentManualLive[$ChatId] } else { Get-PendingState -ChatId $ChatId }
+    if ($action -eq 'hide') {
+        return (Invoke-UrgentManualHide -ChatId $ChatId -UserId $UserId -Token $token) -ceq 'hidden'
+    }
+    $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [long](Get-JsonProp $state 'UserId') -ne $UserId -or
         [string](Get-JsonProp $state 'Token') -cne $token) { return $false }
-    if ($action -eq 'hide') {
-        if ([string](Get-JsonProp $state 'Mode') -ne 'urgent_manual_live' -or
-            [string]$state.LiveStamp -cne (Get-UrgentLiveStamp -Layer ([int]$state.Layer))) { return $false }
-        $liveKey = [string](Get-JsonProp $script:OnAir[[int]$state.Layer] 'Key')
-        if (-not (Test-TemplateAccess -Key $liveKey -Layer ([int]$state.Layer) -ChatId $ChatId -UserId $UserId).Allowed) { return $false }
-        if (-not (Invoke-HideLayer -Layer ([int]$state.Layer) -ChatId $ChatId -UserId $UserId)) { return $false }
-        $script:UrgentManualLive.Remove($ChatId) | Out-Null
-        Save-UrgentManualState | Out-Null
-        return $true
-    }
 
     if ([string](Get-JsonProp $state 'Mode') -ne 'urgent_manual_confirm') { return $false }
     $item = @(Get-UrgentProperty $script:UrgentBoard 'Items' @()) | Where-Object { [string](Get-JsonProp $_ 'Id') -ceq $state.ItemId } | Select-Object -First 1
@@ -1131,41 +1286,41 @@ function Invoke-UrgentManualAction {
     # timed duration for the timed one. A story shown alone used to have no
     # timer at all, which is how an urgent ran eleven hours.
     $manualHide = [int](Get-JsonProp $state 'AutoHideSeconds')
-    $result = Invoke-ShowTemplateResult -Key ([string]$template.Key) -Variables (Get-UrgentItemVariables -Item $item) -ChatId $ChatId -UserId $UserId -AutoHideSeconds $manualHide
+    $variables = Get-UrgentItemVariables -Item $item
+    $result = Invoke-ShowTemplateResult -Key ([string]$template.Key) -Variables $variables -ChatId $ChatId -UserId $UserId `
+        -AutoHideSeconds $manualHide -RequireEventIdentity -ManualUrgent
     if (-not [bool](Get-JsonProp $result 'Success')) { return $false }
-    $liveState = Set-UrgentManualLiveState -ChatId $ChatId -UserId $UserId -ItemId ([string]$state.ItemId) -Layer ([int]$template.Layer)
-    if (-not $liveState) { return $true }
-    $shownText = (T 'urgent.shownAlone')
-    if ($manualHide -gt 0) { $shownText += "`n" + (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $manualHide)) }
-    $shownText += "`n`n" + (ConvertTo-TelegramHtmlText -Text ([string](Get-JsonProp $state 'Text')))
-    # On the board message, like every other urgent screen: the SHOW's own
-    # confirmation has already taken that message, and this is the one that
-    # carries the hide button for what is now on air.
-    Send-UrgentScreen -ChatId $ChatId -Text $shownText -Keyboard @{
-        inline_keyboard = @(
-            , @((New-Button (T 'urgent.hideShown') "urgmanual:hide:$($liveState.Token)" -Style danger))
-            , @((New-Button (T 'urgent.pickAnother') "urgread:$($state.ItemId):0"), (New-Button (T 'urgent.back') 'urgentb:open'))
-        )
+    $effective = Get-EffectiveAutoHideSeconds -Key ([string]$template.Key) -RequestedSeconds $manualHide
+    $liveState = Set-UrgentManualLiveState -ChatId $ChatId -UserId $UserId -ItemId ([string]$state.ItemId) -Layer ([int]$template.Layer) `
+        -Result $result -AutoHideSeconds $effective
+    if (-not $liveState) {
+        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.noConfirmAfterShow')
+        return $true
     }
+    $shownText = (T 'urgent.shownAlone')
+    if ($effective -gt 0) {
+        $shownText += "`n" + $(if (Get-JsonProp $result 'AutoHideArmed') { (T 'air.autoHideAfter' $(Format-DurationSeconds -Seconds $effective)) }
+            else { (T 'air.hideTimerNotSaved') })
+    }
+    $shownText += "`n`n" + (ConvertTo-TelegramHtmlText -Text ([string](Get-JsonProp $state 'Text')))
+    $items = @()
+    $control = Get-UrgentManualControl -ChatId $ChatId -UserId $UserId
+    if ($control) { $items += , @((New-Button (T 'urgent.hideShown') "urgmanual:hide:$($control.Token)" -Style danger)) }
+    $items += , @((New-Button (T 'urgent.pickAnother') "urgread:$($state.ItemId):0"), (New-Button (T 'urgent.back') 'urgentb:open'))
+    Send-UrgentScreen -ChatId $ChatId -Text $shownText -Keyboard @{ inline_keyboard = $items }
     return $true
 }
 
 function Stop-UrgentCurrentAir {
     <# -Quiet leaves the screen to the caller, which redraws the board once
        with a notice instead of this and the run each drawing their own. #>
-    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$Quiet)
+    param([Parameter(Mandatory)][long]$ChatId, [Parameter(Mandatory)][long]$UserId, [switch]$Quiet, [switch]$LegacyButton)
     if ($script:UrgentBoardRun) {
         return (Stop-UrgentBoardRun -ChatId $ChatId -UserId $UserId -Reason 'manual_hide' -Quiet:$Quiet)
     }
-    foreach ($entry in @($script:UrgentManualLive.GetEnumerator())) {
-        $liveState = $entry.Value
-        if ([long](Get-UrgentProperty $liveState 'UserId' 0) -ne $UserId) { continue }
-        $token = [string](Get-UrgentProperty $liveState 'Token' '')
-        if ($token -and (Invoke-UrgentManualAction -ChatId $ChatId -UserId $UserId -Argument "hide:$token")) {
-            return $true
-        }
-    }
-    return $false
+    $control = Get-UrgentManualControl -ChatId $ChatId -UserId $UserId
+    if (-not $control -or ($LegacyButton -and (Get-JsonProp $control.State 'EventId'))) { return $false }
+    return (Invoke-UrgentManualHide -ChatId $ChatId -UserId $UserId -Token $control.Token -Quiet:$Quiet) -ceq 'hidden'
 }
 
 function Split-UrgentReaderText {
@@ -1219,7 +1374,7 @@ function Show-UrgentReader {
 }
 
 function Show-UrgentItemScreen {
-    param([Parameter(Mandatory)][long]$ChatId, [int]$Position, [int]$MessageId = 0)
+    param([Parameter(Mandatory)][long]$ChatId, [int]$Position, [int]$MessageId = 0, [long]$UserId = 0)
     $item = Get-UrgentItemByPosition -Position $Position
     if (-not $item) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'urgent.notFound') -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
@@ -1250,7 +1405,7 @@ function Show-UrgentItemScreen {
         $lines += (T 'urg.disabledReason' $(if ($disabledReason) { ConvertTo-TelegramHtmlText -Text $disabledReason } else { (T 'urgent.manualDisable') }))
     }
     $lines += (T 'urg.lastEdit' $(Get-UrgentRelativeTime (Get-JsonProp $item 'UpdatedAt')))
-    $keyboard = Get-UrgentItemKeyboard -Position $Position
+    $keyboard = Get-UrgentItemKeyboard -Position $Position -ChatId $ChatId -UserId $UserId
     Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text ($lines -join "`n") -Keyboard $keyboard
 }
 

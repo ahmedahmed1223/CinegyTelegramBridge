@@ -16,6 +16,9 @@ it('retries a failed draft refresh without uploading the saved file again', asyn
     maxItems: 10,
     paused: { items: [], page: 1, pageCount: 1, total: 0, offset: 0 },
     canClear: true,
+    sharedDraftKey: null,
+    rowKeys: null,
+    canManage: null,
   }
   vi.mocked(uploadTickerTxt).mockResolvedValueOnce({
     review: 'review-1',

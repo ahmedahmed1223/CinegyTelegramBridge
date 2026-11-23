@@ -77,6 +77,10 @@ BeforeAll {
     # retry and the timeout, whose own tests mock this same command and whose
     # mock wins over this one.
     Mock Invoke-RestMethod -ModuleName BridgeTelegram { throw 'the tests do not talk to Telegram' }
+    # The sample Air host is loopback, where the workstation's real engine
+    # can be listening. Block unmocked status and command traffic at the
+    # module's HTTP boundary, including a HIDE or postbox from an indirect call.
+    Mock Invoke-WebRequest -ModuleName CinegyAirTitler { throw 'the tests do not talk to Cinegy' }
 
     # And the other way out of the process. A tick test that mocked most of its
     # steps but not the output monitor spawned a real ffmpeg against the source

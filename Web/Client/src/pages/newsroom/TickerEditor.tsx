@@ -1,7 +1,7 @@
 import { ActionIcon, Alert, Button, Group, Menu, Modal, NumberInput, Pagination, Paper, ScrollArea, Stack, Text, Textarea, TextInput, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
-import { IconArrowDown, IconArrowUp, IconCalendarTime, IconEdit, IconFolders, IconHistory, IconListNumbers, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
+import { IconArrowDown, IconArrowUp, IconCalendarTime, IconCheck, IconEdit, IconFolders, IconHistory, IconListNumbers, IconPlayerPause, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
@@ -18,7 +18,15 @@ import { EditorialSearch, type EditorialOrder } from './EditorialSearch'
 type Request = Schemas['TickerDraftRequest']
 type Draft = Schemas['TickerDraft']
 type Conflict = Schemas['TickerConflict']
-type Edit = { revision: string; index: number | null; text: string }
+type Edit = {
+  revision: string
+  index: number | null
+  text: string
+  sharedDraftKey?: string | null
+  rowKey?: string
+  originalText?: string
+  choosingRow?: boolean
+}
 type Review = { draft: Draft; conflict?: Conflict }
 type Schedule = { revision: string; time: string }
 type Move = { revision: string; index: number; text: string; position: number | string }
@@ -84,7 +92,16 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   const editor = status.data
   const draft = editor?.draft
   const lock = editor?.lock
+  const sharedDraft = Boolean(draft?.sharedDraftKey)
+  const canManage = draft?.canManage !== false
+  const scheduledReadOnly = !canManage && Boolean(draft?.scheduledAt)
   const items = draft?.items ?? []
+  const editingSharedRow = Boolean(edit?.sharedDraftKey && edit.index !== null)
+  const editRowIndex = edit?.rowKey ? (draft?.rowKeys?.indexOf(edit.rowKey) ?? -1) : -1
+  const currentRowText = editingSharedRow && editRowIndex >= 0 ? items[editRowIndex] : undefined
+  const sharedDraftChanged = Boolean(edit?.sharedDraftKey && edit.sharedDraftKey !== draft?.sharedDraftKey)
+  const sharedRowConflict = editingSharedRow && currentRowText !== edit?.originalText
+  const choosingRow = Boolean(edit?.choosingRow && !sharedDraftChanged)
   const needle = searchText(search)
   const matching = items.map((text, index) => ({ text, index }))
     .filter(({ text }) => !needle || searchText(text).includes(needle))
@@ -119,7 +136,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
       setPausedPage(updatedPage)
       const savedDraft = updated.draft
       setEdit(addAnother && savedDraft && savedDraft.items.length < savedDraft.maxItems
-        ? { index: null, text: '', revision: savedDraft.revision } : null)
+        ? { index: null, text: '', revision: savedDraft.revision, sharedDraftKey: savedDraft.sharedDraftKey } : null)
       if (body.action === 'add' || body.action === 'update') setSavedMessage('حُفظ الخبر في المسودة.')
       if (body.action === 'move' && body.destination != null) {
         setMove(null)
@@ -128,7 +145,8 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
       }
       setReview(null)
       setSchedule(null)
-      if (body.action === 'start') { setPage(1); setSearch(''); setOrder('sequence') }
+      if (body.action === 'start' || body.action === 'start_shared') { setPage(1); setSearch(''); setOrder('sequence') }
+      if (body.action === 'share') setSavedMessage('أصبحت المسودة متاحة للتحرير المشترك.')
       if (body.action === 'publish' || body.action === 'append' || body.action === 'replace') {
         notifications.show({
           color: updated.sheetFailed ? 'orange' : 'teal',
@@ -216,25 +234,53 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
   }
 
   function editForm(current: Edit) {
+    const blocked = !draft || sharedDraftChanged || sharedRowConflict || choosingRow || scheduledReadOnly
     return (
-      <form key={current.revision} onSubmit={(event) => {
+      <form onSubmit={(event) => {
         event.preventDefault()
-        if (!current.text.trim()) return
+        if (blocked || !current.text.trim()) return
         const submitter = (event.nativeEvent as SubmitEvent).submitter
-        void send({ action: current.index === null ? 'add' : 'update', ...current }, submitter?.getAttribute('value') === 'another')
+        void send({
+          action: current.index === null ? 'add' : 'update',
+          index: current.rowKey ? editRowIndex : current.index,
+          revision: current.revision,
+          text: current.text,
+          review: current.rowKey ?? current.sharedDraftKey ?? null,
+        }, submitter?.getAttribute('value') === 'another')
       }}>
         <Stack gap="xs">
+          {sharedDraftChanged && (
+            <Alert color="orange" role="alert">
+              تغيّرت المسودة أو انتهت مشاركتها. يمكنك نسخ النص الذي كتبته قبل إغلاق التحرير.
+            </Alert>
+          )}
+          {!sharedDraftChanged && sharedRowConflict && (
+            <Alert color="orange" title="تغيّر الخبر أثناء تحريره" role="alert">
+              <Stack gap="xs">
+                <Text size="sm" dir="rtl">الخبر قبل التعديل: {current.originalText}</Text>
+                <Text size="sm">اختر الخبر المقصود من القائمة قبل حفظ النص الذي كتبته.</Text>
+                <Button variant="subtle" size="compact-sm" disabled={busy || scheduledReadOnly}
+                  onClick={() => setEdit({ ...current, choosingRow: !choosingRow })}>
+                  {choosingRow ? 'إلغاء اختيار الخبر' : 'اختيار الخبر من القائمة'}
+                </Button>
+              </Stack>
+            </Alert>
+          )}
+          {editingSharedRow && !sharedDraftChanged && !sharedRowConflict && (
+            <Text size="sm" c="dimmed" dir="rtl">الخبر قيد التحرير: {current.originalText}</Text>
+          )}
           <Textarea
             label={current.index === null ? 'الخبر الجديد' : 'نص الخبر'}
             dir="rtl" autosize minRows={2} maxRows={6} required autoFocus
             maxLength={editor?.maxItemLength}
             value={current.text}
             onChange={(event) => setEdit({ ...current, text: event.currentTarget.value })}
+            readOnly={scheduledReadOnly}
             disabled={busy}
           />
           <Group gap="xs">
-            <Button type="submit" size="sm" loading={busy} disabled={!current.text.trim()}>حفظ الخبر</Button>
-            {current.index === null && <Button type="submit" value="another" variant="light" size="sm" disabled={busy || !current.text.trim()}>
+            <Button type="submit" size="sm" loading={busy} disabled={blocked || !current.text.trim()}>حفظ الخبر</Button>
+            {current.index === null && <Button type="submit" value="another" variant="light" size="sm" disabled={busy || blocked || !current.text.trim()}>
               حفظ وإضافة خبر آخر
             </Button>}
             <Button variant="subtle" size="sm" disabled={busy} onClick={() => { setEdit(null); setError('') }}>إلغاء</Button>
@@ -252,14 +298,21 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             <Title order={4}>مسودة الشريط</Title>
             {draft && <Text size="sm" c="dimmed">{number.format(items.length)} من {number.format(draft.maxItems)} خبرًا</Text>}
           </div>
-          {editor && !draft && editor.state !== 'locked' && (
-            <Button variant="light" loading={busy} onClick={() => void send({ action: 'start' })}>
-              {editor.state === 'open' ? 'تسلّم المسودة' : 'بدء مسودة'}
-            </Button>
+          {editor && !draft && editor.state !== 'locked' && !edit && (
+            <Group gap="xs">
+              <Button variant="light" loading={busy} onClick={() => void send({ action: 'start' })}>
+                {editor.state === 'open' ? 'تسلّم المسودة' : 'بدء مسودة خاصة'}
+              </Button>
+              {(editor.state === 'available' || editor.state === 'open') && (
+                <Button variant="default" disabled={busy} onClick={() => void send({ action: 'start_shared' })}>
+                  {editor.state === 'open' ? 'تسلّم ومشاركة المسودة' : 'بدء مسودة مشتركة'}
+                </Button>
+              )}
+            </Group>
           )}
           {draft && (
-            <Button leftSection={<IconPlus size={16} />} disabled={busy || !!edit || items.length >= draft.maxItems}
-              onClick={() => { setError(''); setEdit({ index: null, text: '', revision: draft.revision }) }}>
+            <Button leftSection={<IconPlus size={16} />} disabled={busy || !!edit || scheduledReadOnly || items.length >= draft.maxItems}
+              onClick={() => { setError(''); setEdit({ index: null, text: '', revision: draft.revision, sharedDraftKey: draft.sharedDraftKey }) }}>
               إضافة خبر
             </Button>
           )}
@@ -272,7 +325,18 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
           </Alert>
         )}
         {!review && !schedule && !move && error && <Alert color="red" role="alert">{error}</Alert>}
-        {editor?.state === 'locked' && (
+        {sharedDraft && (
+          <Alert color="blue" title="مسودة مشتركة">
+            <Text size="sm">
+              {editor?.owner ? `المشرف على المسودة: ${editor.owner}. ` : canManage ? 'أنت المشرف على المسودة. ' : ''}
+              {canManage
+                ? 'يمكن للمحرّرين إضافة الأخبار وتعديلها. النشر وإدارة المسودة من صلاحيات المشرف.'
+                : 'يمكنك إضافة الأخبار وتعديلها. يتولّى المشرف النشر وإدارة المسودة.'}
+            </Text>
+          </Alert>
+        )}
+        {scheduledReadOnly && <Alert color="orange" role="status">{messageFor('ticker_scheduled_readonly')}</Alert>}
+        {editor?.state === 'locked' && !draft && (
           <Alert color="orange" title="المسودة قيد التحرير">
             <Stack gap="xs">
               <Text size="sm">{editor.owner ? `المسودة مع ${editor.owner} الآن.` : 'المسودة مع محرّر آخر الآن.'}</Text>
@@ -287,7 +351,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             </Stack>
           </Alert>
         )}
-        {draft && lock?.response && (
+        {draft && canManage && lock?.response && (
           <Alert color="blue" title="طلب تسليم المسودة">
             <Stack gap="xs">
               <Text size="sm">{lock.requester || 'محرّر آخر'} يطلب تسلّم المسودة. ستبقى الأخبار فيها إذا وافقت هنا.</Text>
@@ -303,12 +367,12 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             </Stack>
           </Alert>
         )}
+        {edit && (edit.index === null || editingSharedRow || !draft) && editForm(edit)}
         {draft && (
           <>
-            {edit?.index === null && editForm(edit)}
             {savedMessage && <Text size="sm" c="teal" role="status">{savedMessage}</Text>}
             {(items.length > 0 || search) && <EditorialSearch label="بحث في المسودة" sequenceLabel="ترتيب الشريط"
-              search={search} order={order} disabled={!!edit || busy}
+              search={search} order={order} disabled={(!!edit && !choosingRow) || busy}
               onSearch={(value) => { setSearch(value); setPage(1) }}
               onOrder={(value) => { setOrder(value); setPage(1) }} />}
             {!matching.length && !edit && <Text size="sm" c="dimmed">
@@ -317,25 +381,35 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             {!!matching.length && <ol className={classes.tickerItems}>
               {matching.slice(offset, offset + pageSize).map(({ text: item, index }) => {
                 return (
-                  <li key={index} value={index + 1}>
-                    {edit?.index === index ? editForm(edit) : (
+                  <li key={draft.rowKeys?.[index] ?? index} value={index + 1}>
+                    {!editingSharedRow && edit?.index === index ? editForm(edit) : (
                       <div className={classes.tickerEntry}>
                         <Text dir="rtl" className={classes.headline}>{item}</Text>
                         <Group gap={2} wrap="nowrap">
-                          <ActionIcon variant="subtle" aria-label={`تعديل الخبر ${index + 1}`} disabled={busy || !!edit}
-                            onClick={() => { setError(''); setEdit({ index, text: item, revision: draft.revision }) }}><IconEdit size={16} /></ActionIcon>
-                          <ActionIcon variant="subtle" aria-label={`رفع الخبر ${index + 1}`} disabled={busy || !!edit || index === 0}
-                            onClick={() => void send({ action: 'up', revision: draft.revision, index })}><IconArrowUp size={16} /></ActionIcon>
-                          <ActionIcon variant="subtle" aria-label={`خفض الخبر ${index + 1}`} disabled={busy || !!edit || index + 1 === items.length}
-                            onClick={() => void send({ action: 'down', revision: draft.revision, index })}><IconArrowDown size={16} /></ActionIcon>
-                          <ActionIcon variant="subtle" title="نقل إلى موضع محدد" aria-label={`نقل الخبر ${index + 1} إلى موضع محدد`}
-                            disabled={busy || !!edit || items.length < 2}
-                            onClick={() => { setError(''); setMove({ index, position: index + 1, text: item, revision: draft.revision }) }}><IconListNumbers size={16} /></ActionIcon>
-                          <ActionIcon variant="subtle" title="إيقاف مؤقتًا" aria-label={`إيقاف الخبر ${index + 1} مؤقتًا`} disabled={busy || !!edit}
-                            onClick={() => void send({ action: 'pause', revision: draft.revision, index })}><IconPlayerPause size={16} /></ActionIcon>
-                          {draft.canRemove && (
-                            <ActionIcon variant="subtle" color="red" aria-label={`حذف الخبر ${index + 1}`} disabled={busy || !!edit}
-                              onClick={() => confirmDelete(draft, index)}><IconTrash size={16} /></ActionIcon>
+                          <ActionIcon variant={choosingRow ? 'light' : 'subtle'}
+                            aria-label={choosingRow ? `اختيار الخبر ${index + 1} لهذا التعديل` : `تعديل الخبر ${index + 1}`}
+                            disabled={busy || scheduledReadOnly || (!!edit && !choosingRow) || (sharedDraft && !draft.rowKeys?.[index])}
+                            onClick={() => {
+                              setError('')
+                              setEdit({ index, text: choosingRow && edit ? edit.text : item, revision: draft.revision,
+                                sharedDraftKey: draft.sharedDraftKey, rowKey: draft.rowKeys?.[index], originalText: item })
+                            }}>{choosingRow ? <IconCheck size={16} /> : <IconEdit size={16} />}</ActionIcon>
+                          {canManage && (
+                            <>
+                              <ActionIcon variant="subtle" aria-label={`رفع الخبر ${index + 1}`} disabled={busy || !!edit || index === 0}
+                                onClick={() => void send({ action: 'up', revision: draft.revision, index })}><IconArrowUp size={16} /></ActionIcon>
+                              <ActionIcon variant="subtle" aria-label={`خفض الخبر ${index + 1}`} disabled={busy || !!edit || index + 1 === items.length}
+                                onClick={() => void send({ action: 'down', revision: draft.revision, index })}><IconArrowDown size={16} /></ActionIcon>
+                              <ActionIcon variant="subtle" title="نقل إلى موضع محدد" aria-label={`نقل الخبر ${index + 1} إلى موضع محدد`}
+                                disabled={busy || !!edit || items.length < 2}
+                                onClick={() => { setError(''); setMove({ index, position: index + 1, text: item, revision: draft.revision }) }}><IconListNumbers size={16} /></ActionIcon>
+                              <ActionIcon variant="subtle" title="إيقاف مؤقتًا" aria-label={`إيقاف الخبر ${index + 1} مؤقتًا`} disabled={busy || !!edit}
+                                onClick={() => void send({ action: 'pause', revision: draft.revision, index })}><IconPlayerPause size={16} /></ActionIcon>
+                              {draft.canRemove && (
+                                <ActionIcon variant="subtle" color="red" aria-label={`حذف الخبر ${index + 1}`} disabled={busy || !!edit}
+                                  onClick={() => confirmDelete(draft, index)}><IconTrash size={16} /></ActionIcon>
+                              )}
+                            </>
                           )}
                         </Group>
                       </div>
@@ -344,8 +418,8 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
                 )
               })}
             </ol>}
-            {pageCount > 1 && <Pagination total={pageCount} value={currentPage} onChange={setPage} disabled={!!edit || busy} />}
-            <Modal opened={!!move} title="نقل خبر في ترتيب الشريط" onClose={() => { setMove(null); setError('') }}
+            {pageCount > 1 && <Pagination total={pageCount} value={currentPage} onChange={setPage} disabled={(!!edit && !choosingRow) || busy} />}
+            <Modal opened={canManage && !!move} title="نقل خبر في ترتيب الشريط" onClose={() => { setMove(null); setError('') }}
               closeOnEscape={!busy} closeOnClickOutside={!busy} withCloseButton={!busy}>
               {move && <form onSubmit={(event) => {
                 event.preventDefault()
@@ -365,7 +439,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
                 </Stack>
               </form>}
             </Modal>
-            {draft.paused && (draft.paused.total > 0 || showPaused) && (
+            {canManage && draft.paused && (draft.paused.total > 0 || showPaused) && (
               <Stack gap="xs" className={classes.tickerTools}>
                 <Group justify="space-between" align="center">
                   <Title order={5} size="sm">الأخبار الموقوفة · {number.format(draft.paused.total)}</Title>
@@ -398,16 +472,22 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
             {draft.scheduledAt && (
               <Group justify="space-between" className={classes.tickerTools}>
                 <Text size="sm">موعد النشر <bdi>{formatDateTime(draft.scheduledAt)}</bdi></Text>
-                <Button variant="subtle" size="compact-sm" disabled={busy || !!edit}
-                  onClick={() => void send({ action: 'unschedule', revision: draft.revision })}>إلغاء الموعد</Button>
+                {canManage && <Button variant="subtle" size="compact-sm" disabled={busy || !!edit}
+                  onClick={() => void send({ action: 'unschedule', revision: draft.revision })}>إلغاء الموعد</Button>}
               </Group>
             )}
-            <Group justify="space-between">
+            {canManage && <Group justify="space-between">
               <Group gap="xs">
                 <Button variant="default" disabled={busy || !!edit} onClick={() => setShowPaste(true)}>لصق أخبار</Button>
                 <Menu position="bottom-start">
                   <Menu.Target><Button variant="default" disabled={busy || !!edit}>خيارات المسودة</Button></Menu.Target>
                   <Menu.Dropdown>
+                    {!sharedDraft && <Menu.Item onClick={() => modals.openConfirmModal({
+                      title: 'مشاركة المسودة مع المحرّرين',
+                      children: <Text size="sm">سيتمكّن المحرّرون من إضافة الأخبار وتعديلها. ستظلّ مسؤولًا عن المسودة ونشرها.</Text>,
+                      labels: { confirm: 'مشاركة المسودة', cancel: 'إلغاء' },
+                      onConfirm: () => void send({ action: 'share', revision: draft.revision }),
+                    })}>مشاركة المسودة</Menu.Item>}
                     <Menu.Item onClick={() => setShowTxt(true)}>استيراد ملف TXT</Menu.Item>
                     <Menu.Item onClick={() => confirmHandover(draft)}>تسليم المسودة</Menu.Item>
                     {draft.canClear && items.length > 0 && <Menu.Item color="red" onClick={() => confirmDraftRemoval(draft, 'clear')}>تفريغ المسودة</Menu.Item>}
@@ -420,10 +500,10 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
                   onClick={() => openSchedule(draft)}>{draft.scheduledAt ? 'تغيير الموعد' : 'جدولة النشر'}</Button>
                 <Button color="red" variant="light" disabled={busy || !!edit} onClick={() => { setError(''); setReview({ draft }) }}>مراجعة النشر</Button>
               </Group>
-            </Group>
+            </Group>}
           </>
         )}
-        {editor && (
+        {editor && canManage && (
           <>
             <Group>
               <Button variant="default" size="sm" leftSection={<IconFolders size={17} aria-hidden />}
@@ -448,12 +528,12 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
           </>
         )}
       </Stack>
-      {draft && showPaste && <TickerPaste draft={draft} onClose={() => setShowPaste(false)}
+      {draft && canManage && showPaste && <TickerPaste draft={draft} onClose={() => setShowPaste(false)}
         onCommand={(body) => tickerCommand({ ...body, pausedPage })}
         onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey })} />}
-      {draft && showTxt && <TickerTxt draft={draft} onClose={() => setShowTxt(false)}
+      {draft && canManage && showTxt && <TickerTxt draft={draft} onClose={() => setShowTxt(false)}
         onRefresh={() => queryClient.invalidateQueries({ queryKey: draftKey }, { throwOnError: true })} />}
-      <Modal opened={!!schedule} onClose={() => { if (!busy) { setSchedule(null); setError('') } }} title="جدولة نشر شريط الأخبار">
+      <Modal opened={canManage && !!schedule} onClose={() => { if (!busy) { setSchedule(null); setError('') } }} title="جدولة نشر شريط الأخبار">
         {schedule && <form onSubmit={(event) => {
           event.preventDefault()
           const date = new Date(schedule.time)
@@ -475,7 +555,7 @@ export function TickerEditor({ onPublished }: { onPublished: () => Promise<unkno
           </Stack>
         </form>}
       </Modal>
-      <Modal opened={!!review} onClose={() => { if (!busy) { setReview(null); setError('') } }} title="مراجعة نشر شريط الأخبار" size="lg">
+      <Modal opened={canManage && !!review} onClose={() => { if (!busy) { setReview(null); setError('') } }} title="مراجعة نشر شريط الأخبار" size="lg">
         {review && <Stack>
           {review.conflict && (
             <>

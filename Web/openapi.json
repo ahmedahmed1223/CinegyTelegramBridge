@@ -13471,6 +13471,11 @@
           },
           "feed": {
             "$ref": "#/components/schemas/FeedStatus"
+          },
+          "urgentNoticeId": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         },
         "nullable": true
@@ -20200,6 +20205,24 @@
           },
           "canClear": {
             "type": "boolean"
+          },
+          "sharedDraftKey": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "rowKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
+          },
+          "canManage": {
+            "type": "boolean",
+            "default": null,
+            "nullable": true
           }
         },
         "nullable": true
@@ -20883,6 +20906,16 @@
           "rehearsalStarted": {
             "type": "boolean",
             "default": false
+          },
+          "sceneConfirmed": {
+            "type": "boolean",
+            "default": null,
+            "nullable": true
+          },
+          "noticeId": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         }
       },
@@ -20916,6 +20949,11 @@
           "step": {
             "type": "integer",
             "format": "int32",
+            "default": null,
+            "nullable": true
+          },
+          "mode": {
+            "type": "string",
             "default": null,
             "nullable": true
           }

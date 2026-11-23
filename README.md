@@ -15,6 +15,14 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.0
+
+Web editors can contribute to a shared ticker draft at the same time. Changes to different headlines merge, and a stale edit to the same headline stays in the editor for review. The draft owner manages handover and publishing. Once the owner schedules publication, contributors can read the draft until the schedule is removed.
+
+Telegram and the web share the urgent headline table. The web offers separate controls for playing every enabled row or just the selected rows, with a review of the sequence mode before starting. Both interfaces can receive notices for confirmed individual urgent playout.
+
+The web-only installer updates the server and static assets with Manager left running. It checks the required bridge version and keeps a verified rollback copy. See [the web upgrade procedure](RELEASE.md#update-the-web-without-restarting-manager).
+
 ## Version 9.0.0
 
 The Arabic web newsroom combines template-driven editorial tables, right-to-left entry, search and sorting, and live monitoring with a floating player or browser picture-in-picture. Operators can review direct or timed urgent playout, manage the ticker draft and publication order, upload bulletin images and correct the confirmed live programme row.

@@ -182,15 +182,18 @@ function Send-TemplateAirNotice {
         # The take-down was not the bridge's: the room was told it went up,
         # and "who took it down" is the question this answers before it is
         # asked in the chat.
-        [switch]$EndedOutside
+        [switch]$EndedOutside,
+        [switch]$ConfirmedManualUrgent,
+        [switch]$IncludeActor
     )
     # Before the audience and duplicate gates: those decide who hears about
     # it, this keeps every open urgent board truthful whoever hears.
     if ($Key -ceq $script:MojazUrgentKey) { Update-UrgentHomeScreens -Action $Action -ActorName $ActorName -EndedOutside:$EndedOutside | Out-Null }
     $scope = Get-TemplateNotifyScope -Key $Key
-    $audience = @(Get-TemplateNoticeAudience -Scope $scope -ActorChatId $ActorChatId)
+    $excludedChat = if ($IncludeActor) { 0L } else { $ActorChatId }
+    $audience = @(Get-TemplateNoticeAudience -Scope $scope -ActorChatId $excludedChat)
     if ($audience.Count -eq 0) { return 0 }
-    if (-not (Test-AirNoticeDue -Key $Key -Layer $Layer -Action $Action)) { return 0 }
+    if (-not $ConfirmedManualUrgent -and -not (Test-AirNoticeDue -Key $Key -Layer $Layer -Action $Action)) { return 0 }
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $layerPart = if ($Layer -gt 0) { (T 'air.layer' $Layer) } else { '' }
@@ -224,7 +227,14 @@ function Send-TemplateAirNotice {
         # built: the audience is who the newsroom decided should hear, and
         # this is one person's own answer to it.
         if (Test-AirNoticeMuted -UserId $chatId) { continue }
-        if (Send-AirNoticeOrHold -ChatId $chatId -Text $text -Markup $markup) { $delivered++ }
+        $recipientMarkup = $markup
+        if ($ConfirmedManualUrgent) {
+            if ((Test-WebOnlyUserId -UserId $chatId) -or -not (Test-Authorized -ChatId $chatId -UserId $chatId) -or
+                -not (Test-TemplateAccess -Key $Key -Layer $Layer -ChatId $chatId -UserId $chatId).Allowed) { continue }
+            $control = Get-UrgentManualControl -ChatId $chatId -UserId $chatId
+            if ($control) { $recipientMarkup = Get-AirNoticeMuteKeyboard -UrgentHideToken $control.Token }
+        }
+        if (Send-AirNoticeOrHold -ChatId $chatId -Text $text -Markup $recipientMarkup) { $delivered++ }
     }
     # Whoever is preparing this same graphic hears about it differently, and
     # regardless of their mute: this is not news about the channel, it is news
@@ -356,11 +366,15 @@ function Test-AirNoticeDue {
 }
 
 function Get-AirNoticeMuteKeyboard {
-    <# One button, on every notice: the person being interrupted can stop
+    <# Every notice includes the mute button: the person being interrupted can stop
        being interrupted without hunting for a settings screen. A bot with no
        way out is a bot muted at the operating system level, and then the
        alert that mattered is gone too. #>
-    return @{ inline_keyboard = @(, @((New-Button (T 'air.muteMyAlerts') 'notice:mute'))) }
+    param([string]$UrgentHideToken)
+    $rows = @()
+    if ($UrgentHideToken) { $rows += , @((New-Button (T 'urgent.hideShown') "urgmanual:hide:$UrgentHideToken" -Style danger)) }
+    $rows += , @((New-Button (T 'air.muteMyAlerts') 'notice:mute'))
+    return @{ inline_keyboard = $rows }
 }
 
 function Test-MaintenanceWindowActive {
@@ -572,6 +586,7 @@ function Get-VerifiedCinegyShowIdentity {
         [AllowEmptyString()][string]$ExpectedActiveId = '',
         [switch]$AllowAnonymousActiveId,
         [switch]$RequireEventIdentity,
+        [switch]$CaptureUrgentEvent,
         [string]$Device = ''
     )
     $deviceArguments = @{}
@@ -579,7 +594,7 @@ function Get-VerifiedCinegyShowIdentity {
     $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
     $status = Get-TitlerLayerStatus @deviceArguments -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -Layer $Layer `
-        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1)
+        -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -RequireConsistentIdentity:($CaptureUrgentEvent -and $RequireEventIdentity)
     if (-not [bool](Get-JsonProp $status 'Success') -or -not [bool](Get-JsonProp $status 'IsOnAir')) {
         return (& $failed (T 'air.noConfirmAfterShow'))
     }
@@ -603,9 +618,22 @@ function Get-VerifiedCinegyShowIdentity {
     $expectedPreviousId = ([string]$ExpectedPreviousActiveId).Trim().Trim('{', '}')
     $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
     $startedAt = Get-CinegyStatusStartedAtUtc -Status $status
+    $consistentItem = $false
+    if ($CaptureUrgentEvent) {
+        try {
+            $item = ([xml][string](Get-JsonProp $status 'ActiveXml')).SelectSingleNode('/Item')
+            $statusEvent = [guid]::Empty
+            $detailEvent = [guid]::Empty
+            $consistentItem = $item -and [guid]::TryParse($activeId, [ref]$statusEvent) -and
+                [guid]::TryParse($item.GetAttribute('Id'), [ref]$detailEvent) -and $detailEvent -ne [guid]::Empty -and
+                $detailEvent -eq $statusEvent -and $item.GetAttribute('IsEmpty') -notmatch '^(y|yes|true|1)$'
+        }
+        catch { $consistentItem = $false }
+    }
     if ($RequireEventIdentity) {
-        if ($expectedCurrentId -and $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) {
-            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id'; StartedAt=$startedAt }
+        if ($expectedCurrentId -and $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase) -and
+            (-not $CaptureUrgentEvent -or $consistentItem)) {
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id'; StartedAt=$startedAt; ConsistentItem=$consistentItem }
         }
         return (& $failed (T 'air.noConfirmAfterShow'))
     }
@@ -624,7 +652,7 @@ function Get-VerifiedCinegyShowIdentity {
               $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) -or
              (-not [string]::IsNullOrWhiteSpace($expectedPreviousId) -and
               -not $normalizedId.Equals($expectedPreviousId, [StringComparison]::OrdinalIgnoreCase)))) {
-            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation'; StartedAt=$startedAt }
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation'; StartedAt=$startedAt; ConsistentItem=$consistentItem }
         }
         return (& $failed (T 'air.noMatchableName'))
     }
@@ -639,7 +667,7 @@ function Get-VerifiedCinegyShowIdentity {
     if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
         return (& $failed (T 'air.sceneNameMismatch' $Key))
     }
-    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name'; StartedAt=$startedAt }
+    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name'; StartedAt=$startedAt; ConsistentItem=$consistentItem }
 }
 
 function Get-TemplateFieldTypeOverrides {
@@ -704,6 +732,7 @@ function Invoke-ShowTemplateResult {
         [int]$ExpectedLayer = 0,
         [string]$ExpectedTemplatePath = '',
         [switch]$RequireEventIdentity,
+        [switch]$ManualUrgent,
         [hashtable]$VariableTypes = @{},
         [switch]$SkipPostboxWrites,
         [switch]$ReviewedRollback,
@@ -949,7 +978,8 @@ function Invoke-ShowTemplateResult {
         # its engine id changed from the pre-SHOW item.
         $identity = Get-VerifiedCinegyShowIdentity @rollbackDeviceArguments -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
             -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
-            -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity -AllowAnonymousActiveId
+            -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity `
+            -CaptureUrgentEvent:($ManualUrgent -or $script:UrgentBoardStarting) -AllowAnonymousActiveId
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
         Set-JsonProp $result 'EngineStartedAtUtc' (Get-JsonProp $identity 'StartedAt')
         # Callers that later remove a specific job need exact event proof.
@@ -957,6 +987,9 @@ function Invoke-ShowTemplateResult {
         $eventIdentityConfirmed = $activeIdConfirmed -and $eventId -and
             $eventId.Trim().Trim('{', '}') -eq $activeId.Trim().Trim('{', '}')
         Set-JsonProp $result 'EventIdentityConfirmed' $eventIdentityConfirmed
+        if ($ManualUrgent -or $script:UrgentBoardStarting) {
+            Set-JsonProp $result 'UrgentEventReadConfirmed' ((Get-JsonProp $identity 'ConsistentItem') -eq $true)
+        }
         $engineStartedAt = Get-JsonProp $identity 'StartedAt'
         $engineStartTicks = if ($engineStartedAt -is [datetime]) { $engineStartedAt.ToUniversalTime().Ticks } else { 0L }
         if ($previousSnapshot) {
@@ -1028,9 +1061,11 @@ function Invoke-ShowTemplateResult {
         Add-AuditEntry (T 'air.showAudit' $Key $($template.Layer) $actor)
         # The room hears about the templates it asked to hear about, with what
         # they say and how long they stay.
-        Send-TemplateAirNotice -Key $Key -Layer ([int]$template.Layer) -ActorChatId $ChatId `
-            -ActorName $actor -Copy (Format-OnAirScreenCopy -Key $Key -Variables $publicValues) `
-            -AutoHideSeconds $AutoHideSeconds | Out-Null
+        if (-not $ManualUrgent) {
+            Send-TemplateAirNotice -Key $Key -Layer ([int]$template.Layer) -ActorChatId $ChatId `
+                -ActorName $actor -Copy (Format-OnAirScreenCopy -Key $Key -Variables $publicValues) `
+                -AutoHideSeconds $AutoHideSeconds | Out-Null
+        }
 
         # Belt and braces: also write the values through the postbox, which is
         # the channel this scene actually honours.
@@ -1081,7 +1116,9 @@ function Invoke-ShowTemplateResult {
         # A one-tap hide right where the operator is looking: previously taking
         # something back off air meant going 🙈 -> pick layer, which is several
         # taps too many when a wrong graphic is live.
-        Send-TelegramMessage -ChatId $ChatId -Text (T 'air.shown' $Key $($template.Layer) $suffix) -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
+        if (-not $ManualUrgent) {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'air.shown' $Key $($template.Layer) $suffix) -ReplyMarkup (Get-AfterShowKeyboard -Layer ([int]$template.Layer) -ChatId $ChatId -UserId $UserId)
+        }
         Write-AirOperationResult -OperationId $operation.Id -Action SHOW -Result success -DurationMs $operation.Stopwatch.ElapsedMilliseconds -UserId $UserId -ChatId $ChatId -Layer ([int]$template.Layer) -Target $Key -Values $auditedValues
     }
     else {

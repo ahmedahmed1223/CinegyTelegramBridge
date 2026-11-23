@@ -30,6 +30,7 @@ function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage'])
 function emptySnapshot(freshUntil: number): BridgeStatus {
   return {
     version: '8.141.0', startedAt: 0, publishedAt: Date.now(), layers: [], feed: null,
+    urgentNoticeId: null,
     cinegy: { address: 'local', channel: 0, health: 'healthy', freshUntil, lastReadAt: Date.now() },
     telegram: { state: 'connected', failures: 0 },
   }

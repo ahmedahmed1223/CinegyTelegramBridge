@@ -110,12 +110,21 @@ Describe 'The breaking-news board and the fixed urgent template' {
         Get-UrgentBoardText -ChatId 100 | Should -Match '⛔'
     }
 
+    It 'blocks unexpected Cinegy writes at the shared HTTP boundary' {
+        # This URI has no network destination even if the shared guard is removed.
+        InModuleScope CinegyAirTitler {
+            { Invoke-WebRequest -Uri 'about:blank' -Method Post } | Should -Throw 'the tests do not talk to Cinegy'
+        }
+    }
+
     It 'leaves the fixed urgent template exactly where it was' {
         # The board is a second consumer of this scene, not a replacement. With
         # the board switched off the old path must still be the same call it
         # always was.
         $config.Settings | Add-Member -NotePropertyName 'EnableUrgentBoard' -NotePropertyValue $false -Force
         Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = ''; Error = '' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
         Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true; EventId = '{x}' } }
         Mock Update-OnAirStateFromCinegy { }
 
@@ -124,18 +133,26 @@ Describe 'The breaking-news board and the fixed urgent template' {
         Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
     }
 
-    It 'primes the postbox before SHOW on the ordinary pipeline too' {
+    It 'clears a tracked scene and primes the postbox before SHOW in the ordinary pipeline' {
         $script:AirOrder = @()
+        $previous = $script:OnAir[7]
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = '{previous}'; At = Get-Date }
+        $config.Settings | Add-Member -NotePropertyName 'ReshowClearsLayer' -NotePropertyValue $true -Force
         $config.Settings | Add-Member -NotePropertyName 'SetValuesAfterShow' -NotePropertyValue $true -Force
         Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $false; ActiveId = ''; Error = '' } }
+        Mock Hide-TitlerTemplate { $script:AirOrder += 'hide'; [pscustomobject]@{ Success = $true; Error = '' } }
         Mock Send-PostboxValues { $script:AirOrder += 'postbox'; [pscustomobject]@{ Success = $true; Xml = ''; Error = '' } }
         Mock Show-TitlerTemplate { $script:AirOrder += 'show'; [pscustomobject]@{ Success = $true; EventId = '{x}' } }
         Mock Update-OnAirStateFromCinegy { }
 
-        Invoke-ShowTemplateResult -Key 'Urgent' -Variables @{ 'Headline.Text' = 'خبر' } -ChatId 100 -UserId 100 | Out-Null
-
-        Should -Invoke Show-TitlerTemplate -Times 1 -Exactly
-        @($script:AirOrder)[0] | Should -Be 'postbox' -Because 'the previous story must be gone from the postbox before the scene loads'
+        try {
+            Invoke-ShowTemplateResult -Key 'Urgent' -Variables @{ 'Headline.Text' = 'خبر' } -ChatId 100 -UserId 100 | Out-Null
+            Should -Invoke Hide-TitlerTemplate -Times 1 -Exactly -ParameterFilter { $Layer -eq 7 }
+            $script:AirOrder | Should -Be @('hide', 'postbox', 'show')
+        }
+        finally {
+            if ($previous) { $script:OnAir[7] = $previous } else { $script:OnAir.Remove(7) }
+        }
     }
 
     It 'pages the board keyboard rather than growing one row per line' {
@@ -225,6 +242,7 @@ Describe 'Running the breaking-news board' {
         Mock Invoke-ShowTemplateResult { [pscustomobject]@{ Success = $true } }
         Mock Invoke-ExitLayer { $true }
         Mock Send-PostboxValues { [pscustomobject]@{ Success = $true; Xml = '' } }
+        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
         Mock Show-TitlerTemplate { [pscustomobject]@{ Success = $true } }
         Mock Exit-TitlerScene { [pscustomobject]@{ Success = $true } }
         Mock Get-MojazSceneTiming { $null }
@@ -321,6 +339,40 @@ Describe 'Running the breaking-news board' {
             $script:UrgentHomeMessage.ContainsKey([long]100) | Should -BeFalse -Because 'a stale id must never aim a later edit at another message'
         }
         finally { $script:UrgentHomeMessage.Clear(); $script:LastTelegramMessageId = 0 }
+    }
+
+    It 'queues a Web edit for open Telegram boards without replacing a pending air notice' {
+        $script:UrgentHomeMessage.Clear()
+        $script:UrgentHomeRefresh.Clear()
+        $script:UrgentHomeMessage[[long]100] = 55
+        $script:UrgentHomeMessage[[long]200] = 66
+        $script:UrgentHomeRefresh[[long]100] = 'إشعار الهواء'
+        Mock Show-UrgentBoardScreen {}
+        try {
+            Update-UrgentHomeScreens -Action edit | Out-Null
+            $script:UrgentHomeRefresh[[long]100] | Should -Be 'إشعار الهواء'
+            $script:UrgentHomeRefresh.ContainsKey([long]200) | Should -BeTrue
+            Should -Invoke Show-UrgentBoardScreen -Times 0 -Exactly
+            Update-UrgentHomeRefresh
+            Update-UrgentHomeRefresh
+            Should -Invoke Show-UrgentBoardScreen -Times 1 -Exactly -ParameterFilter {
+                $ChatId -eq 200 -and $MessageId -eq 66 -and $EditOnly -and -not $Notice
+            }
+        }
+        finally { $script:UrgentHomeMessage.Clear(); $script:UrgentHomeRefresh.Clear() }
+    }
+
+    It 'applies a session mode to inherited and appended rows while keeping row overrides and defaults' {
+        $defaults = Get-UrgentBoardDefaults
+        $script:UrgentBoard.Items[1].Mode = 'exit'
+        $review = (New-UrgentBoardPlan -ChatId 100 -ModeOverride 'auto_hide').Value
+        $review.Steps[0].Mode | Should -Be 'auto_hide'
+        $review.Steps[1].Mode | Should -Be 'exit'
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 -ReviewedPlan $review -ModeOverride 'auto_hide' | Should -BeTrue
+        $newRow = (Add-UrgentItem -Board (New-UrgentBoard) -Text 'عاجل جديد').Value.Items[0]
+        (Add-UrgentRunStep -Item $newRow) | Should -BeGreaterThan 0
+        $script:UrgentBoardRun.Steps[-1].Mode | Should -Be 'auto_hide'
+        (Get-UrgentBoardDefaults).Mode | Should -Be $defaults.Mode
     }
 
     It 'takes a story added mid-run onto the end of the run, and plays it' {
@@ -499,7 +551,7 @@ Describe 'Running the breaking-news board' {
     It 'primes the postbox with the line before its scene loads' {
         $script:AirOrder = @()
         Mock Send-PostboxValues { $script:AirOrder += 'postbox'; [pscustomobject]@{ Success = $true; Xml = ''; Error = '' } }
-        Mock Hide-TitlerTemplate { [pscustomobject]@{ Success = $true; Error = '' } }
+        Mock Hide-TitlerTemplate { $script:AirOrder += 'hide'; [pscustomobject]@{ Success = $true; Error = '' } }
         Mock Show-TitlerTemplate { $script:AirOrder += 'show'; [pscustomobject]@{ Success = $true; Error = ''; EventId = 'e' } }
         Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = '{NEW}'; ActiveDurationSeconds = 86400; ActiveManualEnd = $true; Error = '' } }
         Mock Update-OnAirStateFromCinegy { }
@@ -508,7 +560,7 @@ Describe 'Running the breaking-news board' {
         $script:PostShowQueue.Clear()
         try {
             Show-UrgentBoardScene -Template (Get-UrgentTemplate) -Values @{ Text = 'الخبر الثاني' } | Out-Null
-            $script:AirOrder | Should -Be @('postbox', 'show') -Because 'the scene initialises from what the postbox already holds'
+            $script:AirOrder | Should -Be @('hide', 'postbox', 'show') -Because 'the previous scene must leave before the new line loads'
         }
         finally { $script:PostShowQueue.Clear(); $script:OnAir.Remove(7) }
     }

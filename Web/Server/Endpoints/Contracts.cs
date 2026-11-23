@@ -119,7 +119,7 @@ public sealed record UrgentRowInput(Dictionary<string, string> Values, bool Enab
 public sealed record UrgentItemTiming(int IntervalSeconds, int Repeats, string Mode);
 public sealed record UrgentItemTimingInput(int? IntervalSeconds, int? Repeats, string? Mode);
 public sealed record UrgentWriteRequest(string Action, int Revision, string? Id = null, UrgentRowInput? Row = null, UrgentItemTimingInput? Timing = null);
-public sealed record UrgentPlaybackRequest(string Action, string[]? SelectedIds = null, string? Review = null, string? RunId = null, int? Step = null);
+public sealed record UrgentPlaybackRequest(string Action, string[]? SelectedIds = null, string? Review = null, string? RunId = null, int? Step = null, string? Mode = null);
 public sealed record UrgentRunStatus(string Id, string State, int Step, int StepCount, string Current, string Next);
 public sealed record UrgentPreviewStep(string Text, double StartSeconds, double HoldSeconds);
 public sealed record UrgentRunPreview(string Review, double TotalSeconds, int ItemCount, int StepCount, int Layer, bool ReplacesGraphic, string GraphicName, string[] Notes, UrgentPreviewStep[] Steps);
@@ -129,7 +129,7 @@ public sealed record UrgentManualPreview(string Review, int Layer, Dictionary<st
     bool ReplacesGraphic, bool StopsRun, bool StopsBulletin, string GraphicName, bool Rehearsal = false);
 public sealed record UrgentManualLive(string ItemId, int Layer, string Review);
 public sealed record UrgentManualResponse(UrgentManualPreview? Preview = null, UrgentManualLive? Live = null, int[]? Durations = null,
-    bool AutoHideFailed = false, bool CanRehearse = false, bool RehearsalStarted = false);
+    bool AutoHideFailed = false, bool CanRehearse = false, bool RehearsalStarted = false, bool? SceneConfirmed = null, string? NoticeId = null);
 public sealed record UrgentTimingRequest(string Action, string? Revision = null, string? Field = null, int? Number = null, string? Option = null);
 public sealed record UrgentTimingBounds(int Minimum, int Maximum);
 public sealed record UrgentTimingState(string Revision, int IntervalSeconds, int Repeats, int TotalSeconds, int ExitGapSeconds,
@@ -137,7 +137,8 @@ public sealed record UrgentTimingState(string Revision, int IntervalSeconds, int
 public sealed record TickerDraftRequest(string Action, string? Revision = null, int? Index = null, string? Text = null, string? Review = null,
     long? PublishAtMs = null, int? PausedPage = null, int? Destination = null);
 public sealed record TickerPausedPage(string[] Items, int Page, int PageCount, int Total, int Offset);
-public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused, bool CanClear);
+public sealed record TickerDraft(string Revision, string[] Items, DateTimeOffset? ScheduledAt, bool CanRemove, int MaxItems, TickerPausedPage Paused, bool CanClear,
+    string? SharedDraftKey = null, string[]? RowKeys = null, bool? CanManage = null);
 public sealed record TickerConflict(string Review, string[] Items);
 public sealed record TickerPastePreview(string Review, string[] Items, int Duplicates, int TooLong, int NoRoom, bool AtTop);
 public sealed record TickerTxtPreview(string Review, string[] Items, string[] CurrentItems, int Duplicates, bool Identical, bool CancelsSchedule);

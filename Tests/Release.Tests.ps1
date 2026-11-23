@@ -29,6 +29,7 @@ Describe 'Release package safety' {
         $names | Should -Contain 'docs/VERSION-6.md'
         $names | Should -Contain 'release-manifest.json'
         $names | Should -Contain 'scripts/Test-ServiceLifecycle.ps1'
+        $names | Should -Contain 'scripts/Update-BridgeWeb.ps1'
         foreach ($forbidden in @('config.json', 'secrets.dpapi.json', 'templates.json', 'onair.json', 'audit.jsonl', 'bridge.log', 'schedule.json', 'autohide.json', 'template-reminders.json')) {
             $names | Should -Not -Contain $forbidden
         }
@@ -105,13 +106,111 @@ Describe 'Release package safety' {
     }
 }
 
+Describe 'Web-only update' {
+    BeforeAll {
+        $script:WebUpdater = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/Update-BridgeWeb.ps1'
+    }
+
+    BeforeEach {
+        $sandbox = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $station = Join-Path $sandbox 'station'
+        $web = Join-Path $station 'dist/web'
+        $bundle = Join-Path $sandbox 'bundle'
+        $newWeb = Join-Path $bundle 'dist/web'
+        foreach ($folder in @("$web/wwwroot/assets", "$newWeb/wwwroot/assets", "$station/dist/BridgeManager", "$station/logs/web")) {
+            [IO.Directory]::CreateDirectory($folder) | Out-Null
+        }
+        Set-Content -LiteralPath "$station/TelegramBridge.ps1" -Value "`$script:BridgeVersion = '9.1.0'"
+        Set-Content -LiteralPath "$web/CinegyBridge.Web.exe" -Value 'old executable'
+        Set-Content -LiteralPath "$web/wwwroot/index.html" -Value 'old page'
+        Set-Content -LiteralPath "$web/wwwroot/assets/old.js" -Value 'old javascript'
+        Set-Content -LiteralPath "$web/wwwroot/index.html.br" -Value 'old compressed page'
+        Set-Content -LiteralPath "$web/appsettings.json" -Value 'local web settings'
+        Set-Content -LiteralPath "$station/dist/BridgeManager/BridgeManager.exe" -Value 'original manager'
+        Set-Content -LiteralPath "$station/logs/web/session.json" -Value 'original sessions'
+        Set-Content -LiteralPath "$station/config.json" -Value 'original station settings'
+
+        Set-Content -LiteralPath "$newWeb/CinegyBridge.Web.exe" -Value 'new executable'
+        Set-Content -LiteralPath "$newWeb/wwwroot/index.html" -Value 'new page'
+        Set-Content -LiteralPath "$newWeb/wwwroot/assets/new.js" -Value 'new javascript'
+        Set-Content -LiteralPath "$newWeb/wwwroot/assets/new.js.gz" -Value 'new compressed javascript'
+        Set-Content -LiteralPath "$bundle/config.json" -Value 'archive settings must be ignored'
+        $script:WebUpdateManifest = @{
+            Product = 'CinegyTelegramBridge'; Version = '9.2.0'; MinimumWebBridgeVersion = '9.1.0'
+            Files = @(Get-ChildItem -LiteralPath $newWeb -File -Recurse | ForEach-Object {
+                    @{
+                        Name = [IO.Path]::GetRelativePath($bundle, $_.FullName).Replace('\', '/')
+                        Length = $_.Length; SHA256 = (Get-FileHash -LiteralPath $_.FullName).Hash
+                    }
+                })
+        }
+        $script:WebUpdateZip = Join-Path $sandbox 'release.zip'
+    }
+
+    It 'updates only the web payload and restores it from the retained backup' {
+        $script:WebUpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$bundle/release-manifest.json"
+        Compress-Archive -Path "$bundle/*" -DestinationPath $script:WebUpdateZip
+        $update = & $script:WebUpdater -BridgeRoot $station -ReleaseZip $script:WebUpdateZip -ExpectedSha256 (Get-FileHash -LiteralPath $script:WebUpdateZip).Hash -RunningBridgeVersion 9.1.0
+
+        $update.Version | Should -Be '9.2.0'
+        Get-Content -LiteralPath "$web/CinegyBridge.Web.exe" | Should -Be 'new executable'
+        Get-Content -LiteralPath "$web/wwwroot/assets/new.js" | Should -Be 'new javascript'
+        Get-Content -LiteralPath "$web/wwwroot/assets/new.js.gz" | Should -Be 'new compressed javascript'
+        Test-Path -LiteralPath "$web/wwwroot/assets/old.js" | Should -BeFalse
+        Test-Path -LiteralPath "$web/wwwroot/index.html.br" | Should -BeFalse
+        Get-Content -LiteralPath "$web/appsettings.json" | Should -Be 'local web settings'
+        Get-Content -LiteralPath "$station/dist/BridgeManager/BridgeManager.exe" | Should -Be 'original manager'
+        Get-Content -LiteralPath "$station/logs/web/session.json" | Should -Be 'original sessions'
+        Get-Content -LiteralPath "$station/config.json" | Should -Be 'original station settings'
+
+        # Recover even if execution was interrupted with the executable between versions.
+        Remove-Item -LiteralPath "$web/CinegyBridge.Web.exe"
+        & $script:WebUpdater -BridgeRoot $station -RollbackDirectory $update.BackupDirectory | Out-Null
+        Get-Content -LiteralPath "$web/CinegyBridge.Web.exe" | Should -Be 'old executable'
+        Get-Content -LiteralPath "$web/wwwroot/assets/old.js" | Should -Be 'old javascript'
+        Get-Content -LiteralPath "$web/wwwroot/index.html.br" | Should -Be 'old compressed page'
+        Test-Path -LiteralPath "$web/wwwroot/assets/new.js" | Should -BeFalse
+    }
+
+    It 'rejects a different ZIP checksum and an incompatible running bridge before switching files' {
+        $script:WebUpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$bundle/release-manifest.json"
+        Compress-Archive -Path "$bundle/*" -DestinationPath $script:WebUpdateZip
+        { & $script:WebUpdater -BridgeRoot $station -ReleaseZip $script:WebUpdateZip -ExpectedSha256 ('0' * 64) -RunningBridgeVersion 9.1.0 } |
+            Should -Throw '*ZIP SHA-256 does not match*'
+        { & $script:WebUpdater -BridgeRoot $station -ReleaseZip $script:WebUpdateZip -ExpectedSha256 (Get-FileHash -LiteralPath $script:WebUpdateZip).Hash -RunningBridgeVersion 9.0.0 } |
+            Should -Throw '*requires bridge 9.1.0*'
+        Get-Content -LiteralPath "$web/CinegyBridge.Web.exe" | Should -Be 'old executable'
+    }
+
+    It 'rejects a changed asset after checking the ZIP checksum' {
+        $script:WebUpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$bundle/release-manifest.json"
+        Set-Content -LiteralPath "$newWeb/wwwroot/assets/new.js" -Value 'bad javascript'
+        Compress-Archive -Path "$bundle/*" -DestinationPath $script:WebUpdateZip
+        { & $script:WebUpdater -BridgeRoot $station -ReleaseZip $script:WebUpdateZip -ExpectedSha256 (Get-FileHash -LiteralPath $script:WebUpdateZip).Hash -RunningBridgeVersion 9.1.0 } |
+            Should -Throw '*payload hash or size mismatch*'
+        Get-Content -LiteralPath "$web/wwwroot/assets/old.js" | Should -Be 'old javascript'
+    }
+
+    It 'never stages a manifest path that escapes the web payload' {
+        $script:WebUpdateManifest.Files += @{
+            Name = 'dist/web/wwwroot/assets/../../../config.json'; Length = 32; SHA256 = '0' * 64
+        }
+        $script:WebUpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$bundle/release-manifest.json"
+        Compress-Archive -Path "$bundle/*" -DestinationPath $script:WebUpdateZip
+        { & $script:WebUpdater -BridgeRoot $station -ReleaseZip $script:WebUpdateZip -ExpectedSha256 (Get-FileHash -LiteralPath $script:WebUpdateZip).Hash -RunningBridgeVersion 9.1.0 } |
+            Should -Throw '*Invalid or duplicate web payload entry*'
+        Get-Content -LiteralPath "$station/config.json" | Should -Be 'original station settings'
+    }
+}
+
 Describe 'Packaged web and manager' {
     It 'puts the verified web and manager builds where the manager can find them without copying runtime data' {
         $root = Split-Path -Parent $PSScriptRoot
         $web = Join-Path $TestDrive 'fixture-web'
         $manager = Join-Path $TestDrive 'fixture-manager'
         New-Item -ItemType Directory -Path (Join-Path $web 'wwwroot/assets'), $manager | Out-Null
-        foreach ($fixtureFile in @('CinegyBridge.Web.exe', 'wwwroot/index.html', 'wwwroot/assets/index.js', 'config.json', 'wwwroot/assets/session.json')) {
+        foreach ($fixtureFile in @('CinegyBridge.Web.exe', 'wwwroot/index.html', 'wwwroot/index.html.br',
+                'wwwroot/assets/index.js', 'wwwroot/assets/index.js.gz', 'config.json', 'wwwroot/assets/session.json', 'wwwroot/assets/session.json.gz')) {
             Set-Content -LiteralPath (Join-Path $web $fixtureFile) -Value 'test fixture'
         }
         Set-Content -LiteralPath (Join-Path $manager 'BridgeManager.exe') -Value 'test fixture'
@@ -119,10 +218,16 @@ Describe 'Packaged web and manager' {
         $build = & (Join-Path $root 'Build-Release.ps1') -SkipChecks -OutputDirectory (Join-Path $TestDrive 'bundle') `
             -WebBundleDirectory $web -ManagerBundleDirectory $manager
         $archive = [IO.Compression.ZipFile]::OpenRead($build.ZipPath)
-        try { $names = @($archive.Entries.FullName) }
+        try {
+            $names = @($archive.Entries.FullName)
+            $reader = [IO.StreamReader]::new($archive.GetEntry('release-manifest.json').Open())
+            try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json }
+            finally { $reader.Dispose() }
+        }
         finally { $archive.Dispose() }
         foreach ($requiredPath in @('dist/web/CinegyBridge.Web.exe', 'dist/web/wwwroot/index.html', 'dist/web/wwwroot/assets/index.js',
-                'dist/BridgeManager/BridgeManager.exe')) { $names | Should -Contain $requiredPath }
-        ($names -join "`n") | Should -Not -Match '(?m)(^|/)(config\.json|session\.json|BridgeManager-selftest\.log)$'
+                'dist/web/wwwroot/index.html.br', 'dist/web/wwwroot/assets/index.js.gz', 'dist/BridgeManager/BridgeManager.exe')) { $names | Should -Contain $requiredPath }
+        ($names -join "`n") | Should -Not -Match '(?m)(^|/)(config\.json|session\.json(?:\.gz)?|BridgeManager-selftest\.log)$'
+        $manifest.MinimumWebBridgeVersion | Should -Be $build.Version
     }
 }

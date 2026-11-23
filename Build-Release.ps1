@@ -6,6 +6,7 @@ param(
     [string]$CodeSigningThumbprint = '',
     [string]$WebBundleDirectory = '',
     [string]$ManagerBundleDirectory = '',
+    [semver]$MinimumWebBridgeVersion,
     [switch]$SkipChecks
 )
 
@@ -18,6 +19,10 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
     throw "Invalid release version '$Version'."
+}
+if ($WebBundleDirectory) {
+    $MinimumWebBridgeVersion ??= [semver]$Version
+    if ($MinimumWebBridgeVersion -gt [semver]$Version) { throw 'The minimum bridge version for the web cannot exceed the release version.' }
 }
 
 if (-not $SkipChecks) {
@@ -46,7 +51,7 @@ $allowList = @(
     'TelegramBridge.ps1', 'Modules\CinegyAirTitler.psm1', 'Modules\BridgeSecurity.psm1', 'Modules\BridgeSettings.psm1', 'Modules\BridgeStorage.psm1', 'Modules\BridgeTelegram.psm1', 'Modules\BridgeAuthorization.psm1', 'Modules\BridgeFlowState.psm1', 'Modules\BridgeCinegyState.psm1', 'Modules\BridgeSchedulePolicy.psm1', 'Modules\BridgeMedia.psm1', 'Modules\BridgeRelayPolicy.psm1', 'Modules\BridgeRuntimeState.psm1', 'Modules\BridgeNewsTicker.psm1', 'Modules\BridgeMojaz.psm1', 'Modules\BridgeUrgent.psm1', 'Modules\BridgeOperationPolicy.psm1', 'Modules\BridgeOperationLifecycle.psm1', 'Modules\BridgeSettingsSchema.psm1', 'Modules\BridgeUiPaging.psm1', 'Modules\BridgeLiveScenes.psm1', 'Modules\BridgeContentBoards.psm1', 'Modules\BridgeAirText.psm1', 'Modules\BridgeLanguage.psm1', 'Modules\BridgeStreamOutages.psm1', 'Modules\BridgeText\Common.ps1', 'Modules\BridgeText\Settings.ps1', 'Modules\BridgeText\Screens.ps1', 'Modules\BridgeText\Content.ps1', 'Modules\BridgeText\Alerts.ps1', 'Modules\BridgeText\Replies.ps1', 'Modules\BridgeText\Reports.ps1', 'Modules\BridgeText\Flow.ps1', 'Modules\BridgeText\Admin.ps1', 'Modules\BridgeText\Air.ps1', 'Modules\BridgeText\Keyboards.ps1', 'Modules\BridgeText\AdminTools.ps1', 'Modules\BridgeText\Screens2.ps1', 'Modules\BridgeText\Interp1.ps1', 'Modules\BridgeText\Interp2.ps1', 'Modules\BridgeText\Interp3.ps1', 'Modules\BridgeText\Interp4.ps1', 'Modules\BridgeText\Interp5.ps1', 'Modules\BridgeText\Interp6.ps1', 'Modules\BridgeText\Interp7.ps1', 'Modules\BridgeText\Interp8.ps1', 'Modules\BridgeText\Interp9.ps1', 'Modules\BridgeText\Core.ps1', 'Modules\BridgeText\Help.ps1', 'Modules\BridgeText\WhatsNew.ps1', 'Modules\BridgeText\Feed.ps1', 'Modules\BridgeText\Web.ps1',
     'scripts\Install-BridgeTask.ps1', 'scripts\Uninstall-BridgeTask.ps1',
     'scripts\Install-BridgeService-NSSM.ps1', 'scripts\Uninstall-BridgeService-NSSM.ps1',
-    'Run-Checks.ps1', 'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'Modules\BridgeInstall.psm1',
+    'Run-Checks.ps1', 'Build-Release.ps1', 'scripts\Protect-BridgeSecrets.ps1', 'scripts\Test-BridgeReadiness.ps1', 'scripts\Test-ServiceLifecycle.ps1', 'scripts\Update-BridgeWeb.ps1', 'Modules\BridgeInstall.psm1',
     'config.example.json', 'templates.example.json',
     'README.md', 'CHANGELOG.md', 'DEVELOPMENT-PLAN.md', 'RELEASE.md', 'docs\VERSION-6.md'
 )
@@ -60,13 +65,17 @@ if ($WebBundleDirectory) {
     foreach ($expected in @('CinegyBridge.Web.exe', 'wwwroot/index.html')) {
         $distributables["dist/web/$expected"] = Join-Path $WebBundleDirectory $expected
     }
-    $favicon = Join-Path $WebBundleDirectory 'wwwroot/favicon.svg'
-    if (Test-Path -LiteralPath $favicon -PathType Leaf) { $distributables['dist/web/wwwroot/favicon.svg'] = $favicon }
+    foreach ($optional in 'favicon.svg', 'favicon.svg.br', 'favicon.svg.gz', 'index.html.br', 'index.html.gz') {
+        $static = Join-Path $WebBundleDirectory "wwwroot/$optional"
+        if (Test-Path -LiteralPath $static -PathType Leaf) { $distributables["dist/web/wwwroot/$optional"] = $static }
+    }
     # Copy the built client files explicitly. Publish folders may also contain
     # logs, appsettings overrides, or state from a previous run.
     $assetExtensions = @('.css', '.js', '.mjs', '.woff', '.woff2', '.svg', '.webp', '.png', '.jpeg', '.jpg', '.ico', '.wasm')
-    $assets = @(Get-ChildItem -LiteralPath (Join-Path $WebBundleDirectory 'wwwroot/assets') -File |
-            Where-Object { $_.Extension -in $assetExtensions -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) })
+    $assets = @(Get-ChildItem -LiteralPath (Join-Path $WebBundleDirectory 'wwwroot/assets') -File | Where-Object {
+            $extension = if ($_.Extension -in '.br', '.gz') { [IO.Path]::GetExtension($_.BaseName) } else { $_.Extension }
+            $extension -in $assetExtensions -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        })
     if (-not ($assets.Extension -contains '.js')) { throw 'The supplied web build has no client JavaScript assets.' }
     foreach ($asset in $assets) { $distributables["dist/web/wwwroot/assets/$($asset.Name)"] = $asset.FullName }
 }
@@ -115,6 +124,7 @@ $manifest = [ordered]@{
     BuiltAtUtc = [DateTime]::UtcNow.ToString('o'); AuthenticodeSigned = $signed
     Files = $manifestFiles
 }
+if ($WebBundleDirectory) { $manifest.MinimumWebBridgeVersion = [string]$MinimumWebBridgeVersion }
 $manifestPath = Join-Path $releaseRoot 'release-manifest.json'
 [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
 

@@ -2788,9 +2788,10 @@ Describe 'Web channel: the pipe' {
         }
     }
 
-    It 'reviews a single urgent before showing it and hides only the same scene for its owner' {
+    It 'reviews a single urgent and gives authorized operators distinct controls for the confirmed scene' {
         $oldBoard = $script:UrgentBoard
         $oldManual = $script:UrgentManualLive
+        $oldNotice = $script:UrgentWebNotice
         $oldReviews = $script:WebUrgentManualReviews
         $oldRun = $script:UrgentBoardRun
         $oldBulletin = $script:MojazPlayback
@@ -2799,6 +2800,7 @@ Describe 'Web channel: the pipe' {
         $script:UrgentBoardRun = $null
         $script:MojazPlayback = $null
         $script:UrgentManualLive = @{}
+        $script:UrgentWebNotice = $null
         $script:WebUrgentManualReviews = @{}
         $script:webSingleScene = @{ Success = $true; IsOnAir = $false }
         $script:webSingleHideClears = $false
@@ -2811,13 +2813,20 @@ Describe 'Web channel: the pipe' {
         Mock Test-TemplateShowPolicy { @{ Allowed = $true } }
         Mock Get-EffectiveAutoHideSeconds { [math]::Min(20, $RequestedSeconds) }
         Mock Save-UrgentManualState { $true }
+        Mock Send-TemplateAirNotice { 0 }
+        Mock Get-TemplateNotifyScope { 'all' }
+        Mock Test-AirNoticeMuted { $false }
         Mock Invoke-ShowTemplateResult {
-            $script:OnAir[5] = @{ Key = 'Urgent'; ActiveId = 'single-scene'; At = (Get-Date) }
-            $script:webSingleScene = @{ Success = $true; IsOnAir = $true; ActiveId = 'single-scene' }
-            @{ Success = $true }
+            $fixtureEvent = 'f691112c-e6a9-4397-9d00-703c977022f3'
+            $script:OnAir[5] = @{ Key = 'Urgent'; ActiveId = $fixtureEvent; At = (Get-Date) }
+            $script:webSingleScene = @{ Success = $true; IsOnAir = $true; ActiveId = $fixtureEvent }
+            @{ Success = $true; EventIdentityConfirmed = $true; UrgentEventReadConfirmed = $true; EventId = $fixtureEvent }
         }
         Mock Invoke-HideLayer {
-            if ($script:webSingleHideClears) { $script:webSingleScene = @{ Success = $true; IsOnAir = $false } }
+            if ($script:webSingleHideClears) {
+                $script:webSingleScene = @{ Success = $true; IsOnAir = $false }
+                $script:OnAir.Remove(5)
+            }
             $true
         }
         $call = {
@@ -2853,28 +2862,37 @@ Describe 'Web channel: the pipe' {
             $command.action = 'show'
             $result = (& $call $command).data
             $result.autoHideFailed | Should -BeTrue
+            $result.sceneConfirmed | Should -BeTrue
             $live = $result.live
             $live.itemId | Should -Be $command.itemId
             Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
-                $AutoHideSeconds -eq 30 -and $ExpectedLayerStamp -eq 'empty' -and $Variables['headline'] -eq 'خبر فردي'
+                $RequireEventIdentity -and $ManualUrgent -and $AutoHideSeconds -eq 30 -and
+                    $ExpectedLayerStamp -eq 'empty' -and $Variables['headline'] -eq 'خبر فردي'
             }
+            Should -Invoke Send-TemplateAirNotice -Times 1 -Exactly -ParameterFilter { $ConfirmedManualUrgent -and $IncludeActor -and $AutoHideSeconds -eq 0 }
             (& $call @{ actor = 4322; action = 'hide'; review = $live.review }).error | Should -Be 'urgent_stale'
-            $hide = @{ actor = 4321; action = 'hide'; review = $live.review }
+            $peerStatus = (& $call @{ actor = 4322; action = 'status' }).data
+            $peerStatus.noticeId | Should -BeExactly (Get-UrgentWebNoticeId)
+            $peerStatus.live.review | Should -Not -Be $live.review
+            $hide = @{ actor = 4322; action = 'hide'; review = $peerStatus.live.review }
             $script:webSingleScene.ActiveId = 'replacement'
             (& $call $hide).error | Should -Be 'urgent_stale'
             Should -Invoke Invoke-HideLayer -Times 0 -Exactly
-            $script:webSingleScene.ActiveId = 'single-scene'
+            $script:webSingleScene.ActiveId = 'f691112c-e6a9-4397-9d00-703c977022f3'
             (& $call $hide).error | Should -Be 'urgent_manual_hide_unconfirmed'
             $script:UrgentManualLive.Count | Should -Be 1
             $script:webSingleHideClears = $true
             (& $call $hide).ok | Should -BeTrue
-            Should -Invoke Invoke-HideLayer -Times 2 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:single-scene' }
+            Should -Invoke Invoke-HideLayer -Times 2 -Exactly -ParameterFilter {
+                $RequireConsistentIdentity -and $ExpectedLayerStamp -eq 'active:f691112c-e6a9-4397-9d00-703c977022f3' -and $UserId -eq 4322
+            }
             $script:UrgentManualLive.Count | Should -Be 0
             (& $call $command).error | Should -Be 'urgent_stale'
         }
         finally {
             $script:UrgentBoard = $oldBoard
             $script:UrgentManualLive = $oldManual
+            $script:UrgentWebNotice = $oldNotice
             $script:WebUrgentManualReviews = $oldReviews
             $script:UrgentBoardRun = $oldRun
             $script:MojazPlayback = $oldBulletin
@@ -2913,14 +2931,21 @@ Describe 'Web channel: the pipe' {
             $preview.data.preview.replacesGraphic | Should -BeTrue
             $preview.data.preview.graphicName | Should -Be 'النشرة'
             Should -Invoke Invoke-ShowTemplateResult -Times 0 -Exactly
+            $invalidModeLine = '{"op":"urgent.playback","args":{"actor":4321,"action":"preview","mode":"unknown"}}'
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $invalidModeLine) | ConvertFrom-Json).error | Should -Be 'urgent_invalid'
 
             $start = @{ op = 'urgent.playback'; args = @{ actor = 4321; action = 'start'; review = $preview.data.preview.review } }
             $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'خبر آخر').Value
             $stale = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json
             $stale.error | Should -Be 'urgent_stale'
 
-            $preview = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $previewLine) | ConvertFrom-Json
+            $overrideItem = $script:UrgentBoard.Items[1]
+            $overrideItem.Mode = 'exit'
+            $sessionModeLine = '{"op":"urgent.playback","args":{"actor":4321,"action":"preview","mode":"auto_hide"}}'
+            $preview = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $sessionModeLine) | ConvertFrom-Json
             $start.args.review = $preview.data.preview.review
+            ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
+            $start.args.mode = 'auto_hide'
             $playbackScene.ActiveId = 'external-replacement'
             ((Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json).error | Should -Be 'urgent_stale'
             $playbackScene.ActiveId = 'old-graphic'
@@ -2930,6 +2955,11 @@ Describe 'Web channel: the pipe' {
             $start.args.actor = 4321
             $started = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json
             $started.data.run.state | Should -Be 'playing'
+            $script:UrgentBoardRun.Steps[0].Mode | Should -Be 'auto_hide'
+            $script:UrgentBoardRun.Steps[1].Mode | Should -Be 'exit'
+            $newRow = (Add-UrgentItem -Board (New-UrgentBoard) -Text 'خبر جديد أثناء الدورة').Value.Items[0]
+            (Add-UrgentRunStep -Item $newRow) | Should -BeGreaterThan 0
+            $script:UrgentBoardRun.Steps[-1].Mode | Should -Be 'auto_hide'
             Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:old-graphic' }
             $script:OnAir[5] = @{ Key = $script:MojazUrgentKey; ActiveId = 'started-urgent' }
             $playbackScene.ActiveId = 'started-urgent'
@@ -3177,6 +3207,67 @@ Describe 'Web channel: the pipe' {
             $script:NewsLockRequest = $oldRequest
             $script:newsLockRequestFile = $oldRequestPath
             $script:NewsLockGrant = $oldGrant
+        }
+    }
+
+    It 'merges different headline edits and rejects stale, unauthorized, or post-handover shared edits' {
+        $oldDraft = $script:NewsTickerDraft
+        $oldPath = $script:newsDraftFile
+        $oldGrant = $script:NewsLockGrant
+        $oldRequest = $script:NewsLockRequest
+        $script:newsDraftFile = Join-Path $TestDrive 'collaborative-ticker.json'
+        $script:NewsLockGrant = $null
+        $script:NewsLockRequest = $null
+        $script:NewsTickerDraft = @{ Id = 'collaborative'; OwnerUserId = 4321; OwnerChatId = 4321; Items = @('الخبر الأول', 'الخبر الثاني') }
+        Mock Test-Authorized { $UserId -in 4321, 4322 }
+        Mock Test-Admin { $false }
+        Mock Get-Setting { Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name }
+        Mock Get-Setting { $true } -ParameterFilter { $Name -in 'EnableNewsTickerManagement', 'NewNewsItemAtTop' }
+        Mock Get-Setting { '|' } -ParameterFilter { $Name -eq 'NewsItemSeparator' }
+        Mock Get-SettingInt { Get-BridgeSettingInt -Config $config -Defaults $script:DefaultSettings -Name $Name -Minimum $Minimum }
+        $tickerCall = {
+            param($arguments)
+            $line = @{ op = 'ticker.edit'; args = $arguments } | ConvertTo-Json -Compress
+            Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
+        }
+        try {
+            (& $tickerCall @{ actor = 4322; action = 'status' }).data.state | Should -Be 'locked'
+            $shared = & $tickerCall @{ actor = 4321; action = 'share'; revision = Get-NewsTickerDraftRevision -Draft $script:NewsTickerDraft }
+            $shared.ok | Should -BeTrue -Because ($shared | ConvertTo-Json -Compress -Depth 6)
+            $fromOwner = $shared.data.draft
+            $fromPeer = (& $tickerCall @{ actor = 4322; action = 'status' }).data.draft
+            $fromOwner.canManage | Should -BeTrue
+            $fromPeer.canManage | Should -BeFalse
+            $fromPeer.items | Should -Be @('الخبر الأول', 'الخبر الثاني')
+            (& $tickerCall @{ actor = 4400; action = 'status' }).error | Should -Be 'forbidden'
+            $peerEdit = @{ actor = 4322; action = 'update'; review = $fromPeer.rowKeys[1]; revision = $fromPeer.revision; index = 1; text = 'تعديل المحرر الثاني' }
+            (& $tickerCall @{ actor = 4321; action = 'add'; review = $fromOwner.sharedDraftKey; revision = $fromOwner.revision; text = 'خبر مضاف' }).ok | Should -BeTrue
+            (Update-NewsTickerDraftItem -UserId 4321 -Index 1 -Text 'تعديل من البوت') | Should -BeTrue
+            $updated = & $tickerCall $peerEdit
+            $updated.ok | Should -BeTrue -Because ($updated | ConvertTo-Json -Compress -Depth 6)
+            $updated.data.draft.items | Should -Be @('خبر مضاف', 'تعديل من البوت', 'تعديل المحرر الثاني')
+            (& $tickerCall $peerEdit).error | Should -Be 'ticker_stale'
+            (& $tickerCall @{ actor = 4322; action = 'discard'; revision = $updated.data.draft.revision }).error | Should -Be 'ticker_locked'
+            $script:NewsTickerDraft = $null
+            Import-NewsTickerDraft
+            $restored = (& $tickerCall @{ actor = 4322; action = 'status' }).data.draft
+            $restored.rowKeys | Should -Be $updated.data.draft.rowKeys
+            $scheduled = & $tickerCall @{
+                actor = 4321; action = 'schedule'; revision = $restored.revision
+                publishAtMs = [datetimeoffset]::UtcNow.AddHours(1).ToUnixTimeMilliseconds()
+            }
+            $scheduled.ok | Should -BeTrue -Because ($scheduled | ConvertTo-Json -Compress -Depth 6)
+            (& $tickerCall @{ actor = 4322; action = 'add'; review = $fromPeer.sharedDraftKey; text = 'خبر بعد الجدولة' }).error | Should -Be 'ticker_scheduled_readonly'
+            (& $tickerCall @{ actor = 4321; action = 'handover'; revision = $scheduled.data.draft.revision }).ok | Should -BeTrue
+            (& $tickerCall @{ actor = 4321; action = 'start_shared' }).ok | Should -BeTrue
+            (& $tickerCall @{ actor = 4322; action = 'add'; review = $fromPeer.sharedDraftKey; text = 'إضافة متأخرة' }).error | Should -Be 'ticker_stale'
+            (Get-NewsTickerDraft).Items | Should -Be @('خبر مضاف', 'تعديل من البوت', 'تعديل المحرر الثاني')
+        }
+        finally {
+            $script:NewsTickerDraft = $oldDraft
+            $script:newsDraftFile = $oldPath
+            $script:NewsLockGrant = $oldGrant
+            $script:NewsLockRequest = $oldRequest
         }
     }
 

@@ -3,6 +3,7 @@ import { useDebouncedValue } from '@mantine/hooks'
 import { useQuery } from '@tanstack/react-query'
 import { IconRefresh } from '@tabler/icons-react'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { PageHeader } from '../../components/PageHeader'
@@ -34,8 +35,10 @@ const states: Record<string, { label: string; color: string }> = {
 const number = new Intl.NumberFormat('ar')
 
 export function NewsroomPage() {
-  const [view, setView] = useState<View>('urgent')
-  const [visited, setVisited] = useState<View[]>(['urgent'])
+  const [params, setParams] = useSearchParams()
+  const view = sectionKeys.find((section) => section === params.get('section')) ?? 'urgent'
+  const [visited, setVisited] = useState<View[]>([view])
+  if (!visited.includes(view)) setVisited([...visited, view])
 
   return (
     <Stack gap="xl" className={classes.page}>
@@ -47,8 +50,11 @@ export function NewsroomPage() {
         keepMountedMode="activity"
         onChange={(next) => {
           if (next === 'urgent' || next === 'bulletins' || next === 'ticker' || next === 'boards') {
-            setView(next)
-            setVisited((previous) => previous.includes(next) ? previous : [...previous, next])
+            setParams((previous) => {
+              const updated = new URLSearchParams(previous)
+              updated.set('section', next)
+              return updated
+            }, { replace: true })
           }
         }}
       >
@@ -88,7 +94,8 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       return data
     },
     retry: false,
-    refetchOnWindowFocus: view !== 'ticker',
+    refetchOnWindowFocus: view !== 'ticker' && !urgentEditing,
+    refetchInterval: view === 'urgent' && !urgentEditing ? 4000 : false,
   })
   const current = views[view]
   const result = content.data
@@ -146,7 +153,11 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
 
     {filters}
 
-    {content.isError ? (
+    {content.isError && view === 'urgent' && result && (
+      <Alert color="orange" role="alert">تعذّر تحديث جدول العواجل. تظهر آخر نسخة وصلت من الجسر.</Alert>
+    )}
+
+    {content.isError && (view !== 'urgent' || !result) ? (
       <Alert color={content.error.message === 'content_disabled' ? 'gray' : 'red'} role="alert">
         {messageFor(content.error.message)}
       </Alert>
@@ -158,7 +169,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       </Stack>
     ) : result && view === 'urgent' ? (
       <>
-        <UrgentPlayback selected={selected} />
+        <UrgentPlayback selected={selected} hasRows={(result.collectionTotal ?? result.total) > 0} />
         <UrgentTiming />
         <UrgentTable
           key={result.page}

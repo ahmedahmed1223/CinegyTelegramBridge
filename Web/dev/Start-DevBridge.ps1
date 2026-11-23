@@ -245,6 +245,7 @@ function Invoke-ShowTemplateResult {
     $script:OnAir[$layer] = @{
         Key = $Key; At = $shownAt; ActiveId = $activeId; ActiveIdConfirmed = $true
         UserId = $UserId; Source = 'bridge'; Variables = $Variables
+        ScreenCopy = Format-OnAirScreenCopy -Key $Key -Variables $publicValues
     }
     $fixtureScene = if ($template.Path) { Get-Item -LiteralPath $template.Path -ErrorAction SilentlyContinue }
     $script:LastSuccessfulLayerShows[$layer] = @{
@@ -258,6 +259,7 @@ function Invoke-ShowTemplateResult {
     return @{
         Success = $true; AutoHideArmed = $AutoHideSeconds -gt 0; ActiveId = $activeId; ActiveIdConfirmed = $true
         EngineStartedAtUtc = $shownAt.ToUniversalTime(); EventIdentityConfirmed = $true
+        EventId = $activeId; UrgentEventReadConfirmed = $true
     }
 }
 
@@ -331,7 +333,9 @@ function Get-TitlerLayerStatus {
     return @{
         Success = $true; IsOnAir = $null -ne $live
         ActiveId = Get-JsonProp $live 'ActiveId'; ActiveName = Get-JsonProp $live 'Key'
-        ActiveXml = if ($startedAt -is [datetime]) { '<Item ScheduledAt="{0:o}" />' -f $startedAt.ToUniversalTime() } else { '' }
+        ActiveXml = if ($startedAt -is [datetime]) {
+            '<Item Id="{0}" IsEmpty="n" ScheduledAt="{1:o}" />' -f $live.ActiveId, $startedAt.ToUniversalTime()
+        } else { '' }
     }
 }
 

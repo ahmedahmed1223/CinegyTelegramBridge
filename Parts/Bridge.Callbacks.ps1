@@ -983,7 +983,7 @@ function Invoke-CallbackQuery {
             break
         }
         'urgentb:item:*' {
-            Show-UrgentItemScreen -ChatId $chatId -Position ([int](Get-CallbackArg $data 'urgentb:item:')) -MessageId ([int]$msgObj.message_id)
+            Show-UrgentItemScreen -ChatId $chatId -UserId $userId -Position ([int](Get-CallbackArg $data 'urgentb:item:')) -MessageId ([int]$msgObj.message_id)
             break
         }
         'urgentb:text:*' {
@@ -1068,7 +1068,7 @@ function Invoke-CallbackQuery {
             # One redraw with the answer on it. The HIDE's own confirmation
             # has taken the pressed message by now; the board comes back over
             # it and says what happened.
-            if (Stop-UrgentCurrentAir -ChatId $chatId -UserId $userId -Quiet) {
+            if (Stop-UrgentCurrentAir -ChatId $chatId -UserId $userId -Quiet -LegacyButton) {
                 Show-UrgentBoardScreen -ChatId $chatId -UserId $userId -MessageId ([int](Get-JsonProp $msgObj 'message_id')) -Notice (T 'urgent.hiddenByYou')
             }
             else { Send-TelegramMessage -ChatId $chatId -Text (T 'reply.noRunToStop') }

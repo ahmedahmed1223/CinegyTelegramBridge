@@ -12923,6 +12923,8 @@ export interface components {
             cinegy: components["schemas"]["CinegyStatus"];
             layers: components["schemas"]["LayerStatus"][];
             feed: components["schemas"]["FeedStatus"];
+            /** @default null */
+            urgentNoticeId: string | null;
         } | null;
         BridgeUserResponse: {
             /** Format: int64 */
@@ -14976,6 +14978,12 @@ export interface components {
             maxItems: number;
             paused: components["schemas"]["TickerPausedPage"];
             canClear: boolean;
+            /** @default null */
+            sharedDraftKey: string | null;
+            /** @default null */
+            rowKeys: string[] | null;
+            /** @default null */
+            canManage: boolean | null;
         } | null;
         TickerDraftRequest: {
             action: string;
@@ -15199,6 +15207,10 @@ export interface components {
             canRehearse: boolean;
             /** @default false */
             rehearsalStarted: boolean;
+            /** @default null */
+            sceneConfirmed: boolean | null;
+            /** @default null */
+            noticeId: string | null;
         };
         UrgentPlaybackRequest: {
             action: string;
@@ -15213,6 +15225,8 @@ export interface components {
              * @default null
              */
             step: number | null;
+            /** @default null */
+            mode: string | null;
         };
         UrgentPlaybackResponse: {
             run: components["schemas"]["UrgentRunStatus"];

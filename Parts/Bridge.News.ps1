@@ -51,9 +51,28 @@ function Test-NewsTickerConfirmation {
     return $draft -and $Token -cmatch '^[A-F0-9]{20}$' -and (Get-NewsTickerDraftRevision -Draft $draft).Substring(0, 20) -ceq $Token
 }
 
+function Get-NewsTickerSharedRowKeys {
+    param([System.Collections.IDictionary]$Draft, [string[]]$Items)
+    $previous = [string[]]@(Get-JsonProp $Draft 'Items')
+    $keys = @(Get-JsonProp $Draft 'WebRowKeys')
+    foreach ($item in $Items) {
+        $index = [Array]::IndexOf($previous, $item)
+        # Identical headlines cannot safely carry identity through a move.
+        if ($index -ge 0 -and $index -lt $keys.Count -and $keys[$index] -cmatch '^[a-f0-9]{32}$' -and
+            $index -eq [Array]::LastIndexOf($previous, $item) -and
+            [Array]::IndexOf($Items, $item) -eq [Array]::LastIndexOf($Items, $item)) {
+            $keys[$index]
+        }
+        else { [guid]::NewGuid().ToString('N') }
+    }
+}
+
 function Set-NewsTickerDraftItems {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Draft, [string[]]$Items, [switch]$ClearSchedule)
     $candidate = Copy-NewsTickerDraft -Draft $Draft
+    if (Get-JsonProp $candidate 'WebShareId') {
+        $candidate.WebRowKeys = @(Get-NewsTickerSharedRowKeys -Draft $Draft -Items $Items)
+    }
     $candidate.Items = @($Items)
     $candidate.UpdatedAt = (Get-Date).ToString('o')
     if ($ClearSchedule) { Remove-JsonProp $candidate 'PublishAt' }
@@ -140,7 +159,7 @@ function Set-NewsLockReservation {
 function Clear-NewsLockReservation { $script:NewsLockGrant = $null }
 
 function Start-NewsTickerDraft {
-    param([long]$ChatId,[long]$UserId)
+    param([long]$ChatId,[long]$UserId,[switch]$ShareOnWeb)
     $existing = $script:NewsTickerDraft
     if ($existing -and [long](Get-JsonProp $existing 'OwnerUserId') -eq $UserId) { return [pscustomobject]@{Success=$true;Draft=$existing;Error=''} }
     if ($existing -and -not (Test-NewsTickerDraftOpen -Draft $existing)) {
@@ -169,6 +188,7 @@ function Start-NewsTickerDraft {
         # The idle-expiry warning is addressed to an owner, and this draft has
         # a new one who has not had their window yet.
         Remove-JsonProp -Object $existing -Name 'WarnedAt'
+        if ($ShareOnWeb) { Initialize-NewsTickerWebSharing -Draft $existing }
         if (-not (Save-NewsTickerDraft -Draft $existing)) { return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.draftSaveFailed')} }
         $script:NewsTickerDraft = $existing
         if ($reservation) { Clear-NewsLockReservation }
@@ -178,6 +198,7 @@ function Start-NewsTickerDraft {
     $snapshot = Get-NewsTickerConfiguredSnapshot
     if (-not $snapshot.Success) { return [pscustomobject]@{Success=$false;Draft=$null;Error=$snapshot.Error} }
     $candidate = [ordered]@{ Id=[guid]::NewGuid().ToString('N');OwnerUserId=$UserId;OwnerChatId=$ChatId;CreatedAt=(Get-Date).ToString('o');UpdatedAt=(Get-Date).ToString('o');BaseHash=$snapshot.Hash;Items=@($snapshot.Items) }
+    if ($ShareOnWeb) { Initialize-NewsTickerWebSharing -Draft $candidate }
     if (-not (Save-NewsTickerDraft -Draft $candidate)) { return [pscustomobject]@{Success=$false;Draft=$null;Error=(T 'news.draftSaveFailed')} }
     $script:NewsTickerDraft = $candidate
     if ($reservation) { Clear-NewsLockReservation }
@@ -220,10 +241,31 @@ function Resume-ExpiredNewsDraft {
     Show-NewsTickerManagementScreen -ChatId $ChatId -UserId $UserId
 }
 
-function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
-    $draft = Get-NewsTickerDraft -UserId $UserId; if (-not $draft) { return $false }
+function Initialize-NewsTickerWebSharing {
+    param([System.Collections.IDictionary]$Draft)
+    $Draft['WebShareId'] = [guid]::NewGuid().ToString('N')
+    $Draft['WebRowKeys'] = @(Get-NewsTickerSharedRowKeys -Draft $Draft -Items ([string[]]@(Get-JsonProp $Draft 'Items')))
+}
+
+function Enable-NewsTickerWebSharing {
+    param([long]$UserId)
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    if (-not $draft -or (Test-NewsTickerDraftOpen -Draft $draft)) { return $false }
+    if (Get-JsonProp $draft 'WebShareId') { return $true }
+    $candidate = Copy-NewsTickerDraft -Draft $draft
+    Initialize-NewsTickerWebSharing -Draft $candidate
+    $candidate.UpdatedAt = (Get-Date).ToString('o')
+    if (-not (Save-NewsTickerDraft -Draft $candidate)) { return $false }
+    $script:NewsTickerDraft = $candidate
+    Add-AuditEntry "Web ticker draft shared by $(Format-UserAuditActor -UserId $UserId)"
+    return $true
+}
+
+function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text,$Draft = (Get-NewsTickerDraft -UserId $UserId),[switch]$SkipDuplicate)
+    if (-not $Draft) { return $false }
     $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
     if (-not $parsed.Success -or @($parsed.Items).Count -ne 1) { return $false }
+    if ($SkipDuplicate -and [Array]::IndexOf([string[]]@($Draft.Items), [string]$parsed.Items[0]) -ge 0) { return $true }
     # Newest first, because that is what a ticker is for: the item just typed
     # is the one that matters, and appending buried it behind however many
     # older items the draft already held. NewNewsItemAtTop turns it back into
@@ -233,8 +275,7 @@ function Add-NewsTickerDraftItem { param([long]$UserId,[string]$Text)
     return (Set-NewsTickerDraftItems -Draft $draft -Items $items)
 }
 
-function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$Text)
-    $draft = Get-NewsTickerDraft -UserId $UserId
+function Update-NewsTickerDraftItem { param([long]$UserId,[int]$Index,[string]$Text,$Draft = (Get-NewsTickerDraft -UserId $UserId))
     if (-not $draft -or $Index -lt 0 -or $Index -ge @($draft.Items).Count) { return $false }
     $parsed = ConvertFrom-NewsTickerText -Text $Text -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems 1
     if (-not $parsed.Success -or @($parsed.Items).Count -ne 1) { return $false }
@@ -282,10 +323,10 @@ function Import-NewsTickerTextToDraft { param([long]$UserId,[string]$Text,[Valid
     $items = if ($Mode -eq 'append') { @($draft.Items)+@($parsed.Items) } else { @($parsed.Items) }
     $validated=ConvertFrom-NewsTickerText -Text (ConvertTo-NewsTickerText -Items $items -Separator ([string](Get-Setting 'NewsItemSeparator'))) -Separator ([string](Get-Setting 'NewsItemSeparator')) -MaxItemLength (Get-SettingInt 'NewsMaxItemLength' 1) -MaxItems (Get-SettingInt 'NewsMaxItems' 1)
     if (-not $validated.Success) { return [pscustomobject]@{Success=$false;Error=($validated.Errors -join ' ')} }
-    $draft.Items = @($validated.Items)
-    $draft.UpdatedAt = (Get-Date).ToString('o')
-    Save-NewsTickerDraft | Out-Null
-    return [pscustomobject]@{Success=$true;Count=$draft.Items.Count;Error=''}
+    if (-not (Set-NewsTickerDraftItems -Draft $draft -Items $validated.Items)) {
+        return [pscustomobject]@{Success=$false;Error=(T 'news.draftSaveFailed')}
+    }
+    return [pscustomobject]@{Success=$true;Count=$validated.Items.Count;Error=''}
 }
 
 function Test-NewsTickerClearAccess {
@@ -574,19 +615,20 @@ function Request-NewsLockRelease {
         return $false
     }
 
+    $preserveSharedDraft = [bool](Get-JsonProp $draft 'WebShareId')
     $script:NewsLockRequest = @{
         RequesterUserId = $UserId; RequesterChatId = $ChatId
         OwnerUserId = [long]$draft.OwnerUserId; OwnerChatId = [long]$draft.OwnerChatId
         DraftId = [string](Get-JsonProp $draft 'Id')
         Id = [guid]::NewGuid().ToString('N')
-        PreserveDraft = [bool]$FromWeb
+        PreserveDraft = [bool]$FromWeb -or $preserveSharedDraft
         RequestedAt = (Get-Date)
     }
     # The auto-grant promise below only holds if the request survives a
     # restart - that is the whole reason this file exists. If the write
     # failed, say so rather than promising something the disk did not accept.
     $requestPersisted = [bool](Save-NewsLockRequest)
-    if ($FromWeb -and -not $requestPersisted) {
+    if (($FromWeb -or $preserveSharedDraft) -and -not $requestPersisted) {
         $script:NewsLockRequest = $null
         return $false
     }
@@ -783,6 +825,8 @@ function Open-NewsTickerDraftToAll {
     # The window restarts, so the warning owes itself again to whoever holds it.
     Remove-JsonProp -Object $draft -Name 'WarnedAt'
     Remove-JsonProp -Object $draft -Name 'PublishAt'
+    Remove-JsonProp -Object $draft -Name 'WebShareId'
+    Remove-JsonProp -Object $draft -Name 'WebRowKeys'
     $pendingRequest = $script:NewsLockRequest
     if ($pendingRequest -and -not (Get-JsonProp $pendingRequest 'AutoGrantSuspended') -and
         (Test-NewsLockRequestDraft -Request $pendingRequest -Draft $ownedDraft)) {

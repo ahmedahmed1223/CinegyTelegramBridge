@@ -47,6 +47,7 @@ function Save-UrgentRunState {
         OperationId = [string]$run.OperationId
         Summary = [string]$run.Summary
         Scope = [string](Get-JsonProp $run 'Scope')
+        ModeOverride = [string](Get-JsonProp $run 'ModeOverride')
         Layer = Get-JsonProp $run 'Layer'
     }
     if (-not (Write-BridgeValidatedJson -Path (Get-UrgentRunFile) -Json ($state | ConvertTo-Json -Depth 12))) {
@@ -242,7 +243,7 @@ function Start-UrgentBoardRun {
         the audit trail are all on the path, and this screen does not get to
         skip them because it has an engine behind it.
     #>
-    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly, [switch]$Force, $ReviewedPlan, [string]$ExpectedLayerStamp = '', [switch]$Quiet)
+    param([Parameter(Mandatory)][long]$ChatId, [long]$UserId = 0, [switch]$SelectedOnly, [switch]$Force, $ReviewedPlan, [string]$ExpectedLayerStamp = '', [switch]$Quiet, [string]$ModeOverride = '')
     if ($UserId -eq 0) { $UserId = $ChatId }
     if (-not (Test-UrgentBoardAvailable)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.boardOffOrNoTemplate')
@@ -254,7 +255,7 @@ function Start-UrgentBoardRun {
     }
     $plan = $ReviewedPlan
     if (-not $plan) {
-        $planResult = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly
+        $planResult = New-UrgentBoardPlan -ChatId $ChatId -SelectedOnly:$SelectedOnly -ModeOverride $ModeOverride
         if (-not $planResult.Success) {
             Send-TelegramMessage -ChatId $ChatId -Text (T 'urgp.didNotStart' $([string]$planResult.Error)) -ReplyMarkup (Get-UrgentBoardKeyboard -ChatId $ChatId)
             return $false
@@ -307,6 +308,7 @@ function Start-UrgentBoardRun {
         # 'all' takes a story added mid-run onto its end; 'selected' was a
         # hand-picked list and does not grow by itself.
         Scope = if ($SelectedOnly) { 'selected' } else { 'all' }
+        ModeOverride = $ModeOverride
     }
     Write-AuditRecord -OperationId ([string]$script:UrgentBoardRun.OperationId) -EventName urgent_board_run -Result started `
         -UserId $UserId -UserName (Get-UserDisplayName -UserId $UserId) -ChatId $ChatId -Action START `
@@ -314,6 +316,9 @@ function Start-UrgentBoardRun {
         -Count ($steps.Count) -Values $summary
     Save-UrgentRunState | Out-Null
     Write-BridgeLog "Urgent board run started by $UserId - $summary"
+    if (Get-ConfirmedUrgentEventId -Result $result -Layer ([int]$template.Layer)) {
+        Publish-UrgentWebNotice -Key $script:MojazUrgentKey -Layer ([int]$template.Layer) -UserId $UserId
+    }
     foreach ($note in @(Get-UrgentProperty $plan 'Notes' @())) { Write-BridgeLog "Urgent board plan: $note" 'WARN' }
     Add-AuditEntry (T 'urgp.boardStarted' $($steps.Count) $(Format-UserAuditActor -UserId $UserId))
     # The SHOW's confirmation took the pressed message; the board comes back
@@ -411,7 +416,8 @@ function Add-UrgentRunStep {
     if (-not [bool](Get-UrgentProperty $Item 'Enabled' $true)) { return 0 }
     $steps = @($run.Steps)
     if ($steps.Count -lt 1) { return 0 }
-    $timing = Get-UrgentEffectiveTiming -Item $Item -Defaults (Get-UrgentBoardDefaults) -FloorSeconds (Get-UrgentFloorSeconds)
+    $defaults = Get-UrgentBoardDefaults -ModeOverride ([string](Get-JsonProp $run 'ModeOverride'))
+    $timing = Get-UrgentEffectiveTiming -Item $Item -Defaults $defaults -FloorSeconds (Get-UrgentFloorSeconds)
     $last = $steps[-1]
     $transition = 0.0
     if ($timing.Mode -eq 'exit' -or [string](Get-JsonProp $last 'Mode') -eq 'auto_hide') { $transition = [math]::Max(0.0, (Get-UrgentTransitionSeconds)) }
@@ -797,6 +803,7 @@ function Restore-UrgentBoardRun {
         ExitAtSeconds = $exitAt
         BoardRevision = [int](Get-JsonProp $state 'BoardRevision')
         Scope = [string](Get-JsonProp $state 'Scope')
+        ModeOverride = [string](Get-JsonProp $state 'ModeOverride')
         Layer = Get-JsonProp $state 'Layer'
         StartedAt = $startedAt.ToString('o')
         Summary = [string](Get-JsonProp $state 'Summary')

@@ -7,13 +7,13 @@ import { messageFor } from '../../api/messages'
 type Bulletin = Schemas['BulletinEditor']
 type PhotoField = { name: string; label: string }
 type PhotoJob = { field: PhotoField; file: File }
-const maxBytes = 10 * 1024 * 1024
+export const bulletinPhotoMaxBytes = 10 * 1024 * 1024
 
-function PhotoInput({ label, file, disabled, describe, onChange }: {
+export function BulletinPhotoInput({ label, file, disabled, describe, onChange }: {
   label: string; file: File | null; disabled: boolean; describe: boolean; onChange: (file: File | null) => void
 }) {
   const [preview, setPreview] = useState<{ file: File; url: string } | null>(null)
-  const tooLarge = !!file && file.size > maxBytes
+  const tooLarge = !!file && file.size > bulletinPhotoMaxBytes
   const isTiff = !!file && /\.tiff?$/i.test(file.name)
   useEffect(() => {
     if (!file || tooLarge || !/^image\/(jpeg|png|gif|bmp)$/.test(file.type)) return
@@ -72,7 +72,7 @@ export function BulletinPhotoDialog({ id, rowId, revision, title, field, otherFi
     onSuccess: (bulletin) => onSaved(bulletin),
   })
   const stale = upload.error?.message === 'bulletin_stale'
-  const canSubmit = jobs.length > 0 && jobs.every(({ file }) => file.size <= maxBytes) && !upload.isPending && !stale
+  const canSubmit = jobs.length > 0 && jobs.every(({ file }) => file.size <= bulletinPhotoMaxBytes) && !upload.isPending && !stale
   function close() {
     if (upload.isPending) return
     if (lastSaved.current) onSaved(lastSaved.current)
@@ -85,7 +85,7 @@ export function BulletinPhotoDialog({ id, rowId, revision, title, field, otherFi
         if (canSubmit) upload.mutate(jobs)
       }}>
         <Stack gap="md">
-          {fields.map((target, index) => <PhotoInput key={target.name} label={target.label} file={files.get(target.name) ?? null}
+          {fields.map((target, index) => <BulletinPhotoInput key={target.name} label={target.label} file={files.get(target.name) ?? null}
             describe={index === 0} disabled={upload.isPending || stale} onChange={(file) => {
               setFiles(current => new Map(current).set(target.name, file))
               if (!stale) upload.reset()

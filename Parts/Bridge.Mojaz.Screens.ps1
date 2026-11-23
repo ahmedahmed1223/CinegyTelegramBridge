@@ -718,7 +718,7 @@ function Complete-MojazRowEdit {
         [Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne "mojaz_edit_$Which") { return }
-    $value = ([string]$Value).Trim()
+    $value = ConvertTo-MojazRowText -Text $Value
     if ([string]::IsNullOrWhiteSpace($value)) {
         Send-TelegramMessage -ChatId $ChatId -Text $(if ($Which -eq 'title') { (T 'mojaz.titleEmpty') } else { (T 'mojaz.storyEmpty') }) -ReplyMarkup (Get-CancelKeyboard)
         return
@@ -742,7 +742,7 @@ function Complete-MojazRowTitle {
     param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne 'mojaz_row_title') { return }
-    $title = ([string]$Value).Trim()
+    $title = ConvertTo-MojazRowText -Text $Value
     if ([string]::IsNullOrWhiteSpace($title)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.titleEmpty') -ReplyMarkup (Get-CancelKeyboard)
         return
@@ -759,7 +759,7 @@ function Complete-MojazRowText {
     param([Parameter(Mandatory)][long]$ChatId, [string]$Value = '')
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state -or [string]$state.Mode -ne 'mojaz_row_text') { return }
-    $text = ([string]$Value).Trim()
+    $text = ConvertTo-MojazRowText -Text $Value
     if ([string]::IsNullOrWhiteSpace($text)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'mojaz.storyEmpty') -ReplyMarkup (Get-CancelKeyboard)
         return

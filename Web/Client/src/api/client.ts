@@ -43,6 +43,31 @@ export async function uploadBulletinPhoto(file: File, id: string, rowId: string 
   return await response.json() as Schemas['BulletinEditor']
 }
 
+export type BulletinPhotoRow = {
+  file: File
+  id: string
+  revision: number
+  field: string
+  values: Record<string, string>
+}
+
+export async function uploadBulletinPhotoRow({ file, id, revision, field, values }: BulletinPhotoRow): Promise<Schemas['BulletinEditor']> {
+  const path = '/api/content/bulletins/photo-row' satisfies keyof paths
+  const query = new URLSearchParams({ id, revision: String(revision), field })
+  const body = new FormData()
+  body.set('image', file)
+  body.set('values', JSON.stringify(values))
+  const response = await fetch(`${path}?${query}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-XSRF-TOKEN': csrfToken },
+    body,
+  })
+  if (response.status === 413) throw new Error('bulletin_photo_size')
+  if (!response.ok) throw new Error(errorCode(await response.json().catch(() => undefined), response))
+  return await response.json() as Schemas['BulletinEditor']
+}
+
 export async function uploadTemplateRegistry(file: File, review?: string): Promise<Schemas['TemplateRegistryImportReview'] | null> {
   const path = (review ? '/api/air/template-registry/import/confirm' : '/api/air/template-registry/import/review') satisfies keyof paths
   const headers = review ? { 'X-Template-Registry-Review': review } : undefined

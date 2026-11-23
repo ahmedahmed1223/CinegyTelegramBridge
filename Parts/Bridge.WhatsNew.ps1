@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.3'; Items = @('In the web bulletin, enter the headline and story and choose a photo before saving the row. You can also reuse a picture or keep the previous one.',
+                        'Phone photos are turned upright before being cropped to fit the bulletin template.') },
                 @{ Version = '9.1.2'; Items = @('Keep using Telegram while the bridge checks the broadcast picture, even when the first capture has to be retried.',
                         'Approve or decline a lock request from the Telegram ticker screen. The bot explains when a request has already closed.') },
                 @{ Version = '9.1.1'; Items = @('Set the web viewing link from the Bot settings. Web operators can watch the stream or copy its viewing link.',
@@ -396,6 +398,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.3'; Items = @('أضف العنوان والخبر والصورة في صف الموجز من الويب بضغطة حفظ واحدة. يمكنك أيضًا إعادة استخدام صورة أو متابعة الصورة السابقة.',
+                        'تُضبط جهة صورة الهاتف قبل قصّها لتناسب قالب الموجز.') },
                 @{ Version = '9.1.2'; Items = @('تابع استخدام تليجرام أثناء فحص صورة البث، حتى إذا احتاج الالتقاط إلى محاولة ثانية.',
                         'وافق على طلب تسليم القفل أو ارفضه من شاشة شريط الأخبار في البوت. يوضّح البوت متى أُغلق الطلب.') },
                 @{ Version = '9.1.1'; Items = @('اضبط رابط المشاهدة من إعدادات البوت ليتمكن مشغّلو الويب من متابعة البث ونسخ الرابط.',

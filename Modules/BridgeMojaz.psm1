@@ -786,4 +786,4 @@ Export-ModuleMember -Function New-MojazLibrary, Add-MojazBulletin, Copy-MojazBul
     Get-MojazRowImageMode, Get-MojazEffectiveImages, Get-MojazUsedImages,
     Rename-MojazBulletin, Remove-MojazBulletin, Get-MojazBulletin, New-MojazRunSnapshot, New-MojazLoopPlan, Get-MojazDueQueue,
     Add-MojazBulletinRow, Add-MojazBulletinRows, Set-MojazBulletinRow, Remove-MojazBulletinRow, Move-MojazBulletinRow, Switch-MojazBulletinRowSkip, ConvertFrom-MojazPasteText,
-    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Set-MojazBulletinTemplate, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues
+    Clear-MojazBulletinRows, Set-MojazBulletinTiming, Set-MojazBulletinTemplate, Get-BridgeSceneFields, Test-BridgeSceneUsable, Get-MojazFieldValues, ConvertTo-MojazRowText

@@ -180,6 +180,15 @@ Describe 'The bulletin table' {
         @($script:MojazLibrary.Bulletins[1].Rows).Count | Should -Be 0
     }
 
+    It 'keeps asking for the story when the Telegram input has only invisible characters' {
+        Set-PendingState -ChatId 100 -State @{ Mode = 'mojaz_row_text'; UserId = 101; BulletinId = [string]$script:bulletin.Id; Image = ''; Title = 'عنوان' }
+        Complete-MojazRowText -ChatId 100 -Value " `u{200B} "
+
+        (Get-PendingState -ChatId 100).Mode | Should -Be 'mojaz_row_text'
+        @((Get-MojazSelected -ChatId 100).Rows).Count | Should -Be 0
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $Text -eq (T 'mojaz.storyEmpty') }
+    }
+
     It 'keeps the table when the save fails, and says so' {
         $script:MojazLibrary.Bulletins[0].Rows = @((New-TestMojazRow -Title 'موجود'))
         Mock Write-BridgeValidatedJson { $false }
@@ -1355,6 +1364,36 @@ Describe 'Checking and sizing an uploaded picture' {
 
         { Convert-MojazPicture -SourcePath $notAPicture -DestinationPath $destination -Size $null } | Should -Throw
         Test-Path -LiteralPath $destination | Should -BeFalse
+    }
+
+    It 'turns a portrait JPEG upright before calculating its PNG size' {
+        $source = Join-Path $TestDrive 'rotated-phone.jpg'
+        $destination = Join-Path $TestDrive 'upright-phone.png'
+        # A landscape JPEG with EXIF orientation 6, as stored by a phone
+        # held in portrait. The display size is 4 by 8, not 8 by 4.
+        $image = [System.Drawing.Bitmap]::new(8, 4)
+        $jpeg = [IO.MemoryStream]::new()
+        try {
+            for ($x = 0; $x -lt $image.Width; $x++) {
+                $color = if ($x -lt 4) { [System.Drawing.Color]::Red } else { [System.Drawing.Color]::Blue }
+                for ($y = 0; $y -lt $image.Height; $y++) { $image.SetPixel($x, $y, $color) }
+            }
+            $image.Save($jpeg, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+            $bytes = $jpeg.ToArray()
+        }
+        finally { $image.Dispose(); $jpeg.Dispose() }
+        $exif = [byte[]]@(0xff,0xe1,0,34,69,120,105,102,0,0,73,73,42,0,8,0,0,0,1,0,18,1,3,0,1,0,0,0,6,0,0,0,0,0,0,0)
+        [IO.File]::WriteAllBytes($source, [byte[]]($bytes[0..1] + $exif + $bytes[2..($bytes.Length-1)]))
+
+        Convert-MojazPicture -SourcePath $source -DestinationPath $destination -SharedUpload | Should -BeTrue
+        $upright = [System.Drawing.Image]::FromFile($destination)
+        try {
+            $upright.Width | Should -Be 4
+            $upright.Height | Should -Be 8
+            $upright.GetPixel(1, 1).R | Should -BeGreaterThan $upright.GetPixel(1, 1).B
+            $upright.GetPixel(1, 6).B | Should -BeGreaterThan $upright.GetPixel(1, 6).R
+        }
+        finally { $upright.Dispose() }
     }
 }
 

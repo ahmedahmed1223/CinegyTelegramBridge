@@ -6,10 +6,10 @@ import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconFileUpload, IconPhoto, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
-import { api, errorCode, type Schemas } from '../../api/client'
+import { api, errorCode, uploadBulletinPhotoRow, type BulletinPhotoRow, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { BulletinPaste } from './RowPaste'
-import { BulletinPhotoDialog } from './BulletinPhotoDialog'
+import { BulletinPhotoDialog, BulletinPhotoInput, bulletinPhotoMaxBytes } from './BulletinPhotoDialog'
 import { BulletinSceneImageDialog } from './BulletinSceneImageDialog'
 import { BulletinPreview } from './BulletinPreview'
 import { BulletinRunStatus } from './BulletinPlayback'
@@ -23,7 +23,7 @@ import classes from './NewsroomPage.module.css'
 type Bulletin = Schemas['BulletinEditor']
 type Row = Schemas['BulletinRow']
 type EditRequest = Pick<Schemas['BulletinEditRequest'], 'action'> & Partial<Schemas['BulletinEditRequest']>
-type EditRow = { row: Row | null; revision: number; values: Record<string, string>; imageChoice: string }
+type EditRow = { row: Row | null; revision: number; values: Record<string, string>; imageChoice: string; photo: File | null }
 type NameAction = 'create' | 'rename' | 'copy'
 const number = new Intl.NumberFormat('ar')
 const names = { create: 'إنشاء موجز', rename: 'إعادة تسمية', copy: 'نسخ الموجز' }
@@ -133,7 +133,17 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     setDesignChange(null)
     onSaved(value)
   }
-  const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
+  const edit = useMutation({
+    mutationFn: async (request: EditRequest | BulletinPhotoRow) => {
+      if (!('file' in request)) return applyEdit(request)
+      try {
+        return await uploadBulletinPhotoRow(request)
+      } catch (error) {
+        throw new Error(messageFor(error instanceof Error ? error.message : 'unknown'))
+      }
+    },
+    onSuccess: acceptSaved,
+  })
   const bulletin = query.data
   const playback = useBulletinPlayback(id, Boolean(bulletin?.playbackSupported || bulletin?.onAir))
   const onAir = playback.data ? Boolean(playback.data.run) : bulletin?.onAir === true
@@ -144,14 +154,20 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const textFields = fields.filter((field) => field.kind === 'text')
   const photoFields = fields.filter((field) => bulletin?.photoFields?.includes(field.name) ??
     (bulletin?.canUploadPhoto && field.name === bulletin.imageField))
+  const isBuiltInStory = bulletin?.design.toLowerCase() === 'mojaz' && bulletin.headlinePaste
+  const rowPhotoField = isBuiltInStory ? photoFields.find((field) => field.name === bulletin?.imageField) : undefined
   const canEnterRow = textFields.length > 0 || Boolean(bulletin?.imageField)
+  const missingStory = Boolean(rowEdit && !rowEdit.row && isBuiltInStory &&
+    textFields.some((field) => !rowEdit.values[field.name]?.trim()))
+  const rowCanSave = Boolean(rowEdit && !busy && !missingStory &&
+    (textFields.length || rowEdit.imageChoice) && (!rowEdit.photo || rowEdit.photo.size <= bulletinPhotoMaxBytes))
   const availableDesigns = designs.data?.filter((entry) => entry.value !== bulletin?.design) ?? []
 
   function startRow(row: Row | null, revision: number) {
     edit.reset()
     setSavedNote('')
     setRowEdit({ row, revision, values: Object.fromEntries(textFields.map((field) => [field.name, row?.values[field.name] ?? ''])),
-      imageChoice: row || !bulletin?.imageField ? '' : 'inherit' })
+      imageChoice: row || !bulletin?.imageField ? '' : 'inherit', photo: null })
   }
 
   function rowAction(action: 'up' | 'down' | 'skip' | 'remove', row: Row, latest: Bulletin) {
@@ -196,11 +212,16 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           <Table.Td key={field.name} className={field.kind === 'text' ? classes.urgentCell : undefined}>
             {field.kind === 'text' ? (
               <Textarea aria-label={field.label} dir="rtl" autosize minRows={2} maxRows={6} maxLength={4096}
+                required={!active.row && isBuiltInStory}
                 autoFocus={field === textFields[0]} disabled={busy} value={active.values[field.name] ?? ''}
                 onChange={(event) => setRowEdit({ ...active, values: { ...active.values, [field.name]: event.currentTarget.value } })} />
             ) : field.name === bulletin?.imageField ? (
-              <NativeSelect miw={170} aria-label={field.label} data={imageChoices} value={active.imageChoice} disabled={busy}
-                onChange={(event) => setRowEdit({ ...active, imageChoice: event.currentTarget.value })} />
+              <Stack gap="xs">
+                <NativeSelect miw={170} aria-label="مصدر الصورة" data={imageChoices} value={active.imageChoice} disabled={busy || Boolean(active.photo)}
+                  onChange={(event) => setRowEdit({ ...active, imageChoice: event.currentTarget.value })} />
+                {!active.row && rowPhotoField && <BulletinPhotoInput label="رفع صورة للصف" file={active.photo}
+                  disabled={busy} describe={false} onChange={(photo) => setRowEdit({ ...active, photo })} />}
+              </Stack>
             ) : cell(active.row, field)}
           </Table.Td>
         ))}
@@ -265,7 +286,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
           {sceneImageRow && <BulletinSceneImageDialog id={id} {...sceneImageRow} onClose={() => setSceneImageRow(null)}
             onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
           {photoRow && <BulletinPhotoDialog id={id} {...photoRow}
-            otherFields={bulletin.fields.filter(field => field.kind === 'media' && field.name !== photoRow.field)}
+            otherFields={photoFields.filter(field => field.name !== photoRow.field)}
             onClose={() => setPhotoRow(null)}
             onSaved={(value) => {
               acceptSaved(value)
@@ -304,7 +325,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 onClick={() => { setSavedNote(''); setManagement('clear') }}>إفراغ الصفوف</Button>
               {textFields.length > 0 && <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={busy || editing}
                 onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>}
-              {photoFields.length > 0 && <Menu position="bottom-end">
+              {!isBuiltInStory && photoFields.length > 0 && <Menu position="bottom-end">
                 <Menu.Target>
                   <Button variant={canEnterRow ? 'default' : 'filled'} leftSection={<IconFileUpload size={17} />} disabled={busy || editing}>
                     إضافة صف بصورة
@@ -340,7 +361,11 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             <Paper withBorder radius="lg" className={classes.urgentGrid}>
               <form onSubmit={(event) => {
                 event.preventDefault()
-                if (!rowEdit || busy) return
+                if (!rowEdit || !rowCanSave) return
+                if (rowEdit.photo && rowPhotoField) {
+                  edit.mutate({ id, revision: rowEdit.revision, field: rowPhotoField.name, file: rowEdit.photo, values: rowEdit.values })
+                  return
+                }
                 const [imageMode, imageSourceRowId] = rowEdit.imageChoice.split(':', 2)
                 edit.mutate({ action: rowEdit.row ? 'update' : 'add', id, revision: rowEdit.revision, page: bulletin.page,
                   rowId: rowEdit.row?.id, values: rowEdit.values, imageMode: imageMode || null, imageSourceRowId })
@@ -411,7 +436,7 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 {rowEdit && (
                   <Group justify="flex-end" gap="xs" className={classes.bulletinSave}>
                     <Button variant="subtle" disabled={busy} onClick={() => { setRowEdit(null); edit.reset() }}>إلغاء</Button>
-                    <Button type="submit" loading={edit.isPending} disabled={query.isFetching || (!textFields.length && !rowEdit.imageChoice)}>حفظ الصف</Button>
+                    <Button type="submit" loading={edit.isPending} disabled={!rowCanSave}>حفظ الصف</Button>
                   </Group>
                 )}
               </form>

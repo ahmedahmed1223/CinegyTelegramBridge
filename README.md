@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.3
+
+The web editor saves a standard bulletin's headline, story and optional uploaded picture in one row. Its table and preview use the same saved text as Telegram playback, and the editor remains available if the scene file cannot be read.
+
+Phone photos are rotated according to their EXIF orientation before the shared picture converter crops them to the template's dimensions and saves them as PNG.
+
 ## Version 9.1.2
 
 Periodic broadcast picture checks run between Telegram polling cycles without blocking them while FFmpeg captures a frame. Retries and dark-frame confirmation still run when needed.

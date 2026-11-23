@@ -20,6 +20,8 @@ public sealed class FakeBridge : IBridgeChannel
     public string LastLoginCode { get; private set; } = "";
     public string? CapturePath { get; set; }
     public (string Root, string Path)? BulletinPreviewImage { get; set; }
+    public string? BulletinPhotoDirectory { get; set; }
+    public byte[]? BulletinPhotoBytes { get; private set; }
     public string CaptureId { get; } = Guid.NewGuid().ToString("N");
     public string? TickerTxtDirectory { get; set; }
     public byte[]? TickerTxtBytes { get; private set; }
@@ -66,6 +68,7 @@ public sealed class FakeBridge : IBridgeChannel
             "bulletin.preview-image" => BulletinPreviewImage is { } picture
                 ? Reply(JsonSerializer.Serialize(new { root = picture.Root, path = picture.Path }))
                 : new BridgeReply(false, default, "not_found"),
+            "bulletin.photo" => BulletinPhoto(a),
             "bulletin.scene-images" => a.GetProperty("action").GetString() switch
             {
                 "list" => Reply("""{"selection":"scene-image-ticket","page":0,"pageCount":1,"truncated":false,"items":[{"slot":0,"label":"logo.png","bytes":532}]}"""),
@@ -189,6 +192,21 @@ public sealed class FakeBridge : IBridgeChannel
         upload.CopyTo(copy);
         TickerTxtBytes = copy.ToArray();
         return Reply("""{"review":"review","items":["خبر جديد"],"currentItems":["المسودة"],"duplicates":0,"identical":false,"cancelsSchedule":true}""");
+    }
+
+    private BridgeReply BulletinPhoto(JsonElement args)
+    {
+        if (args.GetProperty("actor").GetInt64() != WebApp.Operator || BulletinPhotoDirectory is null)
+            return new BridgeReply(false, default, "forbidden");
+        if (args.GetProperty("action").GetString() == "prepare")
+            return Reply(JsonSerializer.Serialize(new { directory = BulletinPhotoDirectory, maximumBytes = 10 * 1024 * 1024 }));
+        var id = args.GetProperty("upload").GetString();
+        using var upload = new FileStream(Path.Combine(BulletinPhotoDirectory, $"web-{id}.image"), FileMode.Open,
+            FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var copy = new MemoryStream();
+        upload.CopyTo(copy);
+        BulletinPhotoBytes = copy.ToArray();
+        return Reply("""{"id":"b_1","name":"Fixture","design":"Mojaz","revision":2,"page":0,"pageCount":1,"total":1,"rows":[],"fields":[]}""");
     }
 
     private BridgeReply Capture(JsonElement args)

@@ -1547,7 +1547,22 @@ function Get-WebContentPage {
 function Get-WebBulletinFields {
     param([Parameter(Mandatory)]$Bulletin)
     $key = Get-MojazBulletinDesignKey -Bulletin $Bulletin
-    foreach ($prompt in Get-MojazRowFieldPrompts -TemplateKey $key) {
+    $prompts = @(Get-MojazRowFieldPrompts -TemplateKey $key)
+    if ($key -eq $script:MojazTemplateKey -and -not $prompts.Count) {
+        # The bot's built-in bulletin always sends these three variables.
+        # Its saved rows remain editable even when the scene is unreadable.
+        foreach ($field in @(
+                @{ name = $script:MojazTitleVariable; labelKey = 'mojaz.col.title'; kind = 'text' }
+                @{ name = $script:MojazTextVariable; labelKey = 'mojaz.col.story'; kind = 'text' }
+                @{ name = $script:MojazImageVariable; labelKey = 'mojaz.col.image'; kind = 'media' }
+            )) {
+            $label = Get-MojazFieldLabel -TemplateKey $key -FieldName $field.name
+            if ($label -eq $field.name) { $label = T $field.labelKey }
+            @{ name = $field.name; label = $label; kind = $field.kind }
+        }
+        return
+    }
+    foreach ($prompt in $prompts) {
         $label = [string]$prompt.Label
         $kind = [string]$prompt.Kind
         if ($prompt.Name -eq $script:MojazImageVariable -and $kind -eq 'media') {
@@ -1565,11 +1580,15 @@ function Get-WebBulletinImageField {
 }
 
 function Get-WebBulletinRowView {
-    param($Row, [object[]]$Fields, [string]$ImageField)
+    param($Row, [object[]]$Fields, [string]$ImageField, [switch]$BuiltIn)
     $values = @{}
+    $playoutValues = if ($BuiltIn) { Get-MojazRowVariables -Row $Row }
     $media = @(
         foreach ($field in $Fields) {
-            $value = Get-MojazRowFieldValue -Row $Row -FieldName $field.name -Kind $field.kind
+            $value = if ($BuiltIn -and $field.name -in $script:MojazTitleVariable, $script:MojazTextVariable, $script:MojazImageVariable) {
+                $playoutValues[$field.name]
+            }
+            else { Get-MojazRowFieldValue -Row $Row -FieldName $field.name -Kind $field.kind }
             if ($field.kind -eq 'text') { $values[$field.name] = $value }
             elseif ($value) { $field.name }
         }
@@ -1581,6 +1600,8 @@ function Get-WebBulletinRowView {
 function Get-WebBulletinEditor {
     param([Parameter(Mandatory)]$Bulletin, [int]$Page)
     $fields = @(Get-WebBulletinFields -Bulletin $Bulletin)
+    $designKey = Get-MojazBulletinDesignKey -Bulletin $Bulletin
+    $builtIn = $designKey -eq $script:MojazTemplateKey
     $rows = @(Get-JsonProp $Bulletin 'Rows' | Where-Object { $null -ne $_ })
     $imageField = Get-WebBulletinImageField -Fields $fields
     $imageChoices = @(
@@ -1597,10 +1618,9 @@ function Get-WebBulletinEditor {
     $window = Get-BridgePageWindow -ItemCount $rows.Count -Page $Page
     $items = @(
         for ($position = $window.StartIndex; $position -le $window.EndIndex; $position++) {
-            Get-WebBulletinRowView -Row $rows[$position] -Fields $fields -ImageField $imageField
+            Get-WebBulletinRowView -Row $rows[$position] -Fields $fields -ImageField $imageField -BuiltIn:$builtIn
         }
     )
-    $designKey = Get-MojazBulletinDesignKey -Bulletin $Bulletin
     $canPlay = Test-MojazBulletinPlaybackDesign -Bulletin $Bulletin
     $photoFields = @(foreach ($field in $fields) {
             if ($field.kind -eq 'media' -and (Get-WebBulletinPhotoDestination -Bulletin $Bulletin -Field $field.name)) { $field.name }
@@ -1698,7 +1718,7 @@ function Get-WebBulletinPreview {
             # Skipped rows can transfer their picture choice to the next
             # played row. The shared run snapshot has already resolved it.
             if ($step) { $row = $plan.Rows[$step.Index] }
-            $view = Get-WebBulletinRowView -Row $row -Fields $fields -ImageField $imageField
+            $view = Get-WebBulletinRowView -Row $row -Fields $fields -ImageField $imageField -BuiltIn:($designKey -eq $script:MojazTemplateKey)
             $view['number'] = $position + 1
             $view['startSeconds'] = Get-JsonProp $step 'AtSeconds'
             if ($step -and $imageField) {
@@ -1759,6 +1779,25 @@ function ConvertTo-WebBulletinRowArguments {
         else { $row.Fields[$key] = $Cells[$key] }
     }
     return $row
+}
+
+function Read-WebBulletinRowArguments {
+    param($Values, [object[]]$Fields, [switch]$RequireStory)
+    if ($Values -isnot [System.Collections.IDictionary] -or $Values.Count -ne $Fields.Count) { return }
+    $cells = @{}
+    foreach ($field in $Fields) {
+        $value = Get-JsonProp $Values $field.name
+        if ($value -isnot [string] -or $value.Length -gt 4096) { return }
+        # The bot's row commands normalize invisible characters before the
+        # values reach air. Apply that same normalization before checking
+        # for an empty title/story or validating the remaining XML text.
+        $value = ConvertTo-MojazRowText -Text $value
+        try { [void][System.Xml.XmlConvert]::VerifyXmlChars($value) }
+        catch { return }
+        $cells[$field.name] = $value
+    }
+    if ($RequireStory -and (-not $cells[$script:MojazTitleVariable] -or -not $cells[$script:MojazTextVariable])) { return }
+    return (ConvertTo-WebBulletinRowArguments -Cells $cells)
 }
 
 function Read-WebBulletinPaste {
@@ -1961,18 +2000,10 @@ function Invoke-WebBulletinEdit {
                 $imageField = Get-WebBulletinImageField -Fields $allFields
                 $imageMode = [string](Get-JsonProp $Arguments 'imageMode')
                 $imageSource = [string](Get-JsonProp $Arguments 'imageSourceRowId')
-                if (($fields.Count -eq 0 -and -not $imageMode) -or $values -isnot [System.Collections.IDictionary] -or $values.Count -ne $fields.Count) {
-                    return @{ ok = $false; error = 'bulletin_invalid' }
-                }
-                $cells = @{}
-                foreach ($field in $fields) {
-                    $value = Get-JsonProp $values $field.name
-                    if ($value -isnot [string] -or $value.Length -gt 4096) { return @{ ok = $false; error = 'bulletin_invalid' } }
-                    try { [void][System.Xml.XmlConvert]::VerifyXmlChars($value) }
-                    catch { return @{ ok = $false; error = 'bulletin_invalid' } }
-                    $cells[$field.name] = $value
-                }
-                $rowArgs = ConvertTo-WebBulletinRowArguments -Cells $cells
+                $requireStory = $action -eq 'add' -and (Get-MojazBulletinDesignKey -Bulletin $bulletin) -eq $script:MojazTemplateKey -and
+                    (Test-WebBulletinHeadlineFormat -Fields $fields)
+                $rowArgs = Read-WebBulletinRowArguments -Values $values -Fields $fields -RequireStory:$requireStory
+                if (-not $rowArgs -or ($fields.Count -eq 0 -and -not $imageMode)) { return @{ ok = $false; error = 'bulletin_invalid' } }
                 if ($imageMode -or $imageSource) {
                     if (-not $imageField -or $imageMode -cnotin 'inherit', 'template', 'reuse' -or ($imageSource -and $imageMode -cne 'reuse')) {
                         return @{ ok = $false; error = 'bulletin_image_invalid' }
@@ -2232,6 +2263,17 @@ function Get-WebBulletinPhotoAdmission {
         return @{ ok = $false; error = 'not_found' }
     }
     $fields = @(Get-WebBulletinFields -Bulletin $bulletin)
+    $rowArguments = @{}
+    $values = Get-JsonProp $Arguments 'values'
+    if ($null -ne $values) {
+        if (-not $createRow) { return @{ ok = $false; error = 'bulletin_invalid' } }
+        $textFields = @($fields | Where-Object { $_.kind -eq 'text' })
+        $builtIn = (Get-MojazBulletinDesignKey -Bulletin $bulletin) -eq $script:MojazTemplateKey
+        $rowArguments = Read-WebBulletinRowArguments -Values $values -Fields $textFields -RequireStory:$builtIn
+        if (-not $rowArguments) { return @{ ok = $false; error = 'bulletin_invalid' } }
+        $rowArguments.Fields = Get-MojazFieldValues -Fields $rowArguments.Fields
+        if (-not $rowArguments.Fields.Count) { $rowArguments.Remove('Fields') }
+    }
     $requested = [string](Get-JsonProp $Arguments 'field')
     $field = if ($requested) { $requested } else { Get-WebBulletinImageField -Fields $fields }
     if (-not $field -or $field -cnotin @($fields | Where-Object { $_.kind -eq 'media' } | ForEach-Object { $_.name })) {
@@ -2248,7 +2290,7 @@ function Get-WebBulletinPhotoAdmission {
         }
     }
     return @{ ok = $true; Actor = $actor; BulletinId = $id; RowId = $rowId; Directory = $destination.Directory
-        Size = $size; Scene = $destination.Scene; Field = $field; CreateRow = $createRow }
+        Size = $size; Scene = $destination.Scene; Field = $field; CreateRow = $createRow; RowArguments = $rowArguments }
 }
 
 function Start-WebBulletinPhotoRequest {
@@ -2342,7 +2384,7 @@ function Complete-WebBulletinPhotoRequest {
     else { @{ MediaField = $admission.Field; MediaPath = $Pending.Path } }
     if ($admission.CreateRow) {
         $result = Add-MojazBulletinRows -Library $script:MojazLibrary -BulletinId $admission.BulletinId -UserId $admission.Actor `
-            -Rows @($attachment + @{ AllowImageOnly = $true })
+            -Rows @($attachment + $admission.RowArguments + @{ AllowImageOnly = $true })
     }
     else {
         if ($canonical) { $attachment.DesignFields = @{ $script:MojazImageVariable = '' } }

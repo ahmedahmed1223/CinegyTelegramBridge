@@ -179,14 +179,14 @@ Describe 'Web channel: the pipe' {
             @{ Key = 'access'; AdminOnly = $true }
         }
         Mock Get-WhatsNewSections {
-            foreach ($version in '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
+            foreach ($version in '9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
                 @{ Version = $version; Items = @('private-bot-release') }
             }
         }
         $operator = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7110,"role":"owner"}}' | ConvertFrom-Json
         $operator.ok | Should -BeTrue
         $operator.data.chapters.id | Should -Be @('templates')
-        $operator.data.releases.version | Should -Be @('9.1.1', '9.1.0', '9.0.0', '8.129.0')
+        $operator.data.releases.version | Should -Be @('9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0')
         $operator.data.releases[0].Items.Count | Should -Be 2
         $operator.data.releases[-1].Items.Count | Should -Be 1
 
@@ -3910,6 +3910,72 @@ Describe 'Web channel: the pipe' {
             (& $sendPhoto $photo).error | Should -Be 'bridge_outcome_unknown'
             $newImage = $script:MojazLibrary.Bulletins[0].Rows[0].Image
             Test-Path -LiteralPath (Join-Path (Get-MojazUploadDirectory) (Split-Path -Leaf $newImage)) | Should -BeTrue
+        }
+        finally {
+            $script:MojazLibrary = $oldLibrary
+            $script:mojazWebUploadDirectory = $oldUploadDirectory
+        }
+    }
+
+    It 'reads the built-in bulletin text that the bot plays even without scene field discovery' {
+        Mock Get-MojazRowFieldPrompts { @() }
+        Mock Get-WebBulletinPhotoDestination { $null }
+        Mock Test-MojazBulletinPlaybackDesign { $false }
+        Mock Get-MojazBulletinSceneTiming { $null }
+        $bulletin = @{
+            Id = 'b_built_in'; Name = 'موجز'; Revision = 2
+            Rows = @(@{
+                    Id = 'r_built_in'; Title = 'العنوان الحالي'; Text = "سطر أول`nسطر ثانٍ"; ImageMode = 'inherit'
+                    Fields = @{ 'title.Text' = 'عنوان قديم'; 'Subject.Text' = 'نص قديم'; 'mojaz_img' = 'pic.png' }
+                })
+        }
+        $editor = Get-WebBulletinEditor -Bulletin $bulletin
+        @($editor.fields).name | Should -Be @('title.Text', 'Subject.Text', 'mojaz_img')
+        $editor.rows[0].values['title.Text'] | Should -Be $bulletin.Rows[0].Title
+        $editor.rows[0].values['Subject.Text'] | Should -Be $bulletin.Rows[0].Text
+        $editor.rows[0].media | Should -BeNullOrEmpty
+        $editor.rows[0].imageMode | Should -Be 'inherit'
+    }
+
+    It 'saves the title, story and processed photo together for a new bulletin row' {
+        Add-Type -AssemblyName System.Drawing
+        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-MojazAvailable { $true }
+        Mock Get-MojazUploadDirectory { Join-Path $TestDrive 'story-row-pictures' }
+        Mock Get-MojazImageSize { @{ Width = 32; Height = 18 } }
+        Mock Get-WebBulletinFields {
+            @{ name = 'title.Text'; label = 'العنوان'; kind = 'text' }
+            @{ name = 'Subject.Text'; label = 'النص'; kind = 'text' }
+            @{ name = 'mojaz_img'; label = 'الصورة'; kind = 'media' }
+        }
+        $oldLibrary = $script:MojazLibrary
+        $oldUploadDirectory = $script:mojazWebUploadDirectory
+        $script:mojazWebUploadDirectory = Join-Path $TestDrive 'story-row-staging'
+        New-Item -ItemType Directory -Path $script:mojazWebUploadDirectory | Out-Null
+        try {
+            $script:MojazLibrary = (Add-MojazBulletin -Library (New-MojazLibrary) -Name 'موجز كامل').Value
+            $bulletin = $script:MojazLibrary.Bulletins[0]
+            $request = @{ op = 'bulletin.photo'; args = @{
+                    actor = 4321; action = 'apply'; id = $bulletin.Id; revision = $bulletin.Revision
+                    createRow = $true; field = 'mojaz_img'; upload = [guid]::NewGuid().ToString('N')
+                    values = @{ 'title.Text' = 'خبر'; 'Subject.Text' = " `u{200B} " }
+                } }
+            $path = Join-Path $script:mojazWebUploadDirectory "web-$($request.args.upload).image"
+            $bitmap = [System.Drawing.Bitmap]::new(3, 4)
+            try { $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png) }
+            finally { $bitmap.Dispose() }
+            $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Depth 6 -Compress) | ConvertFrom-Json
+            $reply.error | Should -Be 'bulletin_invalid'
+            $script:MojazLibrary.Bulletins[0].Rows.Count | Should -Be 0
+            Test-Path -LiteralPath (Get-MojazUploadDirectory) | Should -BeFalse
+
+            $request.args.values['Subject.Text'] = "  سطر أول`nسطر ثانٍ  "
+            $reply = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($request | ConvertTo-Json -Depth 6 -Compress) | ConvertFrom-Json
+            $reply.ok | Should -BeTrue
+            $reply.data.rows[0].values.'title.Text' | Should -Be 'خبر'
+            $reply.data.rows[0].values.'Subject.Text' | Should -Be "سطر أول`nسطر ثانٍ"
+            $reply.data.rows[0].media | Should -Contain 'mojaz_img'
+            $script:MojazLibrary.Bulletins[0].Revision | Should -Be ($bulletin.Revision + 1)
         }
         finally {
             $script:MojazLibrary = $oldLibrary

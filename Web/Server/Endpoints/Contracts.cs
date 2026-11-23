@@ -86,6 +86,7 @@ public sealed record ProgrammeBoardAirPreview(string Review, int Layer, string T
     bool ReplacesGraphic, string? GraphicName, int? AutoHideSeconds, bool StopsUrgent = false, bool StopsBulletin = false);
 public sealed record ProgrammeBoardAirResult(ProgrammeBoardAirPreview? Preview, string? LiveRowId, bool AutoHideFailed = false);
 public sealed record BulletinField(string Name, string Label, string Kind);
+public sealed record BulletinPhotoRowUpload(IFormFile Image, string Values);
 public sealed record BulletinRow(string Id, Dictionary<string, string> Values, string[] Media, bool Skipped, string? ImageMode = null);
 public sealed record BulletinImageChoice(string RowId, int RowNumber);
 public sealed record BulletinPreviewRow(string Id, int Number, Dictionary<string, string> Values, string[] Media, bool Skipped,

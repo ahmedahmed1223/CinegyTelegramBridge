@@ -347,9 +347,29 @@ function Convert-MojazPicture {
             $image = [System.Drawing.Image]::FromStream($uploadStream, $false, $false)
         }
         else { $image = [System.Drawing.Image]::FromFile($SourcePath) }
+        if ($SharedUpload -and ([long]$image.Width * $image.Height) -gt 32MB) {
+            throw 'The image exceeds the maximum pixel count.'
+        }
+        # Browsers upload the original camera file. Its pixel grid can be
+        # sideways even when the phone's preview applies EXIF orientation.
+        if (0x0112 -in $image.PropertyIdList) {
+            $orientation = $image.GetPropertyItem(0x0112).Value
+            if ($orientation.Length -ge 2) {
+                $rotateFlip = switch ([BitConverter]::ToUInt16($orientation, 0)) {
+                    2 { 'RotateNoneFlipX' }
+                    3 { 'Rotate180FlipNone' }
+                    4 { 'Rotate180FlipX' }
+                    5 { 'Rotate90FlipX' }
+                    6 { 'Rotate90FlipNone' }
+                    7 { 'Rotate270FlipX' }
+                    8 { 'Rotate270FlipNone' }
+                }
+                if ($rotateFlip) { $image.RotateFlip([System.Drawing.RotateFlipType]$rotateFlip) }
+            }
+        }
         $width = if ($Size) { [int]$Size.Width } else { [int]$image.Width }
         $height = if ($Size) { [int]$Size.Height } else { [int]$image.Height }
-        if ($SharedUpload -and (([long]$image.Width * $image.Height) -gt 32MB -or ([long]$width * $height) -gt 32MB)) {
+        if ($SharedUpload -and ([long]$width * $height) -gt 32MB) {
             throw 'The image exceeds the maximum pixel count.'
         }
         $canvas = New-Object System.Drawing.Bitmap($width, $height)

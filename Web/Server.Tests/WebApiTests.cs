@@ -39,6 +39,43 @@ public sealed class TickerTxtTests : IDisposable
     }
 }
 
+public sealed class BulletinPhotoRowTests : IDisposable
+{
+    private readonly WebApp _app = new();
+
+    public void Dispose() => _app.Dispose();
+
+    [Fact]
+    public async Task A_new_bulletin_row_sends_its_text_and_staged_image_in_one_bridge_write()
+    {
+        var directory = Path.Combine(_app.Root, "bulletin-uploads");
+        _app.Bridge.BulletinPhotoDirectory = directory;
+        var browser = await _app.SignedInAsync("bulletin-editor", WebApp.Operator);
+        const string path = "/api/content/bulletins/photo-row?id=b_1&field=mojaz_img&revision=1";
+        var bytes = new byte[] { 137, 80, 78, 71 };
+        using var payload = new MultipartFormDataContent();
+        payload.Add(new ByteArrayContent(bytes), "image", "fixture.png");
+        payload.Add(JsonContent.Create(new Dictionary<string, string>
+        {
+            ["title.Text"] = "العنوان",
+            ["Subject.Text"] = "سطر أول\nسطر ثانٍ",
+        }), "values");
+
+        using var response = await browser.Client.PostAsync(path, payload);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(bytes, _app.Bridge.BulletinPhotoBytes);
+        var mutation = Assert.Single(_app.Bridge.Calls, call => call.Op == "bulletin.photo" && call.Args.Contains("\"apply\"", StringComparison.Ordinal));
+        using var document = System.Text.Json.JsonDocument.Parse(mutation.Args);
+        var arguments = document.RootElement;
+        Assert.True(arguments.GetProperty("createRow").GetBoolean());
+        Assert.Equal(1, arguments.GetProperty("revision").GetInt32());
+        Assert.Equal("العنوان", arguments.GetProperty("values").GetProperty("title.Text").GetString());
+        Assert.Equal("سطر أول\nسطر ثانٍ", arguments.GetProperty("values").GetProperty("Subject.Text").GetString());
+        Assert.Empty(Directory.EnumerateFiles(directory));
+    }
+}
+
 public sealed class SignInTests : IDisposable
 {
     private readonly WebApp _app = new();

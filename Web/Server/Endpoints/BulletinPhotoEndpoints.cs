@@ -10,25 +10,27 @@ namespace CinegyBridge.Web.Endpoints;
 
 internal static class BulletinPhotoEndpoints
 {
+    private const int MaximumValuesCharacters = 24 * 1024;
+    private const int MultipartAllowance = 128 * 1024;
     private sealed record UploadPolicy(string Directory, int MaximumBytes);
     private sealed record PreviewFile(string Root, string Path);
 
     public static void Map(RouteGroupBuilder bulletin)
     {
-        bulletin.MapPost("/photo", Upload)
-            .Accepts<Stream>("application/octet-stream")
-            .Produces<BulletinEditor>()
-            .Produces<ErrorResponse>(400)
-            .Produces<ErrorResponse>(403)
-            .Produces<ErrorResponse>(404)
-            .Produces<ErrorResponse>(409)
-            .Produces<ErrorResponse>(413)
-            .Produces<ErrorResponse>(503);
+        DescribeUpload(bulletin.MapPost("/photo", UploadPhoto).Accepts<Stream>("application/octet-stream"));
+        DescribeUpload(bulletin.MapPost("/photo-row", UploadRow).Accepts<BulletinPhotoRowUpload>("multipart/form-data"));
         bulletin.MapGet("/preview-image", Preview)
             .Produces(200, contentType: "image/png", additionalContentTypes: ["image/jpeg", "image/bmp", "image/gif", "image/webp"])
             .Produces<ErrorResponse>(403)
             .Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409)
+            .Produces<ErrorResponse>(503);
+    }
+
+    private static void DescribeUpload(RouteHandlerBuilder route)
+    {
+        route.Produces<BulletinEditor>().Produces<ErrorResponse>(400).Produces<ErrorResponse>(403)
+            .Produces<ErrorResponse>(404).Produces<ErrorResponse>(409).Produces<ErrorResponse>(413)
             .Produces<ErrorResponse>(503);
     }
 
@@ -118,7 +120,14 @@ internal static class BulletinPhotoEndpoints
         };
     }
 
-    private static async Task<IResult> Upload(string id, string? rowId, int revision, string? field, bool? createRow, IBridgeChannel bridge, HttpContext http)
+    private static Task<IResult> UploadPhoto(string id, string? rowId, int revision, string? field, bool? createRow,
+        IBridgeChannel bridge, HttpContext http) => Upload(id, rowId, revision, field, createRow, false, bridge, http);
+
+    private static Task<IResult> UploadRow(string id, int revision, string field, IBridgeChannel bridge, HttpContext http) =>
+        Upload(id, null, revision, field, true, true, bridge, http);
+
+    private static async Task<IResult> Upload(string id, string? rowId, int revision, string? field, bool? createRow,
+        bool withRowValues, IBridgeChannel bridge, HttpContext http)
     {
         http.Response.Headers.CacheControl = "no-store";
         if (revision < 1 || id.Length is < 1 or > 64 || rowId is { Length: < 1 or > 64 } ||
@@ -132,12 +141,38 @@ internal static class BulletinPhotoEndpoints
         if (policy is null || string.IsNullOrEmpty(policy.Directory) ||
             !Path.IsPathFullyQualified(policy.Directory) || policy.MaximumBytes <= 0)
             return ApiErrors.BridgeUnavailable();
-        if (http.Request.ContentLength > policy.MaximumBytes) return Error("bulletin_photo_size");
+        long maximumRequestBytes = (long)policy.MaximumBytes + (withRowValues ? MultipartAllowance : 0);
+        if (http.Request.ContentLength > maximumRequestBytes) return Error("bulletin_photo_size");
         if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-            limit.MaxRequestBodySize = policy.MaximumBytes;
+            limit.MaxRequestBodySize = maximumRequestBytes;
 
         try
         {
+            IFormFile? image = null;
+            Dictionary<string, string>? values = null;
+            if (withRowValues)
+            {
+                if (!http.Request.HasFormContentType) return Error("bulletin_photo_invalid");
+                var form = await new FormFeature(http.Request, new FormOptions
+                {
+                    MultipartBodyLengthLimit = maximumRequestBytes,
+                    ValueCountLimit = 2,
+                    ValueLengthLimit = MultipartAllowance,
+                }).ReadFormAsync(cancellation);
+                image = form.Files.GetFile("image");
+                if (form.Files.Count != 1 || image is null || image.Length == 0) return Error("bulletin_photo_invalid");
+                if (image.Length > policy.MaximumBytes) return Error("bulletin_photo_size");
+                var submitted = form["values"];
+                if (submitted.Count != 1 || submitted[0] is not { Length: > 0 and <= MaximumValuesCharacters } json)
+                    return Error("bulletin_invalid");
+                values = JsonSerializer.Deserialize<Dictionary<string, string>>(json, JsonDefaults.Options);
+                // Leave room for the request envelope in the private pipe's
+                // JSON line after System.Text.Json has escaped the text.
+                if (values is null || JsonSerializer.Serialize(values, JsonDefaults.Options).Length > 60_000)
+                    return Error("bulletin_invalid");
+            }
+            await using var rowImage = image?.OpenReadStream();
+            var content = rowImage ?? http.Request.Body;
             var directory = Directory.CreateDirectory(policy.Directory);
             if ((directory.Attributes & FileAttributes.ReparsePoint) != 0) return Error("bulletin_save_failed");
             var upload = Guid.NewGuid().ToString("N");
@@ -148,7 +183,7 @@ internal static class BulletinPhotoEndpoints
             long bytes = 0;
             while (true)
             {
-                var read = await http.Request.Body.ReadAsync(buffer, cancellation);
+                var read = await content.ReadAsync(buffer, cancellation);
                 if (read == 0) break;
                 bytes += read;
                 if (bytes > policy.MaximumBytes) return Error("bulletin_photo_size");
@@ -156,20 +191,22 @@ internal static class BulletinPhotoEndpoints
             }
             if (bytes == 0) return Error("bulletin_photo_invalid");
             await staged.FlushAsync(cancellation);
-            var reply = await bridge.SendAsync("bulletin.photo", new { actor, action = "apply", id, rowId, revision, field, createRow, upload }, cancellation);
+            var reply = await bridge.SendAsync("bulletin.photo", new { actor, action = "apply", id, rowId, revision, field, createRow, upload, values }, cancellation);
             return reply.Ok ? Results.Ok(reply.Data.Deserialize<BulletinEditor>(JsonDefaults.Options)) : Error(reply.Error);
         }
         catch (BadHttpRequestException exception) when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
             return Error("bulletin_photo_size");
         }
+        catch (InvalidDataException) { return Error("bulletin_photo_invalid"); }
+        catch (JsonException) { return Error("bulletin_invalid"); }
         catch (IOException) { return Error("bulletin_save_failed"); }
         catch (UnauthorizedAccessException) { return Error("bulletin_save_failed"); }
     }
 
     private static IResult Error(string code) => code switch
     {
-        "bulletin_photo_invalid" => ApiErrors.Of(400, code),
+        "bulletin_photo_invalid" or "bulletin_invalid" => ApiErrors.Of(400, code),
         "forbidden" => ApiErrors.Of(403, code),
         "not_found" or "content_disabled" or "bulletin_photo_unavailable" => ApiErrors.Of(404, code),
         "bulletin_stale" or "bulletin_photo_busy" => ApiErrors.Of(409, code),

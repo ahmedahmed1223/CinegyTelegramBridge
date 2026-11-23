@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.4'; Items = @('In the web bulletin, enter the headline, story and location in the same window where you choose the previous picture or upload a new one. Save once to add the row.') },
                 @{ Version = '9.1.3'; Items = @('In the web bulletin, enter the headline and story and choose a photo before saving the row. You can also reuse a picture or keep the previous one.',
                         'Phone photos are turned upright before being cropped to fit the bulletin template.') },
                 @{ Version = '9.1.2'; Items = @('Keep using Telegram while the bridge checks the broadcast picture, even when the first capture has to be retried.',
@@ -398,6 +399,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.4'; Items = @('أدخل العنوان والخبر والمكان واختر الصورة السابقة أو ارفع صورة جديدة من نافذة إضافة صف الموجز في الويب. اضغط «حفظ الصف» لإضافته.') },
                 @{ Version = '9.1.3'; Items = @('أضف العنوان والخبر والصورة في صف الموجز من الويب بضغطة حفظ واحدة. يمكنك أيضًا إعادة استخدام صورة أو متابعة الصورة السابقة.',
                         'تُضبط جهة صورة الهاتف قبل قصّها لتناسب قالب الموجز.') },
                 @{ Version = '9.1.2'; Items = @('تابع استخدام تليجرام أثناء فحص صورة البث، حتى إذا احتاج الالتقاط إلى محاولة ثانية.',

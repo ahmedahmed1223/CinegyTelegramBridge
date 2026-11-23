@@ -179,16 +179,20 @@ Describe 'Web channel: the pipe' {
             @{ Key = 'access'; AdminOnly = $true }
         }
         Mock Get-WhatsNewSections {
-            foreach ($version in '9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
+            foreach ($version in '9.1.4', '9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
                 @{ Version = $version; Items = @('private-bot-release') }
             }
         }
         $operator = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7110,"role":"owner"}}' | ConvertFrom-Json
         $operator.ok | Should -BeTrue
         $operator.data.chapters.id | Should -Be @('templates')
-        $operator.data.releases.version | Should -Be @('9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0')
-        $operator.data.releases[0].Items.Count | Should -Be 2
-        $operator.data.releases[-1].Items.Count | Should -Be 1
+        $operator.data.releases.version | Should -Be @('9.1.4', '9.1.3', '9.1.1', '9.1.0', '9.0.0')
+        $operator.data.releases[0].Items.Count | Should -Be 1
+
+        Mock Get-WhatsNewSections {
+            @{ Version = '9.1.4'; Items = @('private-bot-release') }
+            @{ Version = '8.129.0'; Items = @('private-bot-release') }
+        }
 
         $admin = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7111}}' | ConvertFrom-Json
         $admin.data.chapters.id | Should -Be @('templates', 'system', 'access')

@@ -37,6 +37,7 @@ function Invoke-WebOperatorHelp {
     # The shared release ledger owns versions and order. A release may mix
     # several audiences in one Bot line, so expose only reviewed Web summaries.
     $publicUpdates = @{
+        '9.1.4' = 'أضف العنوان والخبر والمكان واختر الصورة السابقة أو صورة جديدة من نافذة واحدة، ثم احفظ الصف.'
         '9.1.3' = @(
             'أدخل عنوان الموجز ومتنه واختر الصورة في صف واحد، ثم احفظه.'
             'تُضبط جهة صور الهاتف قبل قصّها على مقاس قالب الموجز.'

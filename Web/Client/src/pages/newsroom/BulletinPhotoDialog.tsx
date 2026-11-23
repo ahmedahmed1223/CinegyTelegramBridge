@@ -1,4 +1,4 @@
-import { Alert, Button, FileInput, Group, Image, Modal, Stack, Text } from '@mantine/core'
+import { Alert, Button, FileInput, Group, Image, Modal, NativeSelect, Stack, Text, Textarea, TextInput } from '@mantine/core'
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { uploadBulletinPhoto, type Schemas } from '../../api/client'
@@ -7,9 +7,10 @@ import { messageFor } from '../../api/messages'
 type Bulletin = Schemas['BulletinEditor']
 type PhotoField = { name: string; label: string }
 type PhotoJob = { field: PhotoField; file: File }
-export const bulletinPhotoMaxBytes = 10 * 1024 * 1024
+const bulletinPhotoMaxBytes = 10 * 1024 * 1024
+const bulletinTextMaxLength = 4096
 
-export function BulletinPhotoInput({ label, file, disabled, describe, onChange }: {
+function BulletinPhotoInput({ label, file, disabled, describe, onChange }: {
   label: string; file: File | null; disabled: boolean; describe: boolean; onChange: (file: File | null) => void
 }) {
   const [preview, setPreview] = useState<{ file: File; url: string } | null>(null)
@@ -34,9 +35,93 @@ export function BulletinPhotoInput({ label, file, disabled, describe, onChange }
   </Stack>
 }
 
+type NewRowInput = { values: Record<string, string>; imageChoice: string; file: File | null }
+
+export function BulletinNewRowDialog({
+  title, textFields, requireText, imageOptions, canUpload, initialImageChoice, onClose, saveRow, onSaved,
+}: {
+  title: string
+  textFields: PhotoField[]
+  requireText: boolean
+  imageOptions: { value: string; label: string }[]
+  canUpload: boolean
+  initialImageChoice: string
+  onClose: () => void
+  saveRow: (row: NewRowInput) => Promise<Bulletin>
+  onSaved: (bulletin: Bulletin) => void
+}) {
+  const [file, setFile] = useState<File | null>(null)
+  const [location, setLocation] = useState('')
+  const [imageChoice, setImageChoice] = useState(initialImageChoice)
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(textFields.map(({ name }) => [name, ''])))
+  const save = useMutation({ mutationFn: saveRow, onSuccess: onSaved })
+  const stale = save.error?.cause === 'bulletin_stale'
+  const locked = save.isPending || stale
+  const uploadPhoto = imageChoice === 'new'
+  const selectedFile = uploadPhoto ? file : null
+  const storyField = requireText ? textFields.find(({ name }) => name.toLowerCase() === 'subject.text')?.name : undefined
+  const story = (storyField && values[storyField]) || ''
+  const preparedStory = location.trim() ? `${location.trim()}\n${story.trim()}` : story
+  const storyTooLong = preparedStory.length > bulletinTextMaxLength
+  const sources = imageOptions.length ? imageOptions : textFields.length ? [{ value: '', label: 'بلا صورة' }] : []
+  const choices = [
+    ...sources.slice(0, 1),
+    ...(canUpload ? [{ value: 'new', label: 'صورة جديدة' }] : []),
+    ...sources.slice(1),
+  ]
+  const missingText = requireText && textFields.some(({ name }) => !values[name]?.trim())
+  const missingPhoto = uploadPhoto && (!selectedFile || selectedFile.size === 0 || selectedFile.size > bulletinPhotoMaxBytes)
+  const canSave = !locked && !missingText && !missingPhoto && !storyTooLong
+
+  return (
+    <Modal opened title={title} onClose={onClose} closeOnEscape={!save.isPending}
+      closeOnClickOutside={false} withCloseButton={!save.isPending}>
+      <form onSubmit={(event) => {
+        event.preventDefault()
+        if (!canSave) return
+        save.mutate({
+          values: storyField ? { ...values, [storyField]: preparedStory } : values,
+          imageChoice, file: selectedFile,
+        })
+      }}>
+        <Stack gap="md">
+          {textFields.map(({ name, label }, index) => (
+            <Textarea key={name} label={label} dir="rtl" required={requireText} maxLength={bulletinTextMaxLength}
+              autosize minRows={index === 0 ? 1 : 3} maxRows={8} autoFocus={index === 0}
+              disabled={locked} value={values[name]} error={name === storyField && storyTooLong ? 'قصّر المكان أو متن الخبر.' : undefined}
+              onChange={(event) => {
+                const text = event.currentTarget.value
+                setValues((current) => ({ ...current, [name]: text }))
+              }} />
+          ))}
+          {storyField && <TextInput label="المكان" description="اختياري. يظهر في أول سطر من الخبر." dir="rtl"
+            maxLength={bulletinTextMaxLength} disabled={locked} value={location}
+            onChange={(event) => setLocation(event.currentTarget.value)} />}
+          {choices.length > 1 && <NativeSelect label="مصدر الصورة" data={choices} value={imageChoice}
+            disabled={locked} onChange={(event) => {
+              setImageChoice(event.currentTarget.value)
+              save.reset()
+            }} />}
+          {uploadPhoto && <BulletinPhotoInput label="ملف الصورة" file={file} disabled={locked} describe onChange={(next) => {
+            setFile(next)
+            save.reset()
+          }} />}
+          {selectedFile?.size === 0 && <Alert color="red" role="alert">{messageFor('bulletin_photo_invalid')}</Alert>}
+          {save.isPending && <Text size="sm" role="status">{uploadPhoto ? 'جارٍ معالجة الصورة وحفظ الصف…' : 'جارٍ حفظ الصف…'}</Text>}
+          {save.error && <Alert color="red" role="alert">{save.error.message}</Alert>}
+          <Group justify="flex-end">
+            <Button type="button" variant="default" disabled={save.isPending} onClick={onClose}>إلغاء</Button>
+            <Button type="submit" loading={save.isPending} disabled={!canSave}>حفظ الصف</Button>
+          </Group>
+        </Stack>
+      </form>
+    </Modal>
+  )
+}
+
 export function BulletinPhotoDialog({ id, rowId, revision, title, field, otherFields = [], onClose, onSaved }: {
   id: string
-  rowId: string | null
+  rowId: string
   revision: number
   title: string
   field: string
@@ -90,7 +175,7 @@ export function BulletinPhotoDialog({ id, rowId, revision, title, field, otherFi
               setFiles(current => new Map(current).set(target.name, file))
               if (!stale) upload.reset()
             }} />)}
-          {rowId && !!otherFields.length && !expanded && <Button type="button" variant="light" size="sm" disabled={upload.isPending || stale}
+          {!!otherFields.length && !expanded && <Button type="button" variant="light" size="sm" disabled={upload.isPending || stale}
             onClick={() => setExpanded(true)}>إضافة صور إلى حقول أخرى</Button>}
           {upload.isPending && <Text size="sm" role="status">
             {expanded && activeField ? `جارٍ رفع صورة «${activeField}» ومعالجتها…` : 'جارٍ رفع الصورة ومعالجتها…'}
@@ -102,7 +187,7 @@ export function BulletinPhotoDialog({ id, rowId, revision, title, field, otherFi
           </Alert>}
           <Group justify="flex-end">
             <Button variant="default" disabled={upload.isPending} onClick={close}>{savedCount ? 'إغلاق' : 'إلغاء'}</Button>
-            <Button type="submit" loading={upload.isPending} disabled={!canSubmit}>{rowId ? expanded ? 'حفظ الصور' : 'حفظ الصورة' : 'إضافة الصف'}</Button>
+            <Button type="submit" loading={upload.isPending} disabled={!canSubmit}>{expanded ? 'حفظ الصور' : 'حفظ الصورة'}</Button>
           </Group>
         </Stack>
       </form>

@@ -6,10 +6,10 @@ import { modals } from '@mantine/modals'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { IconArrowDown, IconArrowRight, IconArrowUp, IconClipboard, IconClock, IconCopy, IconEdit, IconFileUpload, IconPhoto, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { useState } from 'react'
-import { api, errorCode, uploadBulletinPhotoRow, type BulletinPhotoRow, type Schemas } from '../../api/client'
+import { api, errorCode, uploadBulletinPhotoRow, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { BulletinPaste } from './RowPaste'
-import { BulletinPhotoDialog, BulletinPhotoInput, bulletinPhotoMaxBytes } from './BulletinPhotoDialog'
+import { BulletinNewRowDialog, BulletinPhotoDialog } from './BulletinPhotoDialog'
 import { BulletinSceneImageDialog } from './BulletinSceneImageDialog'
 import { BulletinPreview } from './BulletinPreview'
 import { BulletinRunStatus } from './BulletinPlayback'
@@ -23,7 +23,7 @@ import classes from './NewsroomPage.module.css'
 type Bulletin = Schemas['BulletinEditor']
 type Row = Schemas['BulletinRow']
 type EditRequest = Pick<Schemas['BulletinEditRequest'], 'action'> & Partial<Schemas['BulletinEditRequest']>
-type EditRow = { row: Row | null; revision: number; values: Record<string, string>; imageChoice: string; photo: File | null }
+type EditRow = { row: Row; revision: number; values: Record<string, string>; imageChoice: string }
 type NameAction = 'create' | 'rename' | 'copy'
 const number = new Intl.NumberFormat('ar')
 const names = { create: 'إنشاء موجز', rename: 'إعادة تسمية', copy: 'نسخ الموجز' }
@@ -33,7 +33,10 @@ async function applyEdit(request: EditRequest) {
     body: { id: null, revision: null, page: null, rowId: null, name: null, design: null, values: null, timing: null,
       imageMode: null, imageSourceRowId: null, ...request },
   })
-  if (!data) throw new Error(error?.message || messageFor(errorCode(error, response)))
+  if (!data) {
+    const code = errorCode(error, response)
+    throw new Error(error?.message || messageFor(code), { cause: code })
+  }
   return data
 }
 
@@ -102,7 +105,8 @@ export function BulletinEditor({ id, onBack, onSaved }: {
   const [previewing, setPreviewing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
   const [management, setManagement] = useState<BulletinManagementOperation | null>(null)
-  const [photoRow, setPhotoRow] = useState<{ rowId: string | null; revision: number; field: string; title: string } | null>(null)
+  const [newRow, setNewRow] = useState<{ revision: number; uploadField?: string; title: string; imageChoice: string } | null>(null)
+  const [photoRow, setPhotoRow] = useState<{ rowId: string; revision: number; field: string; title: string } | null>(null)
   const [sceneImageRow, setSceneImageRow] = useState<{ rowId: string; revision: number } | null>(null)
   const [designChange, setDesignChange] = useState<{ key: string | null; revision: number } | null>(null)
   const [savedNote, setSavedNote] = useState('')
@@ -128,46 +132,49 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     setNameMode(null)
     setPasting(false)
     setEditingTiming(false)
+    setNewRow(null)
     setPhotoRow(null)
     setSceneImageRow(null)
     setDesignChange(null)
     onSaved(value)
   }
-  const edit = useMutation({
-    mutationFn: async (request: EditRequest | BulletinPhotoRow) => {
-      if (!('file' in request)) return applyEdit(request)
-      try {
-        return await uploadBulletinPhotoRow(request)
-      } catch (error) {
-        throw new Error(messageFor(error instanceof Error ? error.message : 'unknown'))
-      }
-    },
-    onSuccess: acceptSaved,
-  })
+  const edit = useMutation({ mutationFn: applyEdit, onSuccess: acceptSaved })
   const bulletin = query.data
   const playback = useBulletinPlayback(id, Boolean(bulletin?.playbackSupported || bulletin?.onAir))
   const onAir = playback.data ? Boolean(playback.data.run) : bulletin?.onAir === true
   const sceneUnconfirmed = playback.data?.run?.state === 'scene_unconfirmed'
   const busy = edit.isPending || query.isFetching
-  const editing = !!rowEdit || !!nameMode || !!designChange || !!photoRow || !!sceneImageRow || pasting || editingTiming || previewing || scheduling || !!management
+  const editing = !!rowEdit || !!newRow || !!nameMode || !!designChange || !!photoRow || !!sceneImageRow || pasting || editingTiming || previewing || scheduling || !!management
   const fields = bulletin?.fields ?? []
   const textFields = fields.filter((field) => field.kind === 'text')
   const photoFields = fields.filter((field) => bulletin?.photoFields?.includes(field.name) ??
     (bulletin?.canUploadPhoto && field.name === bulletin.imageField))
   const isBuiltInStory = bulletin?.design.toLowerCase() === 'mojaz' && bulletin.headlinePaste
-  const rowPhotoField = isBuiltInStory ? photoFields.find((field) => field.name === bulletin?.imageField) : undefined
+  const preferredPhoto = bulletin?.imageField ? photoFields.find((field) => field.name === bulletin.imageField) : photoFields[0]
+  const imageOptions = bulletin?.imageField ? [
+    { value: 'inherit', label: 'الصورة السابقة' },
+    { value: 'template', label: 'صورة القالب' },
+    ...(bulletin.imageChoices ?? []).map(({ rowId, rowNumber }) => ({ value: `reuse:${rowId}`, label: `صورة الصف ${number.format(rowNumber)}` })),
+  ] : []
   const canEnterRow = textFields.length > 0 || Boolean(bulletin?.imageField)
-  const missingStory = Boolean(rowEdit && !rowEdit.row && isBuiltInStory &&
-    textFields.some((field) => !rowEdit.values[field.name]?.trim()))
-  const rowCanSave = Boolean(rowEdit && !busy && !missingStory &&
-    (textFields.length || rowEdit.imageChoice) && (!rowEdit.photo || rowEdit.photo.size <= bulletinPhotoMaxBytes))
+  const rowCanSave = Boolean(rowEdit && !busy && (textFields.length || rowEdit.imageChoice))
   const availableDesigns = designs.data?.filter((entry) => entry.value !== bulletin?.design) ?? []
 
-  function startRow(row: Row | null, revision: number) {
+  function startRow(row: Row, revision: number) {
     edit.reset()
     setSavedNote('')
-    setRowEdit({ row, revision, values: Object.fromEntries(textFields.map((field) => [field.name, row?.values[field.name] ?? ''])),
-      imageChoice: row || !bulletin?.imageField ? '' : 'inherit', photo: null })
+    setRowEdit({ row, revision, values: Object.fromEntries(textFields.map((field) => [field.name, row.values[field.name] ?? ''])),
+      imageChoice: '' })
+  }
+
+  function startNewRow(revision: number, field?: Bulletin['fields'][number]) {
+    edit.reset()
+    setSavedNote('')
+    const title = field ? (photoFields.length === 1 ? 'إضافة صف بصورة' : `إضافة صف بصورة في عمود ${field.label}`) : 'إضافة صف'
+    setNewRow({
+      revision, title, uploadField: (field ?? preferredPhoto)?.name,
+      imageChoice: field ? 'new' : bulletin?.imageField ? 'inherit' : '',
+    })
   }
 
   function rowAction(action: 'up' | 'down' | 'skip' | 'remove', row: Row, latest: Bulletin) {
@@ -187,41 +194,31 @@ export function BulletinEditor({ id, onBack, onSaved }: {
     } else write()
   }
 
-  function cell(row: Row | null, field: Bulletin['fields'][number]) {
+  function cell(row: Row, field: Bulletin['fields'][number]) {
     if (field.kind === 'media') {
-      if (row?.media.includes(field.name)) return <Text size="sm">مرفق</Text>
-      if (field.name === bulletin?.imageField && row?.imageMode) {
+      if (row.media.includes(field.name)) return <Text size="sm">مرفق</Text>
+      if (field.name === bulletin?.imageField && row.imageMode) {
         return <Text size="sm" c="dimmed">{row.imageMode === 'template' ? 'صورة القالب' : 'استمرار الصورة السابقة'}</Text>
       }
       return <Text size="sm" c="dimmed">—</Text>
     }
-    return <Text size="sm" dir="rtl" className={classes.bulletinCellText}>{row?.values[field.name] || '—'}</Text>
+    return <Text size="sm" dir="rtl" className={classes.bulletinCellText}>{row.values[field.name] || '—'}</Text>
   }
 
-  function editRow(active: EditRow, rank?: number) {
-    const imageChoices = [
-      ...(active.row ? [{ value: '', label: 'الإبقاء على الإعداد الحالي' }] : []),
-      { value: 'inherit', label: 'استمرار الصورة السابقة' },
-      { value: 'template', label: 'صورة القالب' },
-      ...(bulletin?.imageChoices ?? []).map(({ rowId, rowNumber }) => ({ value: `reuse:${rowId}`, label: `صورة الصف ${number.format(rowNumber)}` })),
-    ]
+  function editRow(active: EditRow, rank: number) {
     return (
-      <Table.Tr key={active.row?.id ?? 'new'} className={classes.editRow}>
-        <Table.Td>{rank == null ? 'جديد' : number.format(rank)}</Table.Td>
+      <Table.Tr key={active.row.id} className={classes.editRow}>
+        <Table.Td>{number.format(rank)}</Table.Td>
         {fields.map((field) => (
           <Table.Td key={field.name} className={field.kind === 'text' ? classes.urgentCell : undefined}>
             {field.kind === 'text' ? (
               <Textarea aria-label={field.label} dir="rtl" autosize minRows={2} maxRows={6} maxLength={4096}
-                required={!active.row && isBuiltInStory}
                 autoFocus={field === textFields[0]} disabled={busy} value={active.values[field.name] ?? ''}
                 onChange={(event) => setRowEdit({ ...active, values: { ...active.values, [field.name]: event.currentTarget.value } })} />
             ) : field.name === bulletin?.imageField ? (
-              <Stack gap="xs">
-                <NativeSelect miw={170} aria-label="مصدر الصورة" data={imageChoices} value={active.imageChoice} disabled={busy || Boolean(active.photo)}
-                  onChange={(event) => setRowEdit({ ...active, imageChoice: event.currentTarget.value })} />
-                {!active.row && rowPhotoField && <BulletinPhotoInput label="رفع صورة للصف" file={active.photo}
-                  disabled={busy} describe={false} onChange={(photo) => setRowEdit({ ...active, photo })} />}
-              </Stack>
+              <NativeSelect miw={170} aria-label="مصدر الصورة"
+                data={[{ value: '', label: 'الإبقاء على الإعداد الحالي' }, ...imageOptions]} value={active.imageChoice} disabled={busy}
+                onChange={(event) => setRowEdit({ ...active, imageChoice: event.currentTarget.value })} />
             ) : cell(active.row, field)}
           </Table.Td>
         ))}
@@ -285,13 +282,25 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             }} />}
           {sceneImageRow && <BulletinSceneImageDialog id={id} {...sceneImageRow} onClose={() => setSceneImageRow(null)}
             onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت صورة الصف.') }} />}
+          {newRow && <BulletinNewRowDialog title={newRow.title} textFields={textFields} requireText={isBuiltInStory}
+            imageOptions={imageOptions} canUpload={!!newRow.uploadField} initialImageChoice={newRow.imageChoice}
+            onClose={() => setNewRow(null)} onSaved={(value) => { acceptSaved(value); setSavedNote('أُضيف الصف إلى الموجز.') }}
+            saveRow={async ({ values, imageChoice, file }) => {
+              if (file && newRow.uploadField) {
+                try {
+                  return await uploadBulletinPhotoRow({ id, revision: newRow.revision, field: newRow.uploadField, file, values })
+                } catch (error) {
+                  const code = error instanceof Error ? error.message : 'unknown'
+                  throw new Error(messageFor(code), { cause: code })
+                }
+              }
+              const [imageMode, imageSourceRowId] = imageChoice.split(':', 2)
+              return applyEdit({ action: 'add', id, revision: newRow.revision, values, imageMode: imageMode || null, imageSourceRowId })
+            }} />}
           {photoRow && <BulletinPhotoDialog id={id} {...photoRow}
             otherFields={photoFields.filter(field => field.name !== photoRow.field)}
             onClose={() => setPhotoRow(null)}
-            onSaved={(value) => {
-              acceptSaved(value)
-              setSavedNote(photoRow.rowId ? 'حُفظت مرفقات الصف.' : 'أُضيف الصف إلى الموجز.')
-            }} />}
+            onSaved={(value) => { acceptSaved(value); setSavedNote('حُفظت مرفقات الصف.') }} />}
           {designChange && <Paper withBorder p="md" radius="lg">
             <form onSubmit={(event) => {
               event.preventDefault()
@@ -325,7 +334,10 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 onClick={() => { setSavedNote(''); setManagement('clear') }}>إفراغ الصفوف</Button>
               {textFields.length > 0 && <Button variant="default" leftSection={<IconClipboard size={17} />} disabled={busy || editing}
                 onClick={() => { setSavedNote(''); setPasting(true) }}>لصق صفوف</Button>}
-              {!isBuiltInStory && photoFields.length > 0 && <Menu position="bottom-end">
+              {photoFields.length === 1 && <Button variant={canEnterRow ? 'default' : 'filled'}
+                leftSection={<IconFileUpload size={17} />} disabled={busy || editing}
+                onClick={() => startNewRow(bulletin.revision, photoFields[0])}>إضافة صف بصورة</Button>}
+              {photoFields.length > 1 && <Menu position="bottom-end">
                 <Menu.Target>
                   <Button variant={canEnterRow ? 'default' : 'filled'} leftSection={<IconFileUpload size={17} />} disabled={busy || editing}>
                     إضافة صف بصورة
@@ -333,14 +345,12 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 </Menu.Target>
                 <Menu.Dropdown>
                   <Menu.Label>اختر عمود الصورة</Menu.Label>
-                  {photoFields.map((field) => <Menu.Item key={field.name} onClick={() => {
-                    setSavedNote('')
-                    setPhotoRow({ rowId: null, field: field.name, title: `إضافة صف بصورة في عمود ${field.label}`, revision: bulletin.revision })
-                  }}>{field.label}</Menu.Item>)}
+                  {photoFields.map((field) => <Menu.Item key={field.name}
+                    onClick={() => startNewRow(bulletin.revision, field)}>{field.label}</Menu.Item>)}
                 </Menu.Dropdown>
               </Menu>}
               {canEnterRow && <Button leftSection={<IconPlus size={17} />} disabled={busy || editing}
-                onClick={() => startRow(null, bulletin.revision)}>إضافة صف</Button>}
+                onClick={() => startNewRow(bulletin.revision)}>إضافة صف</Button>}
             </Group>
           </Group>
           {pasting && <BulletinPaste bulletin={bulletin} onCancel={() => setPasting(false)} onSave={(nextPage) => {
@@ -362,13 +372,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               <form onSubmit={(event) => {
                 event.preventDefault()
                 if (!rowEdit || !rowCanSave) return
-                if (rowEdit.photo && rowPhotoField) {
-                  edit.mutate({ id, revision: rowEdit.revision, field: rowPhotoField.name, file: rowEdit.photo, values: rowEdit.values })
-                  return
-                }
                 const [imageMode, imageSourceRowId] = rowEdit.imageChoice.split(':', 2)
-                edit.mutate({ action: rowEdit.row ? 'update' : 'add', id, revision: rowEdit.revision, page: bulletin.page,
-                  rowId: rowEdit.row?.id, values: rowEdit.values, imageMode: imageMode || null, imageSourceRowId })
+                edit.mutate({ action: 'update', id, revision: rowEdit.revision, page: bulletin.page,
+                  rowId: rowEdit.row.id, values: rowEdit.values, imageMode: imageMode || null, imageSourceRowId })
               }}>
                 <Table.ScrollContainer minWidth={Math.max(520, textFields.length * 165 + 265)} type="native" tabIndex={0} aria-label="جدول إدخال الموجز">
                   <Table verticalSpacing="sm" horizontalSpacing="sm">
@@ -383,10 +389,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                      {rowEdit && !rowEdit.row && editRow(rowEdit)}
                       {bulletin.rows.map((row, index) => {
                         const rank = bulletin.page * 20 + index + 1
-                        return rowEdit?.row?.id === row.id ? editRow(rowEdit, rank) : (
+                        return rowEdit?.row.id === row.id ? editRow(rowEdit, rank) : (
                           <Table.Tr key={row.id}>
                             <Table.Td>{number.format(rank)}</Table.Td>
                             {fields.map((field) => {

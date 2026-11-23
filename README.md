@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.4
+
+The web bulletin opens the same form from **Add row** and **Add row with a picture**. Enter the headline, story and location, choose the previous picture or upload a new one, and save once. The standard design places the optional location on the first line of the story because it has no separate location field.
+
 ## Version 9.1.3
 
 The web editor saves a standard bulletin's headline, story and optional uploaded picture in one row. Its table and preview use the same saved text as Telegram playback, and the editor remains available if the scene file cannot be read.

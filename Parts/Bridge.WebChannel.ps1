@@ -2268,8 +2268,9 @@ function Get-WebBulletinPhotoAdmission {
     if ($null -ne $values) {
         if (-not $createRow) { return @{ ok = $false; error = 'bulletin_invalid' } }
         $textFields = @($fields | Where-Object { $_.kind -eq 'text' })
-        $builtIn = (Get-MojazBulletinDesignKey -Bulletin $bulletin) -eq $script:MojazTemplateKey
-        $rowArguments = Read-WebBulletinRowArguments -Values $values -Fields $textFields -RequireStory:$builtIn
+        $requireStory = (Get-MojazBulletinDesignKey -Bulletin $bulletin) -eq $script:MojazTemplateKey -and
+            (Test-WebBulletinHeadlineFormat -Fields $textFields)
+        $rowArguments = Read-WebBulletinRowArguments -Values $values -Fields $textFields -RequireStory:$requireStory
         if (-not $rowArguments) { return @{ ok = $false; error = 'bulletin_invalid' } }
         $rowArguments.Fields = Get-MojazFieldValues -Fields $rowArguments.Fields
         if (-not $rowArguments.Fields.Count) { $rowArguments.Remove('Fields') }

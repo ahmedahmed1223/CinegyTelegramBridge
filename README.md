@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.2
+
+Periodic broadcast picture checks run between Telegram polling cycles without blocking them while FFmpeg captures a frame. Retries and dark-frame confirmation still run when needed.
+
+The ticker draft owner can accept or decline a pending handover from the Telegram ticker screen. The bot confirms the outcome and explains when an older button refers to a closed request.
+
 ## Version 9.1.1
 
 Set the web viewing link in the bot's settings. Signed-in web operators can watch that stream or copy its viewing link. Relay credentials remain private. The web help's What's New tab includes the recent version 9 releases.

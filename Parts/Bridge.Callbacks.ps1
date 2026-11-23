@@ -84,6 +84,9 @@ function Get-CallbackRefusal {
     if ($Data -like 'news:restore*' -and -not (Test-NewsTickerBackupAccess -ChatId $ChatId -UserId $UserId)) {
         return (T 'reply.newsRestoreAdminOnly')
     }
+    if ($Data -like 'news:lock*' -and $Data -ne 'news:lockrequest' -and -not (Test-NewsLockReply -Data $Data -UserId $UserId)) {
+        return (T 'news.lockReplyExpired')
+    }
     if ($Data -eq 'menu:airwidget' -and -not (Test-StatusViewer -ChatId $ChatId -UserId $UserId)) {
         return (T 'reply.checkAdminOwner')
     }
@@ -527,22 +530,21 @@ function Invoke-CallbackQuery {
             break
         }
         'news:lockrequest' { Request-NewsLockRelease -ChatId $chatId -UserId $userId | Out-Null; break }
-        'news:lockgrant*' {
-            $pending = $script:NewsLockRequest
-            if ($data -cmatch '^news:lockgrant:([a-f0-9]{32})$' -and $pending -and
-                [long]$pending.OwnerUserId -eq $userId -and [string](Get-JsonProp $pending 'Id') -ceq $Matches[1]) {
-                Complete-NewsLockRelease -Reason 'granted by the owner' | Out-Null
-            }
-            break
-        }
-        'news:lockdeny*' {
-            $pending = $script:NewsLockRequest
-            if ($data -cmatch '^news:lockdeny:([a-f0-9]{32})$' -and $pending -and
-                [long]$pending.OwnerUserId -eq $userId -and [string](Get-JsonProp $pending 'Id') -ceq $Matches[1]) {
+        'news:lock*' {
+            if ($data -clike 'news:lockdeny:*') {
                 Complete-NewsLockRelease -Denied | Out-Null
-                if ($script:NewsLockRequest) { Send-TelegramMessage -ChatId $chatId -Text (T 'news.denySaveFailed') }
+                $replyKey = if ($script:NewsLockRequest) { 'news.denySaveFailed' } else { 'news.lockReplyDenied' }
+                Send-TelegramMessage -ChatId $chatId -Text (T $replyKey)
             }
-            Show-NewsTickerManagementScreen -ChatId $chatId -UserId $userId
+            else {
+                $preserve = [bool](Get-JsonProp $script:NewsLockRequest 'PreserveDraft')
+                if (-not (Complete-NewsLockRelease -Reason 'granted by the owner')) {
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'news.lockReplyGrantFailed')
+                }
+                elseif ($preserve) {
+                    Send-TelegramMessage -ChatId $chatId -Text (T 'news.lockReplyPreserved')
+                }
+            }
             break
         }
         'news:unlock' {

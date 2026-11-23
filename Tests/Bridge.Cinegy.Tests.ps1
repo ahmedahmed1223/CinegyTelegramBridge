@@ -775,6 +775,54 @@ Describe 'Live self-test' {
     }
 }
 
+Describe 'Background output capture' {
+    It 'returns to Telegram while the capture is still running without starting it twice' {
+        $oldCycle = Get-Variable OutputMonitorCycle -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $oldMonitorAt = $script:LastOutputMonitorAt
+        $oldConfirmAt = $script:OutputMonitorConfirmAt
+        try {
+            $script:OutputMonitorCycle = $null
+            $script:LastOutputMonitorAt = [datetime]::MinValue
+            $script:OutputMonitorConfirmAt = [datetime]::MinValue
+            Mock Get-SettingInt { 30 } -ParameterFilter { $Name -eq 'OutputMonitorMinutes' }
+            Mock Get-SettingInt { 8 } -ParameterFilter { $Name -eq 'SnapshotTimeoutSeconds' }
+            Mock Get-FfmpegPath { 'mock-ffmpeg.exe' }
+            Mock Get-ActiveLiveStreamConfig { @{ SourceType = 'm3u8'; SourceUrl = 'https://test.invalid/index.m3u8' } }
+            Mock Get-LiveStreamConfig { @{ SourceType = 'm3u8'; SourceUrl = 'https://test.invalid/index.m3u8' } }
+            Mock Start-BridgeMediaProcess {
+                $running = [pscustomobject]@{ HasExited = $false; Id = 42 }
+                $running | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { throw 'This locks the Telegram loop' }
+                $running
+            }
+            Mock Write-BridgeLog {}
+            Mock Start-StreamOutage {}
+            Mock Start-Sleep { throw 'This locks the Telegram loop' }
+            Mock Stop-Process {}
+
+            Update-OutputBlackWatchdog
+            Update-OutputBlackWatchdog
+
+            $script:OutputMonitorCycle.Capture.Proc.HasExited | Should -BeFalse
+            Get-EffectivePollTimeout | Should -Be 1
+            Should -Invoke Start-BridgeMediaProcess -Times 1 -Exactly
+            Should -Invoke Start-StreamOutage -Times 0 -Exactly
+
+            $script:OutputMonitorCycle.Capture.Deadline = (Get-Date).AddSeconds(-1)
+            Update-OutputBlackWatchdog
+            Should -Invoke Stop-Process -Times 1 -Exactly -ParameterFilter { $Id -eq 42 }
+            $script:OutputMonitorCycle.Stage | Should -Be 'retry'
+            $script:OutputMonitorCycle.Capture | Should -BeNullOrEmpty
+            Update-OutputBlackWatchdog
+            Should -Invoke Start-BridgeMediaProcess -Times 1 -Exactly
+        }
+        finally {
+            $script:OutputMonitorCycle = $oldCycle
+            $script:LastOutputMonitorAt = $oldMonitorAt
+            $script:OutputMonitorConfirmAt = $oldConfirmAt
+        }
+    }
+}
+
 Describe 'Black output watchdog' {
     BeforeEach {
         $script:OriginalLiveStreamForWatchdog = $config.LiveStream
@@ -795,8 +843,16 @@ Describe 'Black output watchdog' {
         Mock Add-AuditEntry {}
         Mock Send-AdminBroadcast {}
         Mock Send-TelegramMessage {}
-        Mock Start-Sleep {}
-        Mock Get-MonitorFrame { 'frame.jpg' }
+        $script:OutputMonitorCycle = $null
+        Mock Start-MonitorFrameCapture { @{ Proc = @{ HasExited = $true }; TimeoutSeconds = $TimeoutSeconds } }
+        function Invoke-TestOutputMonitorReading {
+            Update-OutputBlackWatchdog
+            for ($step = 0; $script:OutputMonitorCycle -and $step -lt 2; $step++) {
+                $script:OutputMonitorCycle.DueAt = (Get-Date).AddSeconds(-1)
+                Update-OutputBlackWatchdog
+            }
+        }
+        Mock Complete-MonitorFrameCapture { 'frame.jpg' }
         Mock Remove-Item {}
         Mock Get-SettingInt { 60 } -ParameterFilter { $Name -eq 'OutputMonitorMinutes' }
         Mock Get-SettingInt { 6 } -ParameterFilter { $Name -eq 'OutputBlackLuminance' }
@@ -823,10 +879,10 @@ Describe 'Black output watchdog' {
 
         # Two ticks, because the wait between the looks is no longer slept
         # through on the control loop - it is booked and honoured later.
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:OutputMonitorConfirmAt | Should -BeGreaterThan ([datetime]::MinValue)
         $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Should -Invoke Get-BridgeFrameLuminance -Times 2 -Exactly
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'أسود' }
@@ -838,9 +894,9 @@ Describe 'Black output watchdog' {
         $script:probe = 0
         Mock Get-BridgeFrameLuminance { $script:probe++; if ($script:probe -eq 1) { 0.5 } else { 120 } }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
@@ -848,7 +904,7 @@ Describe 'Black output watchdog' {
     It 'never takes a second capture when the first is bright' {
         Mock Get-BridgeFrameLuminance { 130 }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Should -Invoke Get-BridgeFrameLuminance -Times 1 -Exactly
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
@@ -863,7 +919,7 @@ Describe 'Black output watchdog' {
         Mock Get-BridgeFrameLuminance { 0.5 }
         Mock Start-Sleep { throw 'the control loop must not sleep for the confirming look' }
 
-        { Update-OutputBlackWatchdog } | Should -Not -Throw
+        { Invoke-TestOutputMonitorReading } | Should -Not -Throw
 
         $script:OutputMonitorConfirmAt | Should -BeGreaterThan (Get-Date)
         Should -Invoke Get-BridgeFrameLuminance -Times 1 -Exactly
@@ -872,27 +928,27 @@ Describe 'Black output watchdog' {
     It 'does not repeat the alert while the output stays black' {
         Mock Get-BridgeFrameLuminance { 0.5 }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         $script:LastOutputMonitorAt = [datetime]::MinValue
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly
     }
 
     It 'reports recovery once the picture comes back' {
         Mock Get-BridgeFrameLuminance { 0.5 }
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:OutputMonitorConfirmAt = (Get-Date).AddSeconds(-1)
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Mock Get-BridgeFrameLuminance { 140 }
         $script:LastOutputMonitorAt = [datetime]::MinValue
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'عاد المخرج' }
     }
@@ -901,18 +957,18 @@ Describe 'Black output watchdog' {
         Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorMinutes' }
         Mock Get-BridgeFrameLuminance { 0 }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
-        Should -Invoke Get-MonitorFrame -Times 0 -Exactly
+        Should -Invoke Start-MonitorFrameCapture -Times 0 -Exactly
     }
 
     It 'stays quiet when the capture itself failed, rather than assuming black' {
         # Without a configured backup there is no safe source to switch to;
         # a failed probe must remain quiet until the consecutive-failure alert.
         $config.LiveStream.BackupSourceUrl = ''
-        Mock Get-MonitorFrame { $null }
+        Mock Complete-MonitorFrameCapture { $null }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         Should -Invoke Send-AdminBroadcast -Times 0 -Exactly
     }
@@ -920,9 +976,9 @@ Describe 'Black output watchdog' {
     It 'switches to the Cinegy backup after the first failed primary probe' {
         # A stopped primary must not leave operator snapshots pointed at the
         # dead M3U8 until the next hourly watchdog cycle.
-        Mock Get-MonitorFrame { $null }
+        Mock Complete-MonitorFrameCapture { $null }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         $script:OutputMonitorFallbackActive | Should -BeTrue
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'الاحتياطي' }
@@ -931,16 +987,16 @@ Describe 'Black output watchdog' {
     It 'alerts administrators after the configured consecutive capture failures' {
         # Removing the failure counter or its threshold check must make this fail:
         # a stopped source must produce one actionable administrator alert.
-        Mock Get-MonitorFrame { $null }
+        Mock Complete-MonitorFrameCapture { $null }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
         # The flap window is a separate question with its own tests; these cover
         # the consecutive path, so it is switched off rather than left to a
         # mock that would have to be kept in step with it.
         Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:LastOutputMonitorAt = [datetime]::MinValue
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         $script:OutputMonitorFailureAlerted | Should -BeTrue
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'تعذّر' }
@@ -948,21 +1004,21 @@ Describe 'Black output watchdog' {
 
     It 'reports availability recovery when no backup source is configured' {
         $config.LiveStream.BackupSourceUrl = ''
-        Mock Get-MonitorFrame { $null }
+        Mock Complete-MonitorFrameCapture { $null }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
         # The flap window is a separate question with its own tests; these cover
         # the consecutive path, so it is switched off rather than left to a
         # mock that would have to be kept in step with it.
         Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:LastOutputMonitorAt = [datetime]::MinValue
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
-        Mock Get-MonitorFrame { 'frame.jpg' }
+        Mock Complete-MonitorFrameCapture { 'frame.jpg' }
         Mock Get-BridgeFrameLuminance { 140 }
         $script:LastOutputMonitorAt = [datetime]::MinValue
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         $script:OutputMonitorFailureAlerted | Should -BeFalse
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'عاد الوصول' }
@@ -980,16 +1036,16 @@ Describe 'Black output watchdog' {
     It 'switches once to the Cinegy backup after sustained primary failure' {
         # Removing the fallback switch leaves the relay and snapshots on a dead
         # primary source, so this must fail when that state transition is lost.
-        Mock Get-MonitorFrame { $null }
+        Mock Complete-MonitorFrameCapture { $null }
         Mock Get-SettingInt { 2 } -ParameterFilter { $Name -eq 'OutputMonitorFailureAlertThreshold' }
         # The flap window is a separate question with its own tests; these cover
         # the consecutive path, so it is switched off rather than left to a
         # mock that would have to be kept in step with it.
         Mock Get-SettingInt { 0 } -ParameterFilter { $Name -eq 'OutputMonitorFlapAlertCount' }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
         $script:LastOutputMonitorAt = [datetime]::MinValue
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         $script:OutputMonitorFallbackActive | Should -BeTrue
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'الاحتياطي' }
@@ -999,12 +1055,14 @@ Describe 'Black output watchdog' {
         $script:OutputMonitorFallbackActive = $true
         $script:OutputMonitorFailureAlerted = $true
         $script:OutputMonitorFailureCount = 2
-        Mock Get-MonitorFrame { 'frame.jpg' }
+        Mock Complete-MonitorFrameCapture { 'frame.jpg' }
         Mock Get-BridgeFrameLuminance { 140 }
 
-        Update-OutputBlackWatchdog
+        Invoke-TestOutputMonitorReading
 
         $script:OutputMonitorFallbackActive | Should -BeFalse
+        Should -Invoke Start-MonitorFrameCapture -Times 1 -Exactly -ParameterFilter { $Source.SourceType -eq 'srt' }
+        Should -Invoke Start-MonitorFrameCapture -Times 1 -Exactly -ParameterFilter { $Source.SourceType -eq 'm3u8' }
         Should -Invoke Send-AdminBroadcast -Times 1 -Exactly -ParameterFilter { $Text -match 'الأساسي' }
     }
 }
@@ -1526,6 +1584,8 @@ Describe 'A slow source is not a dead one' {
         # nothing behind it fails the call rather than the feature, and the
         # watchdog asks for four of them.
         Mock Get-SettingInt { if ($Name -eq 'SnapshotTimeoutSeconds') { 8 } else { 30 } }
+        $script:OutputMonitorCycle = $null
+        Mock Start-MonitorFrameCapture { @{ Proc = @{ HasExited = $true }; TimeoutSeconds = $TimeoutSeconds } }
         Mock Get-BridgeFrameLuminance { 120 }
         Mock Remove-Item { }
         Mock Send-AdminBroadcast { }
@@ -1544,12 +1604,15 @@ Describe 'A slow source is not a dead one' {
 
     It 'gives the retry three times as long as the first try' {
         $script:Attempts = [System.Collections.Generic.List[int]]::new()
-        Mock Get-MonitorFrame {
-            $script:Attempts.Add([int]$TimeoutSeconds)
+        Mock Complete-MonitorFrameCapture {
+            $script:Attempts.Add([int]$Capture.TimeoutSeconds)
             if ($script:Attempts.Count -eq 1) { return $null }
             return 'frame.jpg'
         }
 
+        Update-OutputBlackWatchdog
+        $script:OutputMonitorCycle.Stage | Should -Be 'retry'
+        $script:OutputMonitorCycle.DueAt = (Get-Date).AddSeconds(-1)
         Update-OutputBlackWatchdog
 
         @($script:Attempts).Count | Should -Be 2
@@ -1558,8 +1621,11 @@ Describe 'A slow source is not a dead one' {
     }
 
     It 'records no failure when the patient retry gets the frame' {
-        Mock Get-MonitorFrame { if ($TimeoutSeconds -le 8) { $null } else { 'frame.jpg' } }
+        Mock Complete-MonitorFrameCapture { if ($Capture.TimeoutSeconds -le 8) { $null } else { 'frame.jpg' } }
 
+        Update-OutputBlackWatchdog
+        $script:OutputMonitorCycle.Stage | Should -Be 'retry'
+        $script:OutputMonitorCycle.DueAt = (Get-Date).AddSeconds(-1)
         Update-OutputBlackWatchdog
 
         $script:OutputMonitorFailureCount | Should -Be 0
@@ -1567,8 +1633,11 @@ Describe 'A slow source is not a dead one' {
     }
 
     It 'still calls it down when even the patient try gets nothing' {
-        Mock Get-MonitorFrame { $null }
+        Mock Complete-MonitorFrameCapture { $null }
 
+        Update-OutputBlackWatchdog
+        $script:OutputMonitorCycle.Stage | Should -Be 'retry'
+        $script:OutputMonitorCycle.DueAt = (Get-Date).AddSeconds(-1)
         Update-OutputBlackWatchdog
 
         $script:OutputMonitorFailureCount | Should -Be 1

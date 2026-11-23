@@ -636,12 +636,10 @@ function Request-NewsLockRelease {
     Add-AuditEntry (T 'news.unlockRequestAudit' $(Get-UserDisplayName -UserId ([long]$draft.OwnerUserId)) $(Format-UserAuditActor -UserId $UserId))
 
     if ([long]$draft.OwnerChatId -gt 0 -and -not (Test-WebOnlyUserId -UserId ([long]$draft.OwnerUserId))) {
-        $requestId = $script:NewsLockRequest.Id
+        $promptKey = if ($script:NewsLockRequest.PreserveDraft) { 'news.unlockAskPreserved' } else { 'news.unlockAsk' }
         Send-TelegramMessage -ChatId ([long]$draft.OwnerChatId) `
-            -Text (T 'news.unlockAsk' $(Get-UserDisplayName -UserId $UserId) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')) `
-            -ReplyMarkup @{inline_keyboard=@(,@(
-                    @{text=(T 'news.handLock');callback_data="news:lockgrant:$requestId"},
-                    @{text=(T 'news.stillWorking');callback_data="news:lockdeny:$requestId"}))} -Deferred:$FromWeb
+            -Text (T $promptKey $(Get-UserDisplayName -UserId $UserId) $(Get-ArabicCountNoun -Count $minutes -One 'دقيقة' -Two 'دقيقتان' -Few 'دقائق' -Many 'دقيقة' -EnglishOne 'minute' -EnglishMany 'minutes')) `
+            -ReplyMarkup @{ inline_keyboard = @(,(Get-NewsLockReplyButtons -Request $script:NewsLockRequest)) } -Deferred:$FromWeb
     }
     if ($FromWeb) { return $true }
     $persistNote = if ($requestPersisted) { '' } else { "`n$(T news.requestNotSaved)" }
@@ -655,6 +653,24 @@ function Test-NewsLockRequestDraft {
     return [long](Get-JsonProp $Request 'OwnerUserId') -eq [long](Get-JsonProp $Draft 'OwnerUserId') -and
         [string](Get-JsonProp $Request 'DraftId') -ceq [string](Get-JsonProp $Draft 'Id') -and
         (-not $requestId -or [string](Get-JsonProp $Draft 'DeniedLockRequestId') -cne $requestId)
+}
+
+function Get-NewsLockReplyButtons {
+    param($Request)
+    $requestId = [string](Get-JsonProp $Request 'Id')
+    @{ text = (T 'news.handLock'); callback_data = "news:lockgrant:$requestId" }
+    @{ text = (T 'news.stillWorking'); callback_data = "news:lockdeny:$requestId" }
+}
+
+function Test-NewsLockReply {
+    param([string]$Data, [long]$UserId)
+    $reply = [regex]::Match($Data, '^news:lock(?:grant|deny):([a-f0-9]{32})$')
+    $request = $script:NewsLockRequest
+    $draft = Get-NewsTickerDraft -UserId $UserId
+    return ($reply.Success -and $UserId -gt 0 -and $request -and $draft -and
+        -not (Test-NewsTickerDraftOpen -Draft $draft) -and
+        $reply.Groups[1].Value -ceq [string](Get-JsonProp $request 'Id') -and
+        (Test-NewsLockRequestDraft -Request $request -Draft $draft))
 }
 
 function Test-NewsLockRequesterAuthorized {
@@ -1208,6 +1224,10 @@ function Get-NewsTickerManagementKeyboard { param([long]$ChatId,[long]$UserId)
         $rows += , @(@{text=(T 'news.startEditing');callback_data='news:start'}, @{text=(T 'news.importTxt');callback_data='news:import'})
     }
     elseif ([long]$draft.OwnerUserId -eq $UserId) {
+        $pending = $script:NewsLockRequest
+        if ($pending -and (Test-NewsLockRequestDraft -Request $pending -Draft $draft)) {
+            $rows += , @(Get-NewsLockReplyButtons -Request $pending)
+        }
         # First, as the bulletin's play is first: it is what the draft is for,
         # and it sat under five other rows. Colour still marks the one place a
         # mis-tap costs work.
@@ -2348,6 +2368,11 @@ function Show-NewsTickerManagementScreen { param([long]$ChatId,[long]$UserId,[in
         $text += (T 'news.openDraftLine' $byText $(@($script:NewsTickerDraft.Items).Count))
     }
     elseif($script:NewsTickerDraft -and -not $mine){$text+=(T 'news.lockedDraftLine' $(Get-UserDisplayName -UserId ([long]$script:NewsTickerDraft.OwnerUserId)) $(@($script:NewsTickerDraft.Items).Count))}
+    $pending = $script:NewsLockRequest
+    if ($mine -and $pending -and (Test-NewsLockRequestDraft -Request $pending -Draft $mine)) {
+        $requesterName = Get-UserDisplayName -UserId ([long](Get-JsonProp $pending 'RequesterUserId'))
+        $text += "`n" + (T 'news.lockReplyPending' $requesterName)
+    }
     $keyboard = Get-NewsTickerManagementKeyboard -ChatId $ChatId -UserId $UserId
     # The pressed message is redrawn by whichever version lands - the table,
     # or its text - through the one refresh mark every screen uses.

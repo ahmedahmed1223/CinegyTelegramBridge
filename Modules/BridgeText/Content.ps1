@@ -306,6 +306,10 @@ function Add-BridgeTextContent {
     $catalogue['news.clearAll'] = @{ ar = '🧹 مسح الكل'; en = '🧹 Clear everything' }
     $catalogue['news.confirmClearScheduledDraft'] = @{ ar = '⚠️ سيُمسح محتوى المسودة ويُلغى موعد نشرها. هل تؤكد؟'; en = '⚠️ The draft will be emptied and its scheduled publication cancelled. Confirm?' }
     $catalogue['news.denySaveFailed'] = @{ ar = 'تعذّر حفظ رفض الطلب. أوقف الجسر التسليم التلقائي لهذا الطلب. أعد محاولة الرفض.'; en = 'The refusal could not be saved. Automatic handover for this request is suspended. Try refusing again.' }
+    $catalogue['news.lockReplyExpired'] = @{ ar = 'هذا الطلب لم يعد متاحًا للردّ. حدّث شاشة شريط الأخبار لرؤية أيّ طلب حالي.'; en = 'This request can no longer be answered. Refresh the ticker screen to see any current request.' }
+    $catalogue['news.lockReplyDenied'] = @{ ar = 'رُفض طلب تسليم القفل. المسودة ما زالت معك.'; en = 'The lock handover was declined. You still hold the draft.' }
+    $catalogue['news.lockReplyGrantFailed'] = @{ ar = 'تعذّر تسليم القفل. حدّث شاشة شريط الأخبار للتحقّق من حالة المسودة والطلب.'; en = 'The lock could not be handed over. Refresh the ticker screen to check the draft and request.' }
+    $catalogue['news.lockReplyPreserved'] = @{ ar = 'سُلّم قفل شريط الأخبار وبقيت محتويات المسودة للتحرير.'; en = 'The ticker lock was handed over and the draft contents are available for editing.' }
 
     $catalogue['news.handOverDraft'] = @{ ar = '🤝 سلّم المسودة للتالي'; en = '🤝 Hand the draft to the next person' }
 

@@ -2684,6 +2684,7 @@ function Get-EffectivePollTimeout {
     if (@($script:MissingGraphicState.Values | Where-Object { Get-JsonProp $_ 'RecoveryToken' }).Count -gt 0) { return 1 }
     if (Test-AirRunActive) { return 1 }
     if ($script:SnapshotJobs.Count -gt 0 -or $script:AutoHideQueue.Count -gt 0 -or $script:RelayState.VerifyAt) { return 1 }
+    if ($script:OutputMonitorCycle -or $script:OutputMonitorConfirmAt -gt [datetime]::MinValue) { return 1 }
     $base = Get-BasePollTimeout
     if ($script:AirStatusWidgets.Count -gt 0 -or $script:MainMenuWidgets.Count -gt 0 -or $script:AirStatusWidgetUpdate -or $script:AirStatusWidgetAnswers.Count -gt 0) { $base = [Math]::Min($base, 5) }
     $upcoming = @(Get-UpcomingScheduleEvents)

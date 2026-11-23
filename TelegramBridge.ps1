@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '9.1.1'
+$script:BridgeVersion = '9.1.2'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -1115,6 +1115,7 @@ $script:LastUploadSweep = [datetime]::MinValue
 # Probe immediately after startup so a stopped primary cannot keep operator
 # snapshots on the dead source until the normal monitor interval elapses.
 $script:LastOutputMonitorAt = [datetime]::MinValue
+$script:OutputMonitorCycle = $null
 $script:OutputBlackAlerted = $false
 # The confirming second look is owed at a moment, not slept through: see
 # Update-OutputBlackWatchdog.
@@ -2485,6 +2486,7 @@ finally {
     foreach ($job in @($script:SnapshotJobs)) {
         if ($job.Proc -and -not $job.Proc.HasExited) { Stop-Process -Id $job.Proc.Id -Force -ErrorAction SilentlyContinue }
     }
+    Clear-OutputMonitorCycle
     $relayProc = Get-RunningRelayProcess -ReadOnly -RequireTimestamp
     if ($relayProc) {
         Write-BridgeLog "Bridge shutting down - stopping live relay (PID $($relayProc.Id))"

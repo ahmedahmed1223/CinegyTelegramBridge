@@ -477,7 +477,6 @@ Describe 'News lock hand-over' {
         Mock Write-BridgeLog {}
         Mock Add-AuditEntry {}
         Mock Get-UserDisplayName { "user$UserId" }
-        Mock Get-NewsTickerManagementKeyboard { @{ inline_keyboard = @() } }
         Mock Remove-NewsTickerDraft { $script:NewsTickerDraft = $null }
         Mock Get-SettingInt { 5 } -ParameterFilter { $Name -eq 'NewsLockRequestMinutes' }
         Mock Get-SettingInt { 120 } -ParameterFilter { $Name -eq 'NewsLockGrantHoldSeconds' }
@@ -488,6 +487,59 @@ Describe 'News lock hand-over' {
         Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
         $script:NewsTickerDraft | Should -Not -BeNullOrEmpty
         Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 20 -and $Text -match 'يطلب' }
+    }
+
+    It 'lets only the owner answer the pending request from the Telegram ticker screen' {
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserLastActivity {}
+        Mock Save-NewsTickerDraft { $true }
+        $script:NewsTickerDraft.WebShareId = 'shared'
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $approval = "news:lockgrant:$($script:NewsLockRequest.Id)"
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 20 -and (
+                (ConvertTo-TelegramReplyMarkupJson -ReplyMarkup $ReplyMarkup | ConvertFrom-Json).inline_keyboard[0][0].callback_data
+            ) -ceq $approval
+        }
+        $ownerButtons = (Get-NewsTickerManagementKeyboard -ChatId 20 -UserId 20).inline_keyboard | ForEach-Object { $_ }
+        $otherButtons = (Get-NewsTickerManagementKeyboard -ChatId 22 -UserId 22).inline_keyboard | ForEach-Object { $_ }
+        $ownerButtons.callback_data | Should -Contain $approval
+        $otherButtons.callback_data | Should -Not -Contain $approval
+        $callback = [pscustomobject]@{
+            id = 'lock-reply'; data = $approval; from = [pscustomobject]@{ id = 20 }
+            message = [pscustomobject]@{ message_id = 55; chat = [pscustomobject]@{ id = 20; type = 'private' } }
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
+        $script:NewsTickerDraft.ReservedForUserId | Should -Be 21
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter {
+            $ChatId -eq 20 -and $Text -eq (T 'news.lockReplyPreserved')
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $Alert -and $Text -eq (T 'news.lockReplyExpired') }
+    }
+
+    It 'lets the owner decline from the ticker and refuses the same button from another operator' {
+        Mock Confirm-TelegramCallback {}
+        Mock Update-UserLastActivity {}
+        Request-NewsLockRelease -ChatId 21 -UserId 21 | Should -BeTrue
+        $callback = [pscustomobject]@{
+            id = 'lock-deny'; data = "news:lockdeny:$($script:NewsLockRequest.Id)"; from = [pscustomobject]@{ id = 22 }
+        }
+
+        Invoke-CallbackQuery -CallbackQuery $callback
+        $script:NewsLockRequest | Should -Not -BeNullOrEmpty
+        Should -Invoke Confirm-TelegramCallback -Times 1 -Exactly -ParameterFilter { $Alert -and $Text -eq (T 'news.lockReplyExpired') }
+
+        $callback.from.id = 20
+        Invoke-CallbackQuery -CallbackQuery $callback
+        $script:NewsLockRequest | Should -BeNullOrEmpty
+        $script:NewsTickerDraft.Items | Should -Be @('أ', 'ب')
+        Should -Invoke Send-TelegramMessage -Times 1 -Exactly -ParameterFilter { $ChatId -eq 20 -and $Text -eq (T 'news.lockReplyDenied') }
     }
 
     It 'refuses a request from the owner themselves' {

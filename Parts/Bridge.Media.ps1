@@ -389,74 +389,86 @@ function Update-SnapshotJobs {
     }
 }
 
-function Test-PrimaryMonitorSourceBack {
-    <#
-        Asks the primary source directly, while the standby is the one in use.
-
-        Without this the monitor read a successful grab from the standby as
-        proof that the primary had recovered, and announced a return that
-        nobody had tested - the two sources are different addresses and only
-        one of them was ever asked.
-    #>
-    param([int]$TimeoutSeconds = 8)
-    $wasFallback = $script:OutputMonitorFallbackActive
-    try {
-        # Asked as the primary for the length of one grab, then put back
-        # exactly as it was whatever the answer is.
-        $script:OutputMonitorFallbackActive = $false
-        $path = Get-MonitorFrame -TimeoutSeconds $TimeoutSeconds
-        if ($path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return $true }
-        return $false
-    }
-    finally { $script:OutputMonitorFallbackActive = $wasFallback }
-}
-
-function Get-MonitorFrame {
-    <# Grabs one frame synchronously for the black-output monitor.
-
-       Deliberately synchronous, unlike the operator snapshot: this runs on a
-       timer nobody is waiting on, once an hour, and bounding it with a short
-       timeout is simpler than threading another async job through the tick.
-       Returns the file path, or $null with the reason logged. #>
-    param([int]$TimeoutSeconds = 8)
-    $ls = Get-LiveStreamConfig
-    $sourceUrl = [string]$ls.SourceUrl
+function Start-MonitorFrameCapture {
+    param($Source, [int]$TimeoutSeconds)
+    $sourceUrl = [string](Get-JsonProp $Source 'SourceUrl')
     if ([string]::IsNullOrWhiteSpace($sourceUrl)) { return $null }
     $ffmpeg = Get-FfmpegPath
     if (-not $ffmpeg) { return $null }
-
-    # The watchdog counts consecutive failures and alerts at its threshold, so
-    # once the source is known down a line per attempt adds nothing: an hour of
-    # 5XX from the stream host filled the log with twenty identical warnings.
-    $note = { param([string]$Text) if ($script:OutputMonitorFailureCount -le 0) { Write-BridgeLog $Text 'WARN' } }
 
     $stamp = "monitor-$([guid]::NewGuid().ToString('N'))"
     $outPath = Join-Path $script:logDir "$stamp.jpg"
     $errLog = Join-Path $script:logDir "$stamp.err"
     try {
-        $inputArgs = @(Get-FfmpegInputArguments -SourceType ([string]$ls.SourceType) -SourceUrl $sourceUrl)
+        $inputArgs = @(Get-FfmpegInputArguments -SourceType ([string](Get-JsonProp $Source 'SourceType')) -SourceUrl $sourceUrl)
         $proc = Start-BridgeMediaProcess -FilePath $ffmpeg `
             -Arguments (@('-y', '-loglevel', 'error') + $inputArgs + @('-frames:v', '1', '-q:v', '5', $outPath)) `
             -WorkingDirectory $scriptRoot -StandardErrorPath $errLog
-        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            $script:LastCaptureErrorDetail = (T 'media.captureTimedOut' $(Get-ArabicCountNoun -Count $TimeoutSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))
-            & $note "Output monitor capture timed out after ${TimeoutSeconds}s"
-            return $null
-        }
-        if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outPath)) {
-            $script:LastCaptureErrorDetail = Get-LastErrorLine -Path $errLog
-            & $note "Output monitor capture failed (exit $($proc.ExitCode)): $script:LastCaptureErrorDetail"
-            return $null
-        }
-        return $outPath
+        return @{ Proc = $proc; Path = $outPath; ErrorPath = $errLog; TimeoutSeconds = $TimeoutSeconds
+            Deadline = (Get-Date).AddSeconds($TimeoutSeconds) }
     }
     catch {
-        $script:LastCaptureErrorDetail = $_.Exception.Message
-        & $note "Output monitor capture could not start: $($_.Exception.Message)"
+        $script:LastCaptureErrorDetail = Protect-SensitiveText $_.Exception.Message
+        if ($script:OutputMonitorFailureCount -le 0) {
+            Write-BridgeLog "Output monitor capture could not start: $script:LastCaptureErrorDetail" 'WARN'
+        }
+        Remove-Item -LiteralPath $outPath, $errLog -Force -ErrorAction SilentlyContinue
         return $null
     }
-    finally { Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue }
+}
+
+function Remove-MonitorFrameCapture {
+    param([hashtable]$Capture, [switch]$KeepFrame)
+    if (-not $Capture) { return }
+    if (-not $Capture.Proc.HasExited) {
+        Stop-Process -Id $Capture.Proc.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($Capture.Proc -is [IDisposable]) { $Capture.Proc.Dispose() }
+    Remove-Item -LiteralPath $Capture.ErrorPath -Force -ErrorAction SilentlyContinue
+    if (-not $KeepFrame) { Remove-Item -LiteralPath $Capture.Path -Force -ErrorAction SilentlyContinue }
+}
+
+function Complete-MonitorFrameCapture {
+    param([hashtable]$Capture, [switch]$TimedOut)
+    $keepFrame = $false
+    $timeoutSeconds = $Capture.TimeoutSeconds
+    # The watchdog already alerts at its failure threshold. Logging every
+    # failed attempt while the source is known down obscures new faults.
+    try {
+        if ($TimedOut) {
+            $script:LastCaptureErrorDetail = (T 'media.captureTimedOut' $(Get-ArabicCountNoun -Count $TimeoutSeconds -One 'ثانية' -Two 'ثانيتان' -Few 'ثوانٍ' -Many 'ثانية' -EnglishOne 'second' -EnglishMany 'seconds'))
+            if ($script:OutputMonitorFailureCount -le 0) { Write-BridgeLog "Output monitor capture timed out after ${timeoutSeconds}s" 'WARN' }
+            return $null
+        }
+        if ($Capture.Proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Capture.Path)) {
+            $script:LastCaptureErrorDetail = Get-LastErrorLine -Path $Capture.ErrorPath
+            if ($script:OutputMonitorFailureCount -le 0) {
+                Write-BridgeLog "Output monitor capture failed (exit $($Capture.Proc.ExitCode)): $script:LastCaptureErrorDetail" 'WARN'
+            }
+            return $null
+        }
+        $keepFrame = $true
+        return $Capture.Path
+    }
+    finally { Remove-MonitorFrameCapture -Capture $Capture -KeepFrame:$keepFrame }
+}
+
+function Get-MonitorFrame {
+    <# Explicit probes and before/after evidence need the frame before their
+       caller continues. The periodic monitor uses the same capture without waiting. #>
+    param([int]$TimeoutSeconds = 8)
+    $capture = Start-MonitorFrameCapture -Source (Get-LiveStreamConfig) -TimeoutSeconds $TimeoutSeconds
+    if (-not $capture) { return $null }
+    try { $finished = $capture.Proc.WaitForExit($TimeoutSeconds * 1000) }
+    catch {
+        $script:LastCaptureErrorDetail = Protect-SensitiveText $_.Exception.Message
+        if ($script:OutputMonitorFailureCount -le 0) {
+            Write-BridgeLog "Output monitor capture could not finish: $script:LastCaptureErrorDetail" 'WARN'
+        }
+        Remove-MonitorFrameCapture -Capture $capture
+        return $null
+    }
+    return (Complete-MonitorFrameCapture -Capture $capture -TimedOut:(-not $finished))
 }
 
 function Get-OutputMonitorStatus {
@@ -581,55 +593,92 @@ function Test-OutputMonitorFlapping {
     return $true
 }
 
+function Clear-OutputMonitorCycle {
+    $cycle = $script:OutputMonitorCycle
+    $script:OutputMonitorCycle = $null
+    $script:OutputMonitorConfirmAt = [datetime]::MinValue
+    if (-not $cycle) { return }
+    Remove-MonitorFrameCapture -Capture $cycle.Capture
+}
+
 function Update-OutputBlackWatchdog {
-    <#
-        Looks at the actual picture on a timer and reports a black output.
+    # FFmpeg can take tens of seconds to open HLS. Only this tick owns the
+    # watchdog's state, but each capture and retry wait happens between ticks.
+    $intervalMinutes = Get-SettingInt 'OutputMonitorMinutes' 0
+    if ($intervalMinutes -le 0) { Clear-OutputMonitorCycle; return }
+    $now = Get-Date
+    $cycle = $script:OutputMonitorCycle
+    if (-not $cycle) {
+        $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
+        $stage = 'first'
+        if ($script:OutputMonitorConfirmAt -gt [datetime]::MinValue) {
+            if ($now -lt $script:OutputMonitorConfirmAt) { return }
+            $stage = 'confirm'
+            $script:OutputMonitorConfirmAt = [datetime]::MinValue
+        }
+        else {
+            if (($now - $script:LastOutputMonitorAt).TotalMinutes -lt $intervalMinutes) { return }
+            $script:LastOutputMonitorAt = $now
+        }
+        $cycle = @{
+            Stage = $stage; DueAt = $now; StartedAt = $now; Timeout = $timeout
+            Capture = $null; BackupReadable = $false
+        }
+        $script:OutputMonitorCycle = $cycle
+    }
+    if ($now -lt $cycle.DueAt) { return }
+    if (-not $cycle.Capture) {
+        # A successful backup grab does not prove that the primary is back.
+        $source = if ($cycle.Stage -eq 'primary') { Get-LiveStreamConfig } else { Get-ActiveLiveStreamConfig }
+        $captureTimeout = if ($cycle.Stage -in 'retry', 'confirm') { $cycle.Timeout * 3 } else { $cycle.Timeout }
+        $cycle.Capture = Start-MonitorFrameCapture -Source $source -TimeoutSeconds $captureTimeout
+    }
+    $frame = $null
+    if ($cycle.Capture) {
+        $exited = $cycle.Capture.Proc.HasExited
+        if (-not $exited -and $now -lt $cycle.Capture.Deadline) { return }
+        $capture = $cycle.Capture
+        $cycle.Capture = $null
+        $frame = Complete-MonitorFrameCapture -Capture $capture -TimedOut:(-not $exited)
+    }
 
-        Every other health check in the bridge asks a component whether it is
-        happy. Cinegy can answer healthy, the relay process can be alive, the
-        graphics layers can all be correct, and the transmission can still be
-        a black rectangle. This is the only check that looks at the output.
-
-        A single black frame is not evidence: a cut, a fade, a momentary
-        source glitch all read as black. It therefore confirms with a second
-        capture a few seconds later and alerts only if both are black.
-    #>
-    # A booked second look comes first, and is not subject to the interval:
-    # the pair belongs to one reading.
-    if ($script:OutputMonitorConfirmAt -gt [datetime]::MinValue) {
-        if ((Get-Date) -lt $script:OutputMonitorConfirmAt) { return }
-        Complete-OutputBlackConfirmation
+    if ($cycle.Stage -eq 'first' -and -not $frame) {
+        # Opening an HLS playlist and its first segment can exceed the initial
+        # deadline while the source is healthy. Give the second probe time.
+        $cycle.Stage = 'retry'
+        $cycle.DueAt = (Get-Date).AddMilliseconds(1500)
         return
     }
-    $intervalMinutes = Get-SettingInt 'OutputMonitorMinutes' 0
-    if ($intervalMinutes -le 0) { return }
-    $now = Get-Date
-    if (($now - $script:LastOutputMonitorAt).TotalMinutes -lt $intervalMinutes) { return }
-    $script:LastOutputMonitorAt = $now
-
-    $threshold = Get-SettingInt 'OutputBlackLuminance' 1
-    $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
-
-    $firstPath = Get-MonitorFrame -TimeoutSeconds $timeout
-    if (-not $firstPath) {
-        # One more try before believing it. This ran once an hour and a single
-        # eight-second timeout switched a working channel to its standby: the
-        # grab that failed on 8 September timed out while the machine was busy
-        # building something else, and the source was fine the whole time.
-        # A second attempt costs eight seconds against an hour of being on the
-        # wrong source.
-        # And the retry waits properly rather than repeating the same
-        # impatience. Measured against the station's own HLS source with its
-        # eight-second ceiling: 5.2s, 4.7s, 10.3s - every grab succeeded and a
-        # third took longer than the ceiling allowed. An HLS source fetches a
-        # playlist and a segment before it can decode anything, so a timeout
-        # here says "slow", not "down" - and two unlucky grabs in a row were
-        # raising the flapping alarm on a source that was working throughout.
-        Start-Sleep -Milliseconds 1500
-        $firstPath = Get-MonitorFrame -TimeoutSeconds ($timeout * 3)
-        if ($firstPath) { Write-BridgeLog 'Output monitor: the first grab failed and the patient retry succeeded; the source is up but slow to open.' 'INFO' }
+    if ($cycle.Stage -eq 'retry' -and $frame) {
+        Write-BridgeLog 'Output monitor: the first grab failed and the patient retry succeeded; the source is up but slow to open.' 'INFO'
     }
-    if (-not $firstPath) {
+    if ($cycle.Stage -eq 'confirm') {
+        $script:OutputMonitorCycle = $null
+        if ($frame) { Complete-OutputBlackConfirmation -Path $frame }
+        return
+    }
+    if ($cycle.Stage -eq 'primary') {
+        $script:OutputMonitorCycle = $null
+        # The backup is still delivering frames. A failed primary probe
+        # leaves it in place without recording another output outage.
+        if ($frame -or -not $cycle.BackupReadable) {
+            Complete-OutputMonitorReading -Path $frame -Now $cycle.StartedAt -PrimaryConfirmed:([bool]$frame)
+        }
+        return
+    }
+    if ($script:OutputMonitorFallbackActive) {
+        $cycle.BackupReadable = [bool]$frame
+        if ($frame) { Remove-Item -LiteralPath $frame -Force -ErrorAction SilentlyContinue }
+        $cycle.Stage = 'primary'
+        return
+    }
+    $script:OutputMonitorCycle = $null
+    Complete-OutputMonitorReading -Path $frame -Now $cycle.StartedAt
+}
+
+function Complete-OutputMonitorReading {
+    param([string]$Path, [datetime]$Now, [switch]$PrimaryConfirmed)
+    if (-not $Path) {
         $script:OutputMonitorFailureCount++
         # Recorded on its own clock, because the consecutive counter below is
         # reset by the very next success and cannot describe a source that
@@ -668,24 +717,11 @@ function Update-OutputBlackWatchdog {
         }
         return
     }
+    if ($PrimaryConfirmed -and (Set-OutputMonitorFallbackActive -Active $false)) {
+        Send-AdminBroadcast -Text (T 'media.primaryReturned') -Urgent
+    }
     if ($script:OutputMonitorFailureCount -gt 0) {
-        if ($script:OutputMonitorFallbackActive) {
-            # The grab that just succeeded came from whichever source is
-            # active - and while the fallback is active, that is the standby.
-            # Reading it as "the primary is back" announced a recovery nobody
-            # had tested. The primary is asked directly.
-            if (Test-PrimaryMonitorSourceBack -TimeoutSeconds $timeout) {
-                if (Set-OutputMonitorFallbackActive -Active $false) {
-                    Send-AdminBroadcast -Text (T 'media.primaryReturned') -Urgent
-                }
-            }
-            else {
-                # Still on the standby, and still working: no news, and the
-                # counter stays up so the next success asks again.
-                return
-            }
-        }
-        elseif ($script:OutputMonitorFailureAlerted) {
+        if (-not $PrimaryConfirmed -and $script:OutputMonitorFailureAlerted -and -not $script:OutputMonitorFallbackActive) {
             Send-OutputMonitorFailureNotification -Recovered
         }
         Stop-StreamOutage -Kind 'unreachable' -At $now
@@ -694,10 +730,11 @@ function Update-OutputBlackWatchdog {
         $script:LastCaptureErrorDetail = ''
     }
     $first = $null
-    try { $first = Get-BridgeFrameLuminance -Path $firstPath }
-    finally { Remove-Item -LiteralPath $firstPath -Force -ErrorAction SilentlyContinue }
+    try { $first = Get-BridgeFrameLuminance -Path $Path }
+    finally { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
     if ($null -eq $first) { return }
 
+    $threshold = Get-SettingInt 'OutputBlackLuminance' 1
     if ($first -gt $threshold) {
         if ($script:OutputBlackAlerted) {
             $script:OutputBlackAlerted = $false
@@ -719,20 +756,12 @@ function Update-OutputBlackWatchdog {
 }
 
 function Complete-OutputBlackConfirmation {
-    <# The second half of Update-OutputBlackWatchdog, on a later tick. #>
-    $timeout = Get-SettingInt 'SnapshotTimeoutSeconds' 3
+    param([Parameter(Mandatory)][string]$Path)
     $threshold = Get-SettingInt 'OutputBlackLuminance' 1
     $first = [double]$script:OutputMonitorFirstLuma
-    $script:OutputMonitorConfirmAt = [datetime]::MinValue
-
-    # Patient, like the first look. A timeout here returns silently, so an
-    # impatient ceiling does not raise a false alarm - it loses a true one,
-    # which on a source that needs ten seconds to open is worse.
-    $secondPath = Get-MonitorFrame -TimeoutSeconds ($timeout * 3)
-    if (-not $secondPath) { return }
     $second = $null
-    try { $second = Get-BridgeFrameLuminance -Path $secondPath }
-    finally { Remove-Item -LiteralPath $secondPath -Force -ErrorAction SilentlyContinue }
+    try { $second = Get-BridgeFrameLuminance -Path $Path }
+    finally { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
     if ($null -eq $second -or $second -gt $threshold) {
         Write-BridgeLog "Output monitor: first frame dark (luma $first) but second was not (luma $second) - treated as a transition"
         return

@@ -20,6 +20,7 @@ builder.Configuration["AllowedHosts"] = string.Join(';', options.AllowedHosts())
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IBridgeChannel, PipeBridgeChannel>();
+builder.Services.AddSingleton<LivePlaybackSource>();
 builder.Services.AddSingleton<BridgeIdentity>();
 builder.Services.AddSingleton<AccountStore>();
 builder.Services.AddSingleton<SessionStore>();
@@ -87,17 +88,22 @@ app.Use(async (http, next) =>
     headers["X-Content-Type-Options"] = "nosniff";
     headers["X-Frame-Options"] = "DENY";
     headers["Referrer-Policy"] = "no-referrer";
-    // Mantine sets inline style attributes, hence 'unsafe-inline' for styles
-    // only. No inline or remote script, ever.
-    var mediaOrigin = options.PlaybackOrigin.Length > 0 ? $" {options.PlaybackOrigin}" : "";
-    headers["Content-Security-Policy"] =
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-        $"font-src 'self'; connect-src 'self'{mediaOrigin}; media-src 'self' blob:{mediaOrigin}; " +
-        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+    headers["Content-Security-Policy"] = PlaybackPolicy();
     await next();
 });
 app.UseDefaultFiles();
-app.UseStaticFiles();
+var clientFiles = new StaticFileOptions
+{
+    OnPrepareResponseAsync = async response =>
+    {
+        if (!response.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase)) return;
+        var http = response.Context;
+        var playback = await http.RequestServices.GetRequiredService<LivePlaybackSource>().ReadAsync(http.RequestAborted);
+        http.Response.Headers.ContentSecurityPolicy = PlaybackPolicy(playback);
+        http.Response.Headers.CacheControl = "no-store";
+    },
+};
+app.UseStaticFiles(clientFiles);
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -166,9 +172,18 @@ app.MapTemplateRegistryImportEndpoints();
 app.MapTemplateIssueEndpoints();
 app.MapContentEndpoints();
 // Client-side routes: any non-API path is the app.
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", clientFiles);
 
 app.Logger.LogInformation("Cinegy bridge web on http://localhost:{Port} for {Root}", options.Port, options.BridgeRoot);
 app.Run();
+
+static string PlaybackPolicy(Uri? playback = null)
+{
+    // Mantine sets inline style attributes; scripts are always same-origin.
+    var origin = playback is null ? "" : $" {playback.GetLeftPart(UriPartial.Authority)}";
+    return "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+        $"font-src 'self'; connect-src 'self'{origin}; media-src 'self' blob:{origin}; " +
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+}
 
 public partial class Program;

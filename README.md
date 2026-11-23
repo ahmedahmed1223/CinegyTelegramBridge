@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.1
+
+Set the web viewing link in the bot's settings. Signed-in web operators can watch that stream or copy its viewing link. Relay credentials remain private. The web help's What's New tab includes the recent version 9 releases.
+
+The Windows Manager makes bridge health, lifecycle controls, and the live log easier to scan. Its executable can still be updated separately from the web build.
+
 ## Version 9.1.0
 
 Web editors can contribute to a shared ticker draft at the same time. Changes to different headlines merge, and a stale edit to the same headline stays in the editor for review. The draft owner manages handover and publishing. Once the owner schedules publication, contributors can read the draft until the schedule is removed.
@@ -295,7 +301,7 @@ The web interface has a new shared theme with deep navy surfaces, teal selection
 
 ## Version 8.83.0
 
-The web control room has a Live Broadcast page with an output player, signal health, and recent outages. Set the web host's `LivePlaybackUrl` configuration value or launch argument `--LivePlaybackUrl` to a browser-facing HTTPS HLS or MP4 URL without credentials or query parameters. For HLS, serve the playlist and its resources from that origin and allow the web app's origin with CORS. The player contacts the media host directly. The bridge's ingest and relay destinations stay private.
+The web control room has a Live Broadcast page with an output player, signal health, and recent outages. Set **رابط مشاهدة البث** (`WebLivePlaybackUrl`) in the bot's settings to a browser-facing HTTPS HLS or MP4 URL without credentials or query parameters. The Telegram Mini App and the Web player use that address, and signed-in Web operators can copy it from the Live Broadcast page. After changing the media host, reload the Web page so it uses the updated security policy. For HLS, serve the playlist and its resources from that origin and allow the web app's origin with CORS. The player contacts the media host directly. The bridge's ingest and relay destinations stay private. The Web host's legacy `LivePlaybackUrl` is supported when using an older bridge.
 
 Newsroom now previews rows pasted from a spreadsheet or the bot's headline format before saving the batch. The built-in bulletin design also has frame-based timing controls that save to the shared library.
 

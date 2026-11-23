@@ -9,15 +9,17 @@ import { getTemplates } from '../api/air'
 import type { BridgeStatus, Schemas } from '../api/client'
 import { sessionKey } from '../api/session'
 import { LiveStatusContext } from '../layout/LiveStatusContext'
+import { LivePage } from '../pages/live/LivePage'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
 import { StatusPage } from '../pages/status/StatusPage'
 
 vi.mock('../api/air', () => ({ getTemplates: vi.fn() }))
 
-function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage']) {
+function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage'], playback?: { url: string | null }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   queryClient.setQueryData(sessionKey, { id: 1, name: 'مشغّل تجريبي', role: 'admin', method: 'test', webOnly: true })
   if (schedule) queryClient.setQueryData(['template-schedule', 0], schedule)
+  if (playback) queryClient.setQueryData(['live-playback'], playback)
   return render(
     <MantineProvider env="test">
       <QueryClientProvider client={queryClient}>
@@ -65,6 +67,17 @@ it('copies the cached summary while keeping offline broadcast actions disabled',
   }
   await user.click(screen.getByRole('menuitem', { name: 'نسخ ملخّص حالة الهواء' }))
   await waitFor(async () => expect(await navigator.clipboard.readText()).toContain('حالة الطبقات غير مؤكَّدة'))
+})
+
+it('copies the same viewing link supplied to the live player', async () => {
+  const user = userEvent.setup()
+  const url = 'https://media.example.test/live/channel.m3u8'
+  const watch = vi.fn()
+  renderPage(<LivePage active watching={false} onWatchingChange={watch} />, undefined, { url })
+  await user.click(screen.getByRole('button', { name: 'نسخ رابط البث' }))
+  await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(url))
+  await user.click(screen.getByRole('button', { name: 'مشاهدة البث' }))
+  expect(watch).toHaveBeenCalledWith(true)
 })
 
 it('lets the operator retry a failed template load without leaving scheduling', async () => {

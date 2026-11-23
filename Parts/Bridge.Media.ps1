@@ -1441,6 +1441,20 @@ function Get-LiveWatchUrl {
     #>
     $page = [string](Get-Setting 'LiveWatchUrl')
     if ([string]::IsNullOrWhiteSpace($page) -or $page -notmatch '^(?i:https://)') { return '' }
+    $configured = Get-Setting 'WebLivePlaybackUrl'
+    if ($null -ne $configured -and -not ($configured -is [string] -and $configured.Length -eq 0)) {
+        $source = ConvertTo-WebLivePlaybackUrl $configured
+        $watchPage = $null
+        if (-not $source -or -not [uri]::TryCreate($page, [UriKind]::Absolute, [ref]$watchPage)) { return '' }
+        # The Mini App uses the first src parameter. A stale src on the page
+        # URL must not override the explicitly configured shared playback link.
+        $otherParameters = @($watchPage.Query.TrimStart('?').Split('&') | Where-Object {
+            $_ -and [uri]::UnescapeDataString(($_ -split '=', 2)[0]) -cnotin 'src', 'lang'
+        })
+        $builder = [UriBuilder]::new($watchPage)
+        $builder.Query = ($otherParameters + @("src=$([uri]::EscapeDataString($source))", "lang=$(Get-BridgeLanguage)")) -join '&'
+        return $builder.Uri.AbsoluteUri
+    }
     $source = [string](Get-ActiveLiveStreamConfig).SourceUrl
     if ([string]::IsNullOrWhiteSpace($source)) { return '' }
     $separator = if ($page.Contains('?')) { '&' } else { '?' }

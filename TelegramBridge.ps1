@@ -56,7 +56,7 @@ $ErrorActionPreference = "Stop"
 
 # Bump on every functional change. Shown in ℹ️ الحالة and logged at startup so
 # "which build is actually running?" is answerable without diffing files.
-$script:BridgeVersion = '9.1.0'
+$script:BridgeVersion = '9.1.1'
 
 
 $scriptRoot = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
@@ -244,6 +244,7 @@ $script:DefaultSettings = [ordered]@{
     # anywhere. The page is one static file and needs no server of its
     # own; the stream URL reaches it as ?src=.
     LiveWatchUrl               = ''
+    WebLivePlaybackUrl         = ''     # public playback stream for the browser and Telegram viewer
     ClipSeconds                = 8      # how many seconds the clip button records
     EnableLiveRelay            = $true
     EnableTimedShow            = $true
@@ -641,6 +642,7 @@ $script:SettingDisplayMetadata = @{
     EnableSnapshot = @{ Unit = ''; Description = 'يفعّل 📸 صورة من البث: لقطة من خرج القناة' }
     ClipSeconds = @{ Unit = 'ثانية'; Description = 'طول المقطع الذي يسجّله زرّ 🎬 من خرج القناة. الملف يُنسخ بلا إعادة ترميز، فلا يُثقل جهاز البثّ' }
     LiveWatchUrl = @{ Unit = ''; Description = 'رابط صفحة المشاهدة (https) التي يفتحها زرّ 📺 داخل تيليجرام. اتركه فارغًا ليختفي الزرّ. الصفحة ملف واحد في docs/watch.html' }
+    WebLivePlaybackUrl = @{ Unit = ''; Description = 'رابط تشغيل البث العام للويب ومشغّل تيليغرام. استخدم HTTPS دون بيانات دخول أو استعلام أو جزء مرجعي. الرابط الفارغ يوقف المشاهدة في الويب' }
     EnableLiveRelay = @{ Unit = ''; Description = 'يفعّل ▶️ البث المباشر: ترحيل خرج القناة إلى تيليجرام' }
     EnableTimedShow = @{ Unit = ''; Description = 'يفعّل ⏱ العرض المؤقّت: عرض يُخفى تلقائيًا بعد مدة' }
     EnableHideAll = @{ Unit = ''; Description = 'يفعّل 🚨 إخفاء الكل: زر الطوارئ الذي يخفي الطبقات المحددة' }
@@ -1527,7 +1529,7 @@ $script:SettingGroupDefinitions = @(
         ) }
     [pscustomobject]@{ Category = 'monitoring'; Groups = @(
             [pscustomobject]@{ Key = 'view'; Label = 'اللقطة والمقطع والمشاهدة'; Names = @(
-                    'EnableSnapshot', 'ClipSeconds', 'LiveWatchUrl', 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds'
+                    'EnableSnapshot', 'ClipSeconds', 'LiveWatchUrl', 'WebLivePlaybackUrl', 'SnapshotCooldownSeconds', 'SnapshotTimeoutSeconds'
                 ) }
             [pscustomobject]@{ Key = 'output'; Label = 'مراقبة الخرج والشاشة السوداء'; Names = @(
                     'OutputMonitorMinutes', 'OutputBlackLuminance', 'OutputBlackConfirmSeconds'
@@ -1594,6 +1596,7 @@ $script:SettingNavigationLabels = @{
     EnableSnapshot = 'التقاط لقطات البث'
     ClipSeconds = 'طول المقطع المسجّل'
     LiveWatchUrl = 'رابط صفحة المشاهدة'
+    WebLivePlaybackUrl = 'رابط مشاهدة البث'
     EnableLiveRelay = 'ترحيل البث المباشر'
     EnableTimedShow = 'العرض المؤقت'
     EnableHideAll = 'تفعيل إخفاء الكل'

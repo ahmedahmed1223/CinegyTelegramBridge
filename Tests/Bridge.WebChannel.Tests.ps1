@@ -178,15 +178,21 @@ Describe 'Web channel: the pipe' {
             @{ Key = 'settings'; AdminOnly = $true; Body = @('config.json') }
             @{ Key = 'access'; AdminOnly = $true }
         }
-        Mock Get-WhatsNewSections { @{ Version = '8.129.0'; Items = @('private-bot-release') } }
+        Mock Get-WhatsNewSections {
+            foreach ($version in '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
+                @{ Version = $version; Items = @('private-bot-release') }
+            }
+        }
         $operator = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7110,"role":"owner"}}' | ConvertFrom-Json
         $operator.ok | Should -BeTrue
         $operator.data.chapters.id | Should -Be @('templates')
-        $operator.data.releases[0].Items.Count | Should -Be 1
+        $operator.data.releases.version | Should -Be @('9.1.1', '9.1.0', '9.0.0', '8.129.0')
+        $operator.data.releases[0].Items.Count | Should -Be 2
+        $operator.data.releases[-1].Items.Count | Should -Be 1
 
         $admin = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7111}}' | ConvertFrom-Json
         $admin.data.chapters.id | Should -Be @('templates', 'system', 'access')
-        $admin.data.releases[0].Items.Count | Should -Be 2
+        $admin.data.releases[-1].Items.Count | Should -Be 2
 
         $raw = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7112}}'
         ($raw | ConvertFrom-Json).data.chapters.id | Should -Be @('templates', 'system', 'access', 'roles')
@@ -1202,6 +1208,50 @@ Describe 'Web channel: the pipe' {
         $parsed = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"ping"}') | ConvertFrom-Json
         $parsed.ok | Should -BeTrue
         $parsed.data.version | Should -Be $script:BridgeVersion
+    }
+
+    It 'serves only the dedicated normalized playback source from the private pipe without a pump' {
+        $settings = Get-JsonProp $config 'Settings'
+        $previous = Get-JsonProp $settings 'WebLivePlaybackUrl'
+        $previousPage = Get-JsonProp $settings 'LiveWatchUrl'
+        $request = '{"op":"live.playback","args":{"actor":9999,"url":"https://untrusted.example/override"}}'
+        Mock Invoke-WebChannelOperation { throw 'Playback is a read-only listener operation.' }
+        Mock Save-Config {}
+        Mock Get-ActiveLiveStreamConfig {
+            [pscustomobject]@{ SourceUrl = 'https://relay.example/hls?private=fixture'; RtmpDestination = 'rtmp://private.example/key' }
+        }
+        try {
+            Set-JsonProp $settings 'LiveWatchUrl' 'https://watch.example/index.html?theme=dark&src=stale#player'
+            foreach ($invalid in @('', 'https://film.example/hls?secret=fixture', 'https://fixture:private@film.example/hls')) {
+                Set-JsonProp $settings 'WebLivePlaybackUrl' $invalid
+                Publish-WebChannelState -Force
+                $reply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $request -PumpSeconds 0) | ConvertFrom-Json
+                $reply.ok | Should -BeTrue
+                $reply.data.url | Should -BeNullOrEmpty
+            }
+            Set-JsonProp $settings 'WebLivePlaybackUrl' 'HTTPS://FILM.EXAMPLE:443/hls/index.m3u8'
+            Publish-WebChannelState -Force
+            $reply = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $request -PumpSeconds 0) | ConvertFrom-Json
+            $reply.data.url | Should -BeExactly 'https://film.example/hls/index.m3u8'
+            @($reply.data.PSObject.Properties.Name) | Should -Be @('url')
+            $watch = [uri](Get-LiveWatchUrl)
+            @($watch.Query.TrimStart('?').Split('&') | Where-Object { $_ -like 'src=*' }) |
+                Should -Be @('src=' + [uri]::EscapeDataString($reply.data.url))
+            $watch.Query | Should -Match 'theme=dark'
+            $watch.Fragment | Should -Be '#player'
+
+            Set-Setting -Name 'WebLivePlaybackUrl' -Value 'https://film.example/live/replacement.m3u8'
+            $updated = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $request -PumpSeconds 0) | ConvertFrom-Json
+            $updated.data.url | Should -BeExactly 'https://film.example/live/replacement.m3u8'
+            (Get-LiveWatchUrl) | Should -Match ([regex]::Escape([uri]::EscapeDataString($updated.data.url)))
+            Should -Invoke Get-ActiveLiveStreamConfig -Times 0 -Exactly
+            Should -Invoke Invoke-WebChannelOperation -Times 0 -Exactly
+        }
+        finally {
+            Set-JsonProp $settings 'WebLivePlaybackUrl' $previous
+            Set-JsonProp $settings 'LiveWatchUrl' $previousPage
+            Publish-WebChannelState -Force
+        }
     }
 
     It 'drops an expired on-air request before entering the bridge operation' {

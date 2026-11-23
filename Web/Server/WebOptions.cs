@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Text.Json;
 
 namespace CinegyBridge.Web;
@@ -18,7 +20,6 @@ public sealed class WebOptions
     public string PublicHostname { get; init; } = "";
 
     public Uri? LivePlaybackUri { get; init; }
-    public string PlaybackOrigin => LivePlaybackUri?.GetLeftPart(UriPartial.Authority) ?? "";
 
     public string StateDirectory => Path.Combine(BridgeRoot, "logs", "web");
 
@@ -46,10 +47,26 @@ public sealed class WebOptions
 
     public static Uri? ParsePlaybackUri(string? value)
     {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host) ||
-            uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
+        if (value is not { Length: > 0 and <= 2048 } || value.IndexOfAny(['?', '#', '\\']) >= 0 ||
+            value.Any(character => char.IsWhiteSpace(character) || char.GetUnicodeCategory(character) is UnicodeCategory.Control or UnicodeCategory.Format) ||
+            !Uri.TryCreate(value, UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString() || uri.UserInfo.Length > 0 ||
+            uri.HostNameType is not (UriHostNameType.Dns or UriHostNameType.IPv4 or UriHostNameType.IPv6))
             return null;
-        return uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback) ? uri : null;
+        try
+        {
+            var separator = value.IndexOf("://", StringComparison.Ordinal);
+            if (separator < 0) return null;
+            var authority = value[(separator + 3)..].Split('/', 2)[0];
+            if (authority.IndexOfAny(['@', '%']) >= 0) return null;
+            var hostname = uri.IdnHost;
+            var loopback = authority.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                authority.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase) ||
+                (IPAddress.TryParse(hostname, out var address) && IPAddress.IsLoopback(address));
+            if (uri.Scheme != Uri.UriSchemeHttps && (uri.Scheme != Uri.UriSchemeHttp || !loopback)) return null;
+            var normalized = new UriBuilder(uri) { Host = hostname }.Uri;
+            return normalized.AbsoluteUri.Length <= 2048 ? normalized : null;
+        }
+        catch (UriFormatException) { return null; }
     }
 
     public IReadOnlyList<string> AllowedHosts()

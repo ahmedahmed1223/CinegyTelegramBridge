@@ -34,6 +34,7 @@
     "EnableDpapiSecrets": false,
     "EnableSnapshot": true,
     "EnableLiveRelay": true,
+    "WebLivePlaybackUrl": "",
     "EnableTimedShow": true,
     "EnableHideAll": true,
     "HideAllLayers": "all",

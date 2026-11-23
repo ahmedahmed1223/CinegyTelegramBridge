@@ -38,7 +38,12 @@ function Invoke-SettingsExport {
         # Exported documents can be forwarded; omit credentials rather than
         # importing a redaction placeholder back over the station's secret.
         if ($name -match 'token|secret|password|apikey') { continue }
-        $payload[$name] = Get-Setting $name
+        $current = Get-Setting $name
+        if ($name -eq 'WebLivePlaybackUrl' -and $current -cne '') {
+            $current = ConvertTo-WebLivePlaybackUrl $current
+            if (-not $current) { continue }
+        }
+        $payload[$name] = $current
     }
     $document = New-BridgeSettingsExportDocument -Settings $payload
     $path = Join-Path $script:logDir "settings-export-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
@@ -63,7 +68,7 @@ function Invoke-SettingsExport {
 function ConvertTo-ImportedSettingValue {
     <# Validate the exact JSON type before a settings import reaches the live
        configuration. In particular, [bool]'false' is $true in PowerShell. #>
-    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)]$Value)
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][AllowEmptyString()]$Value)
     $default = $script:DefaultSettings[$Name]
     if ($default -is [bool]) {
         if ($Value -isnot [bool]) { throw (T 'cfg.mustBeBool' $Name) }
@@ -81,6 +86,10 @@ function ConvertTo-ImportedSettingValue {
         return [double]$Value
     }
     if ($Value -isnot [string]) { throw (T 'cfg.mustBeText' $Name) }
+    if ($Name -eq 'WebLivePlaybackUrl' -and $Value -cne '') {
+        $Value = ConvertTo-WebLivePlaybackUrl $Value
+        if (-not $Value) { throw (T 'setting.WebLivePlaybackUrl.invalid') }
+    }
     if ($script:SettingChoices.ContainsKey($Name) -and $script:SettingChoices[$Name] -notcontains $Value) { throw (T 'cfg.valueNotAllowed' $Name) }
     Assert-SettingRange -Name $Name -Value $Value
     return [string]$Value

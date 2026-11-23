@@ -78,10 +78,11 @@ public static class StatusEndpoints
             .Produces<LayerReplacementResult>().Produces<ErrorResponse>(403).Produces<ErrorResponse>(404)
             .Produces<ErrorResponse>(409).Produces<ErrorResponse>(429).Produces<ErrorResponse>(503);
 
-        app.MapGet("/api/live", (HttpContext http, WebOptions options) =>
+        app.MapGet("/api/live", async (HttpContext http, LivePlaybackSource source) =>
             {
                 http.Response.Headers.CacheControl = "no-store";
-                return TypedResults.Ok(new LivePlayback(options.LivePlaybackUri?.AbsoluteUri));
+                var playback = await source.ReadAsync(http.RequestAborted);
+                return TypedResults.Ok(new LivePlayback(playback?.AbsoluteUri));
             })
             .WithTags("Status")
             .RequireAuthorization()

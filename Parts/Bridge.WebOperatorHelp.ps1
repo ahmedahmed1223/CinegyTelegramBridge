@@ -37,6 +37,19 @@ function Invoke-WebOperatorHelp {
     # The shared release ledger owns versions and order. A release may mix
     # several audiences in one Bot line, so expose only reviewed Web summaries.
     $publicUpdates = @{
+        '9.1.1' = @(
+            'افتح صفحة البث لمشاهدة الرابط المضبوط في إعدادات البوت، أو انسخه لمشاركته.'
+            'راجع ملخصات الإصدارات الأخيرة من تبويب «ما الجديد» في دليل الويب.'
+        )
+        '9.1.0' = @(
+            'ابدأ مسودة شريط مشتركة ليحرّر عدة مشغّلين سطورًا مختلفة بالتزامن.'
+            'تابع العواجل المشتركة بين البوت والويب، وراجع تشغيل الكل أو المحدد ونمط التسلسل قبل البدء.'
+            'يصلك إشعار بعد تأكيد عرض العاجل، ويمكن للمشغّل المخوّل إخفاؤه من أيٍّ من الواجهتين.'
+        )
+        '9.0.0' = @(
+            'استخدم جداول غرفة الأخبار العربية مع البحث والترتيب، وتابع البث أثناء التحرير.'
+            'أضف صور JPG وPNG إلى حقول الموجز من النافذة نفسها.'
+        )
         '8.141.0' = 'اعرض العاجل مباشرة أو بمؤقّت وأخفه من الجدول. حقول التحرير تُكتب من اليمين إلى اليسار.'
         '8.140.0' = 'اختر المظهر الكحلي من قائمة الحساب.'
         '8.137.0' = 'راجع تسجيل مشهد خارجي بديل من نافذة مقارنة الطبقات.'
@@ -64,7 +77,7 @@ function Invoke-WebOperatorHelp {
     $versions = @(foreach ($release in @(Get-WhatsNewSections)) {
             $version = [string](Get-JsonProp $release 'Version')
             $items = @()
-            if ($publicUpdates.ContainsKey($version)) { $items += [string]$publicUpdates[$version] }
+            if ($publicUpdates.ContainsKey($version)) { $items += @($publicUpdates[$version]) }
             if ($isAdmin -and $adminUpdates.ContainsKey($version)) { $items += [string]$adminUpdates[$version] }
             if ($items.Count -eq 0) { continue }
             @{ version = $version; items = $items }

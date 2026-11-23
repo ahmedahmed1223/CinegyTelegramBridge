@@ -3127,6 +3127,9 @@ function Show-SettingChoices {
     $prompt = if ($Name -eq 'NewsFilePath') {
         (T 'kb.sendNewsPath' $(Get-Setting $Name) $($script:DefaultSettings[$Name]))
     }
+    elseif ($Name -eq 'WebLivePlaybackUrl') {
+        T 'setting.WebLivePlaybackUrl.prompt'
+    }
     else { (T 'kb.sendNewValue' $Name $(Get-Setting $Name) $($script:DefaultSettings[$Name])) }
     Send-TelegramMessage -ChatId $ChatId -Text $prompt -ReplyMarkup (Get-CancelKeyboard)
 }
@@ -3136,7 +3139,14 @@ function Complete-SettingText {
     $state = Get-PendingState -ChatId $ChatId
     if (-not $state) { return }
     $trimmed = $Value.Trim()
-    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+    if ($state.Name -eq 'WebLivePlaybackUrl') {
+        $trimmed = if ($Value -ceq '-') { '' } else { ConvertTo-WebLivePlaybackUrl $Value }
+        if ($null -eq $trimmed) {
+            Send-TelegramMessage -ChatId $ChatId -Text (T 'setting.WebLivePlaybackUrl.invalid') -ReplyMarkup (Get-CancelKeyboard)
+            return
+        }
+    }
+    elseif ([string]::IsNullOrWhiteSpace($trimmed)) {
         Send-TelegramMessage -ChatId $ChatId -Text (T 'common.valueEmpty') -ReplyMarkup (Get-SettingsKeyboard)
         Clear-PendingState -ChatId $ChatId
         return

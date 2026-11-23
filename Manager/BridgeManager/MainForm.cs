@@ -112,7 +112,7 @@ public sealed class MainForm : Form
     private readonly Panel _filterBar;
     private readonly Panel _statusBar;
     private readonly FlowLayoutPanel _actionBar;
-    private readonly FlowLayoutPanel _optionsBar;
+    private readonly Panel _logSurface;
     private readonly Label _stateLabel;
     private readonly Label _stateDetail;
     private readonly Label _telegramPill;
@@ -267,8 +267,9 @@ public sealed class MainForm : Form
         // time by scripts/Build-BridgeManager.ps1 (-p:Version=...); a plain
         // `dotnet build` without that script falls back to .NET's default "1.0.0.0".
         Text = $"مدير جسر تيليجرام - Cinegy Air Pro (v{Application.ProductVersion})";
-        Width = 1000;
-        Height = 660;
+        AutoScaleDimensions = new SizeF(96f, 96f);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        ClientSize = new Size(1000, 650);
         MinimumSize = new Size(760, 480);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Background;
@@ -293,18 +294,18 @@ public sealed class MainForm : Form
         // A 16pt state word against a colour-coded bar, with the quieter
         // detail (uptime, version) under it. The old window said "متوقف" in an
         // 11pt label wedged between the title bar and a row of eleven buttons.
-        _header = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Theme.Surface };
+        _header = new Panel { Dock = DockStyle.Top, Height = 76, BackColor = Theme.Surface, TabIndex = 0 };
         // Right, not left: this window is right-to-left, so the leading edge -
         // where the eye starts and where the state text is aligned - is the right
         // one. On the left the bar trailed the text it belongs to.
-        _accentBar = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Theme.Stopped };
+        _accentBar = new Panel { Dock = DockStyle.Right, Width = 2, BackColor = Theme.Stopped };
         var headerText = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 12) };
         // AutoEllipsis, because this line grew: uptime, pid, and now both
         // versions. A fixed-height docked Label cuts a too-long string off
         // mid-character with nothing to say it did, and the piece that goes
         // first is the end of the line - where the versions are.
         _stateDetail = new Label { Dock = DockStyle.Top, Height = 20, Text = "", Font = Theme.UiSmall, ForeColor = Theme.TextMuted, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
-        _stateLabel = new Label { Dock = DockStyle.Top, Height = 30, Text = "متوقف", Font = Theme.Title, ForeColor = Theme.Stopped, TextAlign = ContentAlignment.MiddleLeft };
+        _stateLabel = new Label { Dock = DockStyle.Top, Height = 30, Text = "الجسر متوقف", Font = Theme.Title, ForeColor = Theme.Stopped, TextAlign = ContentAlignment.MiddleLeft };
         headerText.Controls.Add(_stateDetail);
         headerText.Controls.Add(_stateLabel);
 
@@ -317,7 +318,7 @@ public sealed class MainForm : Form
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             AutoSize = true,
-            Padding = new Padding(16, 14, 8, 10),
+            Padding = new Padding(16, 14, 16, 10),
             BackColor = Color.Transparent
         };
         _telegramPill = new Label { AutoSize = true, Font = Theme.Ui, ForeColor = Theme.TextMuted, Margin = new Padding(0, 0, 0, 2) };
@@ -331,33 +332,30 @@ public sealed class MainForm : Form
         _header.Controls.Add(_accentBar);
 
         // ---- action bar: three things that change the air, then the rest ---
-        _actionBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(14, 12, 14, 6), BackColor = Theme.Background };
-        _startButton = Theme.PrimaryButton("▶  تشغيل", () => Theme.Running);
+        _actionBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true, Padding = new Padding(16, 12, 16, 4), BackColor = Theme.Background, TabIndex = 1
+        };
+        _startButton = Theme.PrimaryButton("تشغيل الجسر", () => Theme.Running);
         _startButton.AccessibleName = "تشغيل الجسر";
         _startButton.Width = ActionButtonWidth;
-        _stopButton = Theme.PrimaryButton("■  إيقاف", () => Theme.Stopped);
+        _stopButton = Theme.DangerButton("إيقاف الجسر");
         _stopButton.AccessibleName = "إيقاف الجسر";
         _stopButton.Width = ActionButtonWidth;
         _stopButton.Enabled = false;
-        _restartButton = Theme.PrimaryButton("↻  إعادة تشغيل", () => Theme.Pending);
+        _restartButton = Theme.PrimaryButton("إعادة تشغيل", () => Theme.Accent);
         _restartButton.AccessibleName = "إعادة تشغيل الجسر (F5)";
         _restartButton.Width = ActionButtonWidth;
         _restartButton.Enabled = false;
 
-        var settingsButton = Theme.QuietButton("⚙  الإعدادات");
-        settingsButton.Width = ActionButtonWidth;
-        var logsButton = Theme.QuietButton("📂  مجلد السجلات");
-        logsButton.Width = ActionButtonWidth;
-        var clearButton = Theme.QuietButton("🧹  مسح الشاشة");
-        clearButton.Width = ActionButtonWidth;
-        var onAirButton = Theme.QuietButton("📡  على الهواء");
-        onAirButton.Width = ActionButtonWidth;
-        var reportsButton = Theme.QuietButton("📊  التقارير");
-        reportsButton.Width = ActionButtonWidth;
-        var webButton = Theme.QuietButton("🌐  واجهة الويب");
-        webButton.Width = ActionButtonWidth;
-        var optionsButton = Theme.QuietButton("☰  خيارات");
-        optionsButton.Width = ActionButtonWidth;
+        var settingsButton = CreateToolbarButton("الإعدادات");
+        var logsButton = CreateToolbarButton("مجلد السجل");
+        var clearButton = CreateToolbarButton("مسح العرض");
+        var onAirButton = CreateToolbarButton("على الهواء");
+        var reportsButton = CreateToolbarButton("التقارير");
+        var webButton = CreateToolbarButton("واجهة الويب");
+        var optionsButton = CreateToolbarButton("الخيارات");
         optionsButton.AccessibleName = "خيارات التشغيل والعرض";
         optionsButton.Click += (_, _) => _optionsMenu?.Show(optionsButton, new Point(0, optionsButton.Height));
 
@@ -388,16 +386,19 @@ public sealed class MainForm : Form
         // Keep start/stop/restart together. Secondary actions may wrap within
         // their own group, so resizing never mixes a clear button into the
         // operational controls during an on-air incident.
-        var operationalActions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 0, 20, 6) };
-        operationalActions.Controls.AddRange(new Control[] { _startButton, _stopButton, _restartButton });
+        var operationalActions = new FlowLayoutPanel
+        {
+            AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0, 0, 20, 6), AccessibleName = "التحكم بتشغيل الجسر"
+        };
+        operationalActions.Controls.AddRange(new Control[] { _startButton, _restartButton, _stopButton });
         var utilityActions = CreateUtilityActions();
-        utilityActions.Controls.AddRange(new Control[] { settingsButton, optionsButton, logsButton, onAirButton, reportsButton, webButton, clearButton });
+        utilityActions.Controls.AddRange(new Control[] { onAirButton, webButton, reportsButton, settingsButton, optionsButton });
         _actionBar.Controls.AddRange(new Control[] { operationalActions, utilityActions });
         _actionBar.SizeChanged += (_, _) =>
             utilityActions.MaximumSize = new Size(Math.Max(1, _actionBar.ClientSize.Width - _actionBar.Padding.Horizontal), 0);
 
         // ---- options: switches, which are not actions ----------------------
-        _optionsBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(16, 2, 14, 8), BackColor = Theme.Background };
         _autoRestartCheck = Theme.ToggleChip("↻  إعادة تشغيل تلقائية", "يعيد تشغيل الجسر بعد 3 ثوانٍ من أي توقف، ويكفّ بعد 5 انهيارات سريعة متتالية بدل أن يظل يحاول.", _tips);
         _autoRestartCheck.Checked = _settings.AutoRestart;
         _watchdogCheck = Theme.ToggleChip("🩺  كشف التعليق", $"يعيد التشغيل إذا انقطعت نبضة الجسر أكثر من {_settings.HangWatchdogMinutes} {ArabicCountWord(_settings.HangWatchdogMinutes, "دقيقة", "دقيقتان", "دقائق", "دقيقة")}، حتى لو بقيت العملية حيّة.", _tips);
@@ -430,7 +431,6 @@ public sealed class MainForm : Form
         // so every .Checked read and every handler elsewhere still works, and
         // what they persist is untouched.
         _optionsMenu = MakeOptionsMenu();
-        _optionsBar.Visible = false;
 
         // ---- what is happening, above the stream that says it slowly -------
         _activityLabel = new Label
@@ -440,10 +440,10 @@ public sealed class MainForm : Form
             Font = Theme.UiSmall,
             ForeColor = Theme.TextMuted,
             BackColor = Theme.Background,
-            Padding = new Padding(16, 5, 16, 0),
-            TextAlign = ContentAlignment.MiddleRight,
+            Padding = new Padding(16, 0, 16, 3),
+            TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
-            Text = "▶ آخر عملية: لا عملية بعد     ⚠ بلا أخطاء"
+            Text = "آخر عملية: لا عملية بعد · بلا أخطاء"
         };
         _preferencesWarning = Theme.Hint("⚠ تعذّر حفظ تفضيلات المدير. ستُطبّق هنا حتى الإغلاق فقط. تحقّق من صلاحية الكتابة في مجلد البرنامج.");
         _preferencesWarning.Dock = DockStyle.Top;
@@ -454,29 +454,51 @@ public sealed class MainForm : Form
         _preferencesWarning.AccessibleName = "تعذّر حفظ تفضيلات المدير";
         _preferencesWarning.Tag = (Action)(() => _preferencesWarning.ForeColor = Theme.Pending);
 
-        // ---- filter row, sitting directly on top of what it filters --------
-        _filterBar = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Surface, Padding = new Padding(14, 9, 14, 9) };
-        var filterFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoSize = false };
-        _filterBox = Theme.Input(300);
-        // Saying that a time works here, because it always did and nothing
-        // said so: every line opens with its stamp, so "07:2" is a filter on
-        // a twenty-minute window as much as a word is a filter on a word.
-        _filterBox.PlaceholderText = "تصفية بالنص أو بالوقت (مثل 07:2)…  (Ctrl+F)";
+        // The log tools sit with the log, so a display command is never
+        // mistaken for a bridge lifecycle control when a row wraps.
+        _filterBar = new Panel
+        {
+            Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Surface, Padding = new Padding(16, 8, 16, 6), TabIndex = 2
+        };
+        var filterFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true
+        };
+        var logTitle = new Label
+        {
+            Text = "سجل الجسر", Font = Theme.SectionHeading, ForeColor = Theme.Text,
+            AutoSize = true, Margin = new Padding(0, 7, 12, 8)
+        };
+        logTitle.Tag = (Action)(() => logTitle.ForeColor = Theme.Text);
+        var searchLabel = new Label
+        {
+            Text = "بحث", Font = Theme.Ui, ForeColor = Theme.TextMuted,
+            AutoSize = true, Margin = new Padding(0, 7, 8, 8)
+        };
+        searchLabel.Tag = (Action)(() => searchLabel.ForeColor = Theme.TextMuted);
+        _filterBox = Theme.Input(245);
+        _filterBox.PlaceholderText = "النص أو الوقت";
         _filterBox.AccessibleName = "تصفية السجل";
         _filterBox.AccessibleDescription = "يبحث في النص المعروض من سجل الجسر.";
-        _errorsOnlyCheck = Theme.ToggleChip("الأخطاء والتحذيرات فقط", "يخفي كل ما عدا أسطر [ERROR] و[WARN].", _tips);
-        _errorsOnlyCheck.Margin = new Padding(12, 0, 0, 0);
-        _filterBox.Margin = new Padding(0, 5, 0, 0);
-        filterFlow.Controls.AddRange(new Control[] { _filterBox, _errorsOnlyCheck });
-        _filterBar.Controls.Add(filterFlow);
-        filterFlow.Dock = DockStyle.Top;
-        filterFlow.AutoSize = true;
-        filterFlow.WrapContents = true;
-        _latestButton = Theme.QuietButton("انتقل إلى الأحدث");
-        _latestButton.AutoSize = true;
+        _tips.SetToolTip(_filterBox, "ابحث بالنص أو الوقت. (Ctrl+F)");
+        _errorsOnlyCheck = Theme.ToggleChip("الأخطاء والتحذيرات", "يخفي كل ما عدا أسطر [ERROR] و[WARN].", _tips);
+        _filterBox.Margin = new Padding(0, 5, 8, 6);
+        _errorsOnlyCheck.Margin = new Padding(0, 0, 8, 6);
+        _followTailCheck.Margin = new Padding(0, 0, 8, 6);
+        _latestButton = CreateToolbarButton("انتقل إلى الأحدث");
         _latestButton.Click += (_, _) => _followTailCheck.Checked = true;
-        filterFlow.Controls.Add(_followTailCheck);
-        filterFlow.Controls.Add(_latestButton);
+        filterFlow.Controls.AddRange(new Control[]
+        {
+            logTitle, searchLabel, _filterBox, _errorsOnlyCheck, _followTailCheck, _latestButton, logsButton, clearButton
+        });
+        _filterBar.Controls.Add(filterFlow);
+        _filterBar.SizeChanged += (_, _) =>
+        {
+            var available = _filterBar.ClientSize.Width - _filterBar.Padding.Horizontal;
+            _filterBox.Width = Math.Clamp(available / 5, LogicalToDeviceUnits(144), LogicalToDeviceUnits(245));
+        };
         UpdateLogFollowState();
 
         _output = new RichTextBox
@@ -502,7 +524,14 @@ public sealed class MainForm : Form
             // correctly inside it.
             RightToLeft = RightToLeft.No
         };
+        _output.AccessibleName = "سجل الجسر المباشر";
         _output.ZoomFactor = ClampZoom(_settings.LogZoom);
+        _logSurface = new Panel
+        {
+            Dock = DockStyle.Fill, BackColor = Theme.LogBackground,
+            Padding = new Padding(16, 8, 16, 8), TabIndex = 3
+        };
+        _logSurface.Controls.Add(_output);
 
         // ---- status bar: the facts nobody should have to hunt for ----------
         // A plain panel rather than a StatusStrip: the strip renderers fight a
@@ -520,7 +549,7 @@ public sealed class MainForm : Form
         _zoomLabel.Click += (_, _) => SetZoom(1f);
         _tips.SetToolTip(_zoomLabel, "تكبير السجل (Ctrl+‏+ / Ctrl+‏-) — اضغط للعودة إلى 100%.");
         UpdateZoomLabel();
-        statusFlow.Controls.AddRange(new Control[] { _lineCountLabel, _livenessLabel, _pathLabel, _zoomLabel });
+        statusFlow.Controls.AddRange(new Control[] { _lineCountLabel, _livenessLabel, _zoomLabel, _pathLabel });
         _statusBar.Controls.Add(statusFlow);
 
         _wordWrapCheck.CheckedChanged += (_, _) =>
@@ -561,11 +590,10 @@ public sealed class MainForm : Form
 
         // Docked Top stacks in reverse order of adding, so this reads
         // bottom-of-the-window first.
-        Controls.Add(_output);
+        Controls.Add(_logSurface);
         Controls.Add(_filterBar);
         Controls.Add(_activityLabel);
         Controls.Add(_preferencesWarning);
-        Controls.Add(_optionsBar);
         Controls.Add(_actionBar);
         Controls.Add(_header);
         Controls.Add(_statusBar);
@@ -702,8 +730,9 @@ public sealed class MainForm : Form
         ForeColor = Theme.Text;
         _header.BackColor = Theme.Surface;
         _actionBar.BackColor = Theme.Background;
-        _optionsBar.BackColor = Theme.Background;
+        _activityLabel.BackColor = Theme.Background;
         _filterBar.BackColor = Theme.Surface;
+        _logSurface.BackColor = Theme.LogBackground;
         _statusBar.BackColor = Theme.Surface;
         _output.BackColor = Theme.LogBackground;
         _output.ForeColor = Theme.LogNormal;
@@ -717,8 +746,20 @@ public sealed class MainForm : Form
         ResumeLayout();
         Theme.ApplyTitleBar(Handle);
         SetStatus(_running);
+        UpdateActivityStrip();
         if (_followTailCheck.Checked) RenderAll();
         UpdateLogFollowState();
+    }
+
+    private static Button CreateToolbarButton(string text)
+    {
+        var button = Theme.QuietButton(text);
+        button.AutoSize = true;
+        button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        button.MinimumSize = new Size(80, 36);
+        button.Padding = new Padding(8, 0, 8, 0);
+        button.Margin = new Padding(0, 0, 8, 6);
+        return button;
     }
 
     internal static FlowLayoutPanel CreateUtilityActions() => new()
@@ -1049,7 +1090,7 @@ public sealed class MainForm : Form
         var errors = _recentErrors.Count == 0
             ? "بلا أخطاء"
             : $"{_recentErrors.Count} {ArabicCountWord(_recentErrors.Count, "خطأ", "خطآن", "أخطاء", "خطأً")} في آخر ساعة";
-        _activityLabel.Text = $"▶ آخر عملية: {last}     ⚠ {errors}";
+        _activityLabel.Text = $"آخر عملية: {last} · {errors}";
         _activityLabel.ForeColor = _recentErrors.Count == 0 ? Theme.TextMuted : Theme.Stopped;
     }
 
@@ -1922,7 +1963,7 @@ public sealed class MainForm : Form
     private void SetStatus(bool running)
     {
         _running = running;
-        SetHeader(running ? "يعمل" : "متوقف",
+        SetHeader(running ? "الجسر يعمل" : "الجسر متوقف",
             running ? Theme.Running : Theme.Stopped,
             running ? "" : "الجسر لا يتحكم بالرسومات على الهواء الآن.");
         UpdateStateDetail();
@@ -1934,6 +1975,7 @@ public sealed class MainForm : Form
         _stopButton.Enabled = running;
         _stopButton.Visible = running;
         _restartButton.Enabled = running && _managedRestartLedger?.IsStalled != true;
+        _restartButton.Visible = running;
         _trayIcon.Text = running ? "مدير جسر تيليجرام - يعمل" : "مدير جسر تيليجرام - متوقف";
         UpdateStatusBar();
     }

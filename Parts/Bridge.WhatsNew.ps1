@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.1'; Items = @('Set the web viewing link from the Bot settings. Web operators can watch the stream or copy its viewing link.',
+                        'Find the recent releases in the Web What''s New tab.') },
                 @{ Version = '9.1.0'; Items = @('Start a shared ticker draft so several web editors can add or edit headlines at the same time. The draft owner still reviews publication.',
                         'See urgent headlines added from Telegram or the web in the same table, choose whether to play all or only the selected rows, and review the sequence mode before starting.',
                         'Receive a notice when an individually selected urgent headline is confirmed on air, whichever interface started it.',
@@ -392,6 +394,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.1'; Items = @('اضبط رابط المشاهدة من إعدادات البوت ليتمكن مشغّلو الويب من متابعة البث ونسخ الرابط.',
+                        'راجع الإصدارات الأخيرة من تبويب «ما الجديد» في دليل الويب.') },
                 @{ Version = '9.1.0'; Items = @('ابدأ مسودة شريط مشتركة ليضيف عدة محررين الأخبار ويعدّلوا سطورًا مختلفة في الوقت نفسه. تبقى مراجعة النشر لدى صاحب المسودة.',
                         'تابع العواجل المضافة من البوت والويب في الجدول نفسه، واختر تشغيل الكل أو المحدد وراجع نمط التسلسل قبل البدء.',
                         'يصلك إشعار عندما يتأكد ظهور عاجل فردي على الهواء، من الويب أو من البوت.',

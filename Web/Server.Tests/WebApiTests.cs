@@ -60,7 +60,8 @@ public sealed class SignInTests : IDisposable
         using var client = configured.CreateClient(new() { BaseAddress = new Uri("http://localhost") });
         using var denied = await client.GetAsync("/api/live");
         Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
-        Assert.Contains("https://media.example.test", denied.Headers.GetValues("Content-Security-Policy").Single());
+        Assert.DoesNotContain("https://media.example.test", denied.Headers.GetValues("Content-Security-Policy").Single());
+        Assert.DoesNotContain(_app.Bridge.Calls, call => call.Op == "live.playback");
 
         await _app.AddPasswordAccountAsync("desk", WebApp.Operator);
         var browser = new Browser(client);
@@ -69,6 +70,54 @@ public sealed class SignInTests : IDisposable
         login.EnsureSuccessStatusCode();
         var playback = await client.GetFromJsonAsync<LivePlayback>("/api/live");
         Assert.Equal("https://media.example.test/output/main.m3u8", playback!.Url);
+    }
+
+    [Fact]
+    public async Task Shared_playback_controls_the_API_and_only_the_document_media_policy()
+    {
+        var assets = Directory.CreateDirectory(Path.Combine(_app.Root, "client"));
+        await File.WriteAllTextAsync(Path.Combine(assets.FullName, "index.html"), "<!doctype html><title>Live fixture</title>");
+        await File.WriteAllTextAsync(Path.Combine(assets.FullName, "fixture.js"), "// fixture");
+        _app.Bridge.LivePlaybackJson = """{"url":"https://studio.example.test:8443/output/main.m3u8","source":"rtmp://relay-secret"}""";
+        using var configured = _app.WithWebHostBuilder(host => host.UseWebRoot(assets.FullName)
+            .UseSetting("LivePlaybackUrl", "https://legacy.example.test/fallback.m3u8"));
+        using var client = configured.CreateClient(new() { BaseAddress = new Uri("http://localhost") });
+
+        using var script = await client.GetAsync("/fixture.js");
+        script.EnsureSuccessStatusCode();
+        Assert.DoesNotContain(_app.Bridge.Calls, call => call.Op == "live.playback");
+        using var document = await client.GetAsync("/live");
+        document.EnsureSuccessStatusCode();
+        Assert.True(document.Headers.CacheControl?.NoStore);
+        var policy = document.Headers.GetValues("Content-Security-Policy").Single();
+        Assert.Contains("connect-src 'self' https://studio.example.test:8443;", policy);
+        Assert.Contains("media-src 'self' blob: https://studio.example.test:8443;", policy);
+        Assert.DoesNotContain("legacy.example.test", policy);
+        Assert.DoesNotContain("main.m3u8", policy);
+        Assert.DoesNotContain("relay-secret", policy);
+
+        await _app.AddPasswordAccountAsync("desk", WebApp.Operator);
+        var browser = new Browser(client);
+        await browser.RefreshSessionAsync();
+        using var login = await browser.PostAsync("/api/auth/password", new PasswordSignInRequest("desk", "correct horse battery"));
+        login.EnsureSuccessStatusCode();
+        using var shared = await client.GetAsync("/api/live");
+        Assert.True(shared.Headers.CacheControl?.NoStore);
+        Assert.Equal("https://studio.example.test:8443/output/main.m3u8", (await shared.Content.ReadFromJsonAsync<LivePlayback>())!.Url);
+        Assert.DoesNotContain("relay-secret", await shared.Content.ReadAsStringAsync());
+
+        _app.Bridge.LivePlaybackJson = """{"url":"https://bad.example.test/output.m3u8?key=private"}""";
+        Assert.Null((await client.GetFromJsonAsync<LivePlayback>("/api/live"))!.Url);
+        _app.Bridge.LivePlaybackJson = """{"url":null}""";
+        Assert.Null((await client.GetFromJsonAsync<LivePlayback>("/api/live"))!.Url);
+        using var cleared = await client.GetAsync("/index.html");
+        var clearedPolicy = cleared.Headers.GetValues("Content-Security-Policy").Single();
+        Assert.DoesNotContain(".example.test", clearedPolicy);
+
+        _app.Bridge.Online = false;
+        using var unavailable = await client.GetAsync("/");
+        unavailable.EnsureSuccessStatusCode();
+        Assert.DoesNotContain("legacy.example.test", unavailable.Headers.GetValues("Content-Security-Policy").Single());
     }
 
     [Fact]
@@ -176,10 +225,22 @@ public sealed class SignInTests : IDisposable
     [InlineData("http://media.example.test/output/main.m3u8")]
     [InlineData("https://name:secret@media.example.test/output.m3u8")]
     [InlineData("https://media.example.test/output.m3u8?key=secret")]
+    [InlineData("https://media.example.test/output.m3u8#")]
+    [InlineData("https://@media.example.test/output.m3u8")]
+    [InlineData("http://loopback/output.m3u8")]
     [InlineData("file:///C:/Station/source.m3u8")]
     public void Playback_configuration_refuses_insecure_or_credentialed_sources(string url)
     {
         Assert.Null(WebOptions.ParsePlaybackUri(url));
+    }
+
+    [Theory]
+    [InlineData("http://localhost:8080/main.m3u8")]
+    [InlineData("http://[::1]:8080/main.m3u8")]
+    [InlineData("https://media.example.test/live/desk@studio.m3u8")]
+    public void Playback_configuration_accepts_https_and_explicit_loopback(string url)
+    {
+        Assert.Equal(url, WebOptions.ParsePlaybackUri(url)?.AbsoluteUri);
     }
 
     [Fact]

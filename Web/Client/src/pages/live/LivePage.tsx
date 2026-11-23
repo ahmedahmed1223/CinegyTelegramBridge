@@ -1,6 +1,6 @@
-import { Alert, Badge, Button, Group, Paper, Skeleton, Stack, Text, Title } from '@mantine/core'
+import { Alert, Badge, Button, CopyButton, Group, Paper, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { IconAntenna, IconArrowUpRight, IconCircleDot, IconDeviceTv, IconPictureInPicture, IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
+import { IconAntenna, IconArrowUpRight, IconCircleDot, IconCopy, IconDeviceTv, IconPictureInPicture, IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import type Hls from 'hls.js'
@@ -149,7 +149,7 @@ function LiveVideo({ url, floating, nativePip, onPipChange, onStop }: {
       </Group>
       {state === 'failed' && (
         <Alert color="yellow" className={classes.playerAlert}>
-          تأكّد من إتاحة رابط المشاهدة لهذا المتصفح ومن سماح خادم الفيديو بتشغيله من الموقع.
+          تأكّد من إتاحة رابط المشاهدة لهذا المتصفح. إذا تغيّر عنوان خادم البث في إعدادات البوت، أعد تحميل صفحة البث.
         </Alert>
       )}
       {pipError && (
@@ -202,7 +202,7 @@ export function LivePage({ active, watching, onWatchingChange }: {
   const player = useQuery({
     queryKey: ['live-playback'],
     retry: false,
-    refetchOnWindowFocus: false,
+    refetchInterval: active ? 15_000 : false,
     queryFn: async ({ signal }) => {
       const { data, error, response } = await api.GET('/api/live', { signal })
       if (!data) throw new Error(messageFor(errorCode(error, response)))
@@ -219,6 +219,11 @@ export function LivePage({ active, watching, onWatchingChange }: {
           <Paper radius="lg" className={classes.monitor} data-floating-video={active ? undefined : nativePip ? 'native' : 'inline'}>
             <Group gap="xs" justify="space-between" className={classes.monitorHeader}>
               <Group gap="xs"><IconDeviceTv size={20} aria-hidden /><Title order={2}>مشاهدة الخرج</Title></Group>
+              {active && url && <CopyButton value={url}>
+                {({ copied, copy }) => <Button size="compact-sm" variant="subtle" onClick={copy} leftSection={<IconCopy size={15} aria-hidden />}>
+                  {copied ? 'نُسخ رابط البث' : 'نسخ رابط البث'}
+                </Button>}
+              </CopyButton>}
               {!active && <Button component={Link} to="/live" size="compact-xs" variant="subtle">فتح صفحة البث</Button>}
             </Group>
             {watching && url ? <LiveVideo url={url} key={url} floating={!active} nativePip={nativePip} onPipChange={setNativePip} onStop={() => {
@@ -247,7 +252,7 @@ export function LivePage({ active, watching, onWatchingChange }: {
                     ) : (
                       <>
                         <Text fw={600}>رابط المشاهدة غير مضبوط</Text>
-                        <Text size="sm">أضف رابط خرج مخصصًا للمشاهدة في إعداد <bdi className="cgb-mono">LivePlaybackUrl</bdi>.</Text>
+                        <Text size="sm">يضيف المشرف «رابط مشاهدة البث» من إعدادات البوت.</Text>
                       </>
                     )}
                   </Stack>

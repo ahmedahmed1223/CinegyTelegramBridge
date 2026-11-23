@@ -396,6 +396,7 @@ function Protect-SettingDisplayValue {
         masked by default instead of by whoever remembers.
     #>
     param([string]$Name, $Value)
+    if ($Name -eq 'WebLivePlaybackUrl') { return (Format-ConfigDiffValue -Name $Name -Value $Value) }
     if ($Name -match '(?i)token|secret|password|apikey') {
         $text = [string]$Value
         return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { (T 'core.empty') })
@@ -418,7 +419,7 @@ function Format-ConfigDiffValue {
         whitelist is a list of people; and everything else is shown, capped.
     #>
     param([string]$Name, $Value)
-    if ($Name -match '(?i)token|secret|password|apikey') {
+    if ($Name -eq 'WebLivePlaybackUrl' -or $Name -match '(?i)token|secret|password|apikey') {
         $text = [string]$Value
         return $(if ($text) { (T 'core.redacted' $($text.Length)) } else { (T 'core.empty') })
     }
@@ -1045,6 +1046,7 @@ function Format-CappedTail {
 
 function Format-SettingDisplay {
     param([Parameter(Mandatory)][string]$Name, $Value)
+    if ($Name -eq 'WebLivePlaybackUrl') { return (Format-ConfigDiffValue -Name $Name -Value $Value) }
     $metadata = Get-JsonProp $script:SettingDisplayMetadata $Name
     $unit = if ($metadata) { [string](Get-JsonProp $metadata 'Unit') } else { '' }
     # A duration is spelled out; every other unit is simply appended.
@@ -1102,9 +1104,39 @@ function Assert-SettingRange {
     }
 }
 
+function ConvertTo-WebLivePlaybackUrl {
+    param($Value)
+
+    if ($Value -isnot [string] -or $Value.Length -gt 2048 -or $Value -match '[\s\p{Cc}\p{Cf}\\?#]') { return }
+    $authority = [regex]::Match($Value, '^(?i:https?)://([^/]+)')
+    if (-not $authority.Success -or $authority.Groups[1].Value -match '[@%]') { return }
+    $uri = $null
+    if (-not [uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -or -not $uri.IsWellFormedOriginalString() -or
+        -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
+        $uri.HostNameType -notin [UriHostNameType]::Dns, [UriHostNameType]::IPv4, [UriHostNameType]::IPv6) { return }
+    try {
+        $hostname = $uri.IdnHost
+        if ($uri.Scheme -eq 'http') {
+            $address = $null
+            if ($authority.Groups[1].Value -notmatch '^localhost(?::[0-9]+)?$' -and
+                (-not [Net.IPAddress]::TryParse($hostname, [ref]$address) -or -not [Net.IPAddress]::IsLoopback($address))) { return }
+        }
+        # Use the browser's ASCII authority for IDN names and preserve the escaped path.
+        $builder = [UriBuilder]::new($uri)
+        $builder.Host = $hostname
+        $normalized = $builder.Uri.AbsoluteUri
+        if ($normalized.Length -le 2048) { return $normalized }
+    }
+    catch { return }
+}
+
 function Set-Setting {
     param([Parameter(Mandatory)][string]$Name, $Value)
     Assert-SettingRange -Name $Name -Value $Value
+    if ($Name -eq 'WebLivePlaybackUrl' -and -not ($Value -is [string] -and $Value.Length -eq 0)) {
+        $Value = ConvertTo-WebLivePlaybackUrl $Value
+        if (-not $Value) { throw (T 'setting.WebLivePlaybackUrl.invalid') }
+    }
     $settings = Get-JsonProp $config 'Settings'
     if ($null -eq $settings) {
         $settings = [pscustomobject]@{}
@@ -1112,6 +1144,7 @@ function Set-Setting {
     }
     Set-JsonProp $settings $Name $Value
     Save-Config
+    if ($Name -eq 'WebLivePlaybackUrl') { Publish-WebChannelState -Force }
 }
 
 function Initialize-Settings {

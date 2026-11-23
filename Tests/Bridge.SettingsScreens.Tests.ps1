@@ -465,6 +465,14 @@ Describe 'Admin configuration backup menu' {
 }
 
 Describe 'Settings export and import' {
+    It 'validates the shared playback URL on import and masks it in Telegram previews' {
+        $safe = 'https://media.example.test/programme/live.m3u8'
+        (ConvertTo-ImportedSettingValue -Name WebLivePlaybackUrl -Value $safe) | Should -Be $safe
+        (ConvertTo-ImportedSettingValue -Name WebLivePlaybackUrl -Value '') | Should -Be ''
+        { ConvertTo-ImportedSettingValue -Name WebLivePlaybackUrl -Value "$($safe)?access=private" } | Should -Throw
+        (Protect-SettingDisplayValue -Name WebLivePlaybackUrl -Value $safe) | Should -Not -Match 'media\.example'
+    }
+
     BeforeEach {
         $script:PendingSettingsImport = $null
         Mock Test-Admin { $true }
@@ -631,8 +639,8 @@ Describe 'Settings export and import' {
 
 Describe 'Version 6 settings navigation schema' {
     It 'leads the release notes with the version actually running' {
-        $script:BridgeVersion | Should -Be '9.1.0'
-        @(Get-WhatsNewSections)[0].Version | Should -Be '9.1.0'
+        $script:BridgeVersion | Should -Be '9.1.1'
+        @(Get-WhatsNewSections)[0].Version | Should -Be '9.1.1'
     }
 
     It 'presents the operational setting categories in a stable order' {
@@ -979,6 +987,55 @@ Describe 'Settings list and search screens' {
 }
 
 Describe 'Confirming a settings change' {
+    It 'normalizes and validates the dedicated Web playback setting before saving' {
+        Mock Save-Config {}
+        $settings = Get-JsonProp $config 'Settings'
+        $prior = Get-JsonProp $settings 'WebLivePlaybackUrl'
+        try {
+            Set-Setting -Name 'WebLivePlaybackUrl' -Value 'HTTPS://PLAYBACK.EXAMPLE:443/live/index.m3u8'
+            (Get-Setting 'WebLivePlaybackUrl') | Should -BeExactly 'https://playback.example/live/index.m3u8'
+            foreach ($value in @('https://user:pass@playback.example/live', 'https://@playback.example/live',
+                    'https://playback.example/live?', 'https://playback.example/live?token=fixture',
+                    'https://playback.example/live#', 'https://playback.example/live#cue',
+                    ' https://playback.example/live', 'https://playback.example/live ',
+                    'https://playback.example/news room', 'https://playback.example\live',
+                    'http://playback.example/live', 'rtmp://playback.example/live', '/stream/hls')) {
+                { Set-Setting -Name 'WebLivePlaybackUrl' -Value $value } | Should -Throw
+            }
+            (Get-Setting 'WebLivePlaybackUrl') | Should -BeExactly 'https://playback.example/live/index.m3u8'
+            Set-Setting -Name 'WebLivePlaybackUrl' -Value 'http://127.0.0.1:9876/dev.m3u8'
+            (Get-Setting 'WebLivePlaybackUrl') | Should -BeExactly 'http://127.0.0.1:9876/dev.m3u8'
+            Set-Setting -Name 'WebLivePlaybackUrl' -Value ''
+            (Get-Setting 'WebLivePlaybackUrl') | Should -BeNullOrEmpty
+            Should -Invoke Save-Config -Times 3 -Exactly
+        }
+        finally { Set-JsonProp $settings 'WebLivePlaybackUrl' $prior }
+    }
+
+    It 'prompts for the playback address and lets an administrator clear it with a dash' {
+        Mock Send-TelegramMessage {}
+        Mock Save-Config {}
+        Mock Write-BridgeLog {}
+        Mock Add-AuditEntry {}
+        $settings = Get-JsonProp $config 'Settings'
+        $prior = Get-JsonProp $settings 'WebLivePlaybackUrl'
+        Set-JsonProp $settings 'WebLivePlaybackUrl' 'https://playback.example/old.m3u8'
+        try {
+            Show-SettingChoices -Name 'WebLivePlaybackUrl' -ChatId 100 -UserId 101
+            Should -Invoke Send-TelegramMessage -Times 1 -ParameterFilter { $Text -match 'HTTPS' -and $Text -match 'شرطة' }
+            Complete-SettingText -ChatId 100 -Value ' https://playback.example/new.m3u8'
+            (Get-Setting 'WebLivePlaybackUrl') | Should -BeExactly 'https://playback.example/old.m3u8'
+            (Get-PendingState -ChatId 100).Name | Should -BeExactly 'WebLivePlaybackUrl'
+            Complete-SettingText -ChatId 100 -Value '-'
+            (Get-Setting 'WebLivePlaybackUrl') | Should -BeNullOrEmpty
+            Should -Invoke Save-Config -Times 1 -Exactly
+        }
+        finally {
+            Set-JsonProp $settings 'WebLivePlaybackUrl' $prior
+            Clear-PendingState -ChatId 100
+        }
+    }
+
     It 'names the setting the way the screens do, and says what it was' {
         Mock Send-TelegramMessage {}
         Mock Save-Config {}

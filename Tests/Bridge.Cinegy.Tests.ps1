@@ -1585,6 +1585,7 @@ Describe 'The watch page address' {
         broken, which is worse than a button that is not there.
     #>
     BeforeEach {
+        Mock Get-Setting { '' } -ParameterFilter { $Name -eq 'WebLivePlaybackUrl' }
         Mock Get-ActiveLiveStreamConfig { [pscustomobject]@{ SourceUrl = 'https://s.example/live.m3u8' } }
         Mock Get-BridgeLanguage { 'ar' }
     }

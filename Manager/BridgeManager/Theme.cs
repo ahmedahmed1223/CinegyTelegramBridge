@@ -25,12 +25,12 @@ internal static class Theme
     public static void SetMode(bool dark) => IsDark = dark;
 
     // ---- surfaces ---------------------------------------------------------
-    public static Color Background => IsDark ? Color.FromArgb(24, 24, 28) : Color.FromArgb(245, 246, 248);
-    public static Color Surface => IsDark ? Color.FromArgb(36, 36, 42) : Color.FromArgb(255, 255, 255);
-    public static Color SurfaceAlt => IsDark ? Color.FromArgb(48, 48, 56) : Color.FromArgb(236, 238, 242);
-    public static Color Border => IsDark ? Color.FromArgb(64, 64, 74) : Color.FromArgb(210, 214, 222);
-    public static Color Text => IsDark ? Color.FromArgb(233, 233, 238) : Color.FromArgb(27, 29, 33);
-    public static Color TextMuted => IsDark ? Color.FromArgb(148, 148, 160) : Color.FromArgb(103, 110, 122);
+    public static Color Background => IsDark ? Color.FromArgb(16, 26, 44) : Color.FromArgb(242, 245, 250);
+    public static Color Surface => IsDark ? Color.FromArgb(21, 33, 55) : Color.White;
+    public static Color SurfaceAlt => IsDark ? Color.FromArgb(26, 42, 66) : Color.FromArgb(233, 239, 248);
+    public static Color Border => IsDark ? Color.FromArgb(52, 75, 105) : Color.FromArgb(203, 214, 229);
+    public static Color Text => IsDark ? Color.FromArgb(241, 245, 255) : Color.FromArgb(22, 37, 59);
+    public static Color TextMuted => IsDark ? Color.FromArgb(157, 177, 207) : Color.FromArgb(78, 95, 121);
 
     // ---- the three bridge states, reserved for exactly that ---------------
     // Darker in light mode: the greens and ambers that read well on near-black
@@ -41,16 +41,16 @@ internal static class Theme
     public static Color Accent => IsDark ? Color.FromArgb(72, 150, 245) : Color.FromArgb(28, 105, 216);
 
     // ---- log line colours, tuned against each mode's own pane -------------
-    public static Color LogBackground => IsDark ? Color.FromArgb(24, 24, 28) : Color.FromArgb(252, 252, 253);
-    public static Color LogNormal => IsDark ? Color.FromArgb(206, 206, 214) : Color.FromArgb(36, 38, 43);
+    public static Color LogBackground => IsDark ? Background : Color.FromArgb(252, 253, 255);
+    public static Color LogNormal => IsDark ? Color.FromArgb(216, 227, 245) : Text;
     public static Color LogError => IsDark ? Color.FromArgb(255, 122, 116) : Color.FromArgb(185, 38, 30);
     public static Color LogWarning => IsDark ? Color.FromArgb(240, 186, 88) : Color.FromArgb(148, 98, 8);
-    public static Color LogDebug => IsDark ? Color.FromArgb(140, 140, 152) : Color.FromArgb(106, 112, 122);
+    public static Color LogDebug => TextMuted;
     public static Color LogManager => IsDark ? Color.FromArgb(112, 178, 255) : Color.FromArgb(28, 105, 216);
-    public static Color LogTimestamp => IsDark ? Color.FromArgb(155, 155, 170) : Color.FromArgb(92, 98, 110);
+    public static Color LogTimestamp => TextMuted;
     public static Color LogLevel => IsDark ? Color.FromArgb(183, 149, 255) : Color.FromArgb(103, 63, 178);
     public static Color LogOperation => IsDark ? Color.FromArgb(114, 207, 255) : Color.FromArgb(0, 104, 160);
-    public static Color LogField => IsDark ? Color.FromArgb(208, 208, 220) : Color.FromArgb(66, 70, 78);
+    public static Color LogField => IsDark ? Color.FromArgb(198, 216, 241) : Color.FromArgb(58, 75, 103);
 
     // ---- chip fills, which cannot simply be the accent in both modes ------
     // A dark-blue fill under dark text is unreadable on a light form, and a
@@ -68,7 +68,7 @@ internal static class Theme
     public static readonly Font UiSmall = new("Segoe UI", 9.75f);
     public static readonly Font Title = new("Segoe UI Semibold", 16f);
     public static readonly Font SectionHeading = new("Segoe UI Semibold", 10.5f);
-    public static readonly Font Mono = new("Segoe UI", 10f);
+    public static readonly Font Mono = new("Segoe UI", 10.5f);
 
     /// <summary>
     /// Matches the OS title bar to the window. Without it Windows draws a white
@@ -156,6 +156,25 @@ internal static class Theme
             button.FlatAppearance.MouseDownBackColor = Darken(colour, 0.16);
         }
 
+        button.Tag = (Action)Apply;
+        button.EnabledChanged += (_, _) => Apply();
+        Apply();
+        return button;
+    }
+
+    public static Button DangerButton(string text)
+    {
+        var button = BaseButton(text);
+        button.Font = UiBold;
+        void Apply()
+        {
+            button.BackColor = Surface;
+            button.ForeColor = button.Enabled ? Stopped : TextMuted;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = button.Enabled ? Stopped : Border;
+            button.FlatAppearance.MouseOverBackColor = IsDark ? Lighten(Surface, 0.10) : Lighten(Stopped, 0.93);
+            button.FlatAppearance.MouseDownBackColor = IsDark ? Lighten(Surface, 0.17) : Lighten(Stopped, 0.86);
+        }
         button.Tag = (Action)Apply;
         button.EnabledChanged += (_, _) => Apply();
         Apply();

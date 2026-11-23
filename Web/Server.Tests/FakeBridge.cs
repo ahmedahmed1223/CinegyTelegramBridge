@@ -16,6 +16,7 @@ public sealed class FakeBridge : IBridgeChannel
     public ConcurrentDictionary<string, long> LoginApprovals { get; } = new();
     public ConcurrentQueue<(string Op, string Args)> Calls { get; } = new();
     public bool Online { get; set; } = true;
+    public string? LivePlaybackJson { get; set; }
     public string LastLoginCode { get; private set; } = "";
     public string? CapturePath { get; set; }
     public (string Root, string Path)? BulletinPreviewImage { get; set; }
@@ -36,6 +37,7 @@ public sealed class FakeBridge : IBridgeChannel
         return Task.FromResult(op switch
         {
             "status" => Reply("""{"version":"test","startedAt":0,"publishedAt":0,"telegram":{"state":"connected","failures":0},"cinegy":{"address":"127.0.0.1","channel":0,"health":"healthy","lastReadAt":0,"freshUntil":0},"layers":[]}"""),
+            "live.playback" when LivePlaybackJson is { } playback => Reply(playback),
             "identity" => Users.TryGetValue(a.GetProperty("userId").GetInt64(), out var user) ? Reply(UserJson(a.GetProperty("userId").GetInt64(), user)) : Reply("null"),
             "roster" => Reply("[" + string.Join(',', Users.Select(u => UserJson(u.Key, u.Value))) + "]"),
             "login.register" => Register(a.GetProperty("code").GetString()!),

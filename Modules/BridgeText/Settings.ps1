@@ -114,6 +114,7 @@ function Add-BridgeTextSettings {
     $catalogue['setting.EnableSnapshot.label'] = @{ ar = 'التقاط لقطات البث'; en = 'Output snapshots' }
     $catalogue['setting.ClipSeconds.label'] = @{ ar = 'طول المقطع المسجّل'; en = 'Recorded clip length' }
     $catalogue['setting.LiveWatchUrl.label'] = @{ ar = 'رابط صفحة المشاهدة'; en = 'The watch page address' }
+    $catalogue['setting.WebLivePlaybackUrl.label'] = @{ ar = 'رابط مشاهدة البث'; en = 'Live playback URL' }
     $catalogue['setting.EnableLiveRelay.label'] = @{ ar = 'ترحيل البث المباشر'; en = 'Live relay' }
     $catalogue['setting.EnableTimedShow.label'] = @{ ar = 'العرض المؤقت'; en = 'Timed show' }
     $catalogue['setting.EnableHideAll.label'] = @{ ar = 'تفعيل إخفاء الكل'; en = 'Hide-all button' }
@@ -485,6 +486,9 @@ function Add-BridgeTextSettings {
     $catalogue['setting.EnableSnapshot.description'] = @{ ar = 'يفعّل 📸 صورة من البث: لقطة من خرج القناة'; en = 'Enables the output snapshot: a frame from the channel output' }
     $catalogue['setting.ClipSeconds.description'] = @{ ar = 'طول المقطع الذي يسجّله زرّ 🎬 من خرج القناة. الملف يُنسخ بلا إعادة ترميز، فلا يُثقل جهاز البثّ'; en = 'How many seconds the 🎬 button records from the channel output. The file is copied rather than re-encoded, so it costs the playout machine nothing' }
     $catalogue['setting.LiveWatchUrl.description'] = @{ ar = 'رابط صفحة المشاهدة (https) التي يفتحها زرّ 📺 داخل تيليجرام. اتركه فارغًا ليختفي الزرّ. الصفحة ملف واحد في docs/watch.html'; en = 'The https page the 📺 button opens inside Telegram. Leave it empty and the button disappears. The page is one file, docs/watch.html' }
+    $catalogue['setting.WebLivePlaybackUrl.description'] = @{ ar = 'رابط تشغيل البث العام للويب ومشغّل تيليغرام. استخدم HTTPS دون بيانات دخول أو استعلام أو جزء مرجعي. الرابط الفارغ يوقف المشاهدة في الويب'; en = 'Public playback stream for Web and the Telegram viewer. Use HTTPS without credentials, a query, or a fragment. Leave it empty to disable Web playback' }
+    $catalogue['setting.WebLivePlaybackUrl.prompt'] = @{ ar = 'أرسل رابط مشاهدة البث بصيغة HTTPS دون بيانات دخول أو استعلام أو جزء مرجعي أو مسافات. أرسل شرطة واحدة (-) لمسح الرابط.'; en = 'Send an HTTPS playback URL without credentials, a query, fragment, or whitespace. Send a single dash (-) to clear it.' }
+    $catalogue['setting.WebLivePlaybackUrl.invalid'] = @{ ar = 'رابط مشاهدة البث غير صالح. أرسل رابط HTTPS دون بيانات دخول أو استعلام أو جزء مرجعي أو مسافات.'; en = 'Invalid playback URL. Use HTTPS without credentials, a query, fragment, or whitespace.' }
     $catalogue['setting.EnableLiveRelay.description'] = @{ ar = 'يفعّل ▶️ البث المباشر: ترحيل خرج القناة إلى تيليجرام'; en = 'Enables the live relay: the channel output forwarded to Telegram' }
     $catalogue['setting.EnableTimedShow.description'] = @{ ar = 'يفعّل ⏱ العرض المؤقّت: عرض يُخفى تلقائيًا بعد مدة'; en = 'Enables the timed show: a graphic that hides itself after a set time' }
     $catalogue['setting.EnableHideAll.description'] = @{ ar = 'يفعّل 🚨 إخفاء الكل: زر الطوارئ الذي يخفي الطبقات المحددة'; en = 'Enables hide-all: the emergency button that clears the selected layers' }

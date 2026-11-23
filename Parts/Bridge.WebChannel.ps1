@@ -10,7 +10,7 @@
 
     Shape of the channel:
       * Listener runspaces own the pipe. They never see bridge state or
-        functions. Reads ('status', 'identity') are answered from data the
+        functions. Reads ('status', 'identity', 'roster', 'live.playback') are answered from data the
         bridge thread publishes into $Shared; everything else is queued.
       * The bridge thread drains that queue in Update-WebChannel - from the
         tick, and from the pump that runs while a Telegram long poll is in
@@ -93,6 +93,10 @@ function Get-WebChannelListenerScript {
                             # already produced the JSON once.
                             $reply = '{"ok":true,"data":' + [string]$Shared.Status + '}'
                         }
+                        elseif ($op -eq 'live.playback') {
+                            # Local process read; the HTTP server enforces the browser session.
+                            $reply = '{"ok":true,"data":' + [string]$Shared.Playback + '}'
+                        }
                         elseif ($op -eq 'identity') {
                             $lookup = $request['args']
                             $who = if ($lookup -is [System.Collections.IDictionary]) { [string]$lookup['userId'] } else { '' }
@@ -137,6 +141,7 @@ function Start-WebChannel {
             Queue = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()
             Signal = [System.Threading.AutoResetEvent]::new($false)
             Status = '{}'
+            Playback = '{"url":null}'
             Roster = @{}
             Stop = $false
             LastListenerError = ''
@@ -149,7 +154,7 @@ function Start-WebChannel {
         $pipeline.AddScript((Get-WebChannelListenerScript)).AddArgument($shared).AddArgument($script:WebChannelPipeName).AddArgument($script:WebChannelListenerCount) | Out-Null
         @{ Pipeline = $pipeline; Handle = $pipeline.BeginInvoke() }
     }
-    $script:WebChannel = @{ Shared = $shared; Pool = $pool; Listeners = @($listeners) }
+    $script:WebChannel = @{ Shared = $shared; Pool = $pool; Listeners = @($listeners); PlaybackSetting = $null }
     $script:WebChannelPublishedAt = [datetime]::MinValue
     Publish-WebChannelState -Force
     Update-WebBotUsername
@@ -304,6 +309,13 @@ function Publish-WebChannelState {
     $script:WebChannelPublishedAt = $now
     $shared = $script:WebChannel.Shared
     $shared.Status = (Get-WebStatusSnapshot -Now $now | ConvertTo-Json -Compress -Depth 6)
+    # The settings writer owns this value. Rebuild the separate playback
+    # snapshot only when it changes, rather than parsing it on each air tick.
+    $playbackSetting = Get-JsonProp (Get-JsonProp $config 'Settings') 'WebLivePlaybackUrl'
+    if (-not [object]::Equals((Get-JsonProp $script:WebChannel 'PlaybackSetting'), $playbackSetting)) {
+        $shared.Playback = (@{ url = ConvertTo-WebLivePlaybackUrl $playbackSetting } | ConvertTo-Json -Compress)
+        $script:WebChannel.PlaybackSetting = $playbackSetting
+    }
     $shared.Roster = Get-WebRoster
 }
 

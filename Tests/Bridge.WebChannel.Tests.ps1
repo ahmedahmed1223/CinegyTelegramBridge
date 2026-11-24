@@ -2,6 +2,18 @@
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
 Describe 'Browser air events' {
+    It 'shares only registered non-sensitive text from the same template and layer' {
+        $template = @{ Key='text-sync'; Path='test.scene'; Layer=5; FieldTypes=@{ title='Text'; photo='Image'; hidden='String' } }
+        $script:LastWebTemplateText['text-sync'] = @{ Path='test.scene'; Layer=5; Values=@{ title='نص من البوت'; hidden='private'; photo='local'; other='unregistered' } }
+        $fields = @(@{ name='title'; sensitive=$false }, @{ name='photo'; sensitive=$false }, @{ name='hidden'; sensitive=$true })
+        try {
+            $values = Get-WebLastTemplateText -Template $template -Fields $fields
+            $values.Count | Should -Be 1
+            $values.title | Should -Be 'نص من البوت'
+            $template.Layer = 6
+            (Get-WebLastTemplateText -Template $template -Fields $fields).Count | Should -Be 0
+        } finally { $script:LastWebTemplateText.Remove('text-sync') }
+    }
     It 'retains successive operations and filters by current audience, mute and access' {
         $previousChannel = $script:WebChannel
         $script:WebChannel = @{}

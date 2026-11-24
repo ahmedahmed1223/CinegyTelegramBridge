@@ -13621,6 +13621,12 @@
             "type": "string",
             "default": null,
             "nullable": true
+          },
+          "urgentRevision": {
+            "type": "integer",
+            "format": "int32",
+            "default": null,
+            "nullable": true
           }
         },
         "nullable": true
@@ -19459,6 +19465,14 @@
           },
           "canManage": {
             "type": "boolean"
+          },
+          "lastValues": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
           }
         }
       },

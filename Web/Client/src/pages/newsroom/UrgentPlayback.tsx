@@ -16,7 +16,7 @@ const sessionModes = [
   { value: 'auto_hide', label: 'إخفاء بعد الخبر' },
 ]
 
-export function UrgentPlayback({ selected, hasRows = true }: { selected: string[]; hasRows?: boolean }) {
+export function UrgentPlayback({ selected, hasRows = true, onStarted }: { selected: string[]; hasRows?: boolean; onStarted: (ids: string[]) => void }) {
   const [review, setReview] = useState<{ plan: Preview; selected: string[]; mode: string | null } | null>(null)
   const [mode, setMode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,6 +49,7 @@ export function UrgentPlayback({ selected, hasRows = true }: { selected: string[
         setReview({ plan: data.preview, selected: body.selectedIds ?? [], mode: body.mode ?? null })
         return
       } else {
+        if (body.action === 'start' && data.run && body.selectedIds?.length) onStarted(body.selectedIds)
         setReview(null)
       }
       await status.refetch()

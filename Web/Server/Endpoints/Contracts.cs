@@ -12,7 +12,8 @@ public sealed record ProgrammeNowNext(long CheckedAtMs, bool StatusAvailable, bo
     ProgrammeStatusItem? Current, ProgrammeStatusItem? Cued);
 public sealed record CaptureCreateRequest(string Kind);
 public sealed record TemplatePresetItem(int Index, string Name, Dictionary<string, string> Values, string[] HiddenFields);
-public sealed record TemplatePresetPage(TemplatePresetItem[] Items, TemplateFieldDto[] Fields, int Page, int PageCount, string Revision, bool CanManage);
+public sealed record TemplatePresetPage(TemplatePresetItem[] Items, TemplateFieldDto[] Fields, int Page, int PageCount, string Revision, bool CanManage,
+    Dictionary<string, string>? LastValues = null);
 public sealed record TemplatePresetRequest(string Action, string Revision, int? Index = null, string? Name = null,
     Dictionary<string, string>? Values = null, int? Page = null);
 public sealed record TemplateRehearsalRequest(string Key, string Action, string? Review = null);

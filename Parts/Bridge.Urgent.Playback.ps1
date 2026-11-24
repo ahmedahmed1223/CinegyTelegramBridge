@@ -316,6 +316,7 @@ function Start-UrgentBoardRun {
         -Count ($steps.Count) -Values $summary
     Save-UrgentRunState | Out-Null
     Write-BridgeLog "Urgent board run started by $UserId - $summary"
+    if ($SelectedOnly -and -not $Quiet) { Set-UrgentSelectedIds -ChatId $ChatId -Ids @() }
     if (Get-ConfirmedUrgentEventId -Result $result -Layer ([int]$template.Layer)) {
         Publish-UrgentWebNotice -Key $script:MojazUrgentKey -Layer ([int]$template.Layer) -UserId $UserId
     }

@@ -2,7 +2,8 @@ import { Alert, Badge, Button, Group, Pagination, Paper, Skeleton, Stack, Tabs, 
 import { useDebouncedValue } from '@mantine/hooks'
 import { useQuery } from '@tanstack/react-query'
 import { IconRefresh } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { useSearchParams } from 'react-router'
 import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
@@ -99,6 +100,13 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
   })
   const current = views[view]
   const result = content.data
+  const live = useLiveStatus()
+  const latestRevision = live.bridgeOnline ? live.status?.urgentRevision : null
+  const refreshContent = content.refetch
+  const changed = view === 'urgent' && latestRevision != null && result?.revision != null && latestRevision > result.revision
+  useEffect(() => {
+    if (changed && !urgentEditing) void refreshContent()
+  }, [changed, latestRevision, urgentEditing, refreshContent])
   const filters = <EditorialSearch label={view === 'ticker' ? 'بحث في الشريط المنشور' : `بحث في ${current.label}`}
     sequenceLabel={view === 'ticker' ? 'ترتيب الشريط' : 'الترتيب المحفوظ'} search={search} order={order}
     disabled={urgentEditing || creatingBulletin}
@@ -110,6 +118,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       void content.refetch()
     }} />
   ) : <Stack gap="md">
+    {changed && urgentEditing && <Alert color="yellow">تغيّر جدول العواجل أثناء التحرير. سيظهر التحديث عند إغلاق المحرّر.</Alert>}
     <Group justify="space-between" align="center">
       <div>
         <Title order={2}>{current.title}</Title>
@@ -169,7 +178,8 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       </Stack>
     ) : result && view === 'urgent' ? (
       <>
-        <UrgentPlayback selected={selected} hasRows={(result.collectionTotal ?? result.total) > 0} />
+        <UrgentPlayback selected={selected} hasRows={(result.collectionTotal ?? result.total) > 0}
+          onStarted={ids => setSelected(previous => previous.filter(id => !ids.includes(id)))} />
         <UrgentTiming />
         <UrgentTable
           key={result.page}

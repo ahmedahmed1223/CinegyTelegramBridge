@@ -160,6 +160,7 @@ function Save-UrgentBoard {
         return $false
     }
     $script:UrgentBoard = $Board
+    Update-UrgentHomeScreens -Action edit | Out-Null
     return $true
 }
 
@@ -1445,6 +1446,12 @@ function Show-UrgentTimingScreen {
     Send-UrgentScreen -ChatId $ChatId -MessageId $MessageId -Text ($lines -join "`n") -Keyboard $keyboard
 }
 
+function Get-UrgentSelectionReviewCode {
+    param($Plan, [long]$ChatId, [long]$UserId)
+    $content = ConvertTo-Json -InputObject @($ChatId,$UserId,$script:UrgentBoard.Revision,$Plan.Steps) -Depth 12 -Compress
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($content))).Substring(0,24)
+}
+
 function Show-UrgentReviewScreen {
     <#
         The last screen before anything reaches air.
@@ -1480,6 +1487,15 @@ function Show-UrgentReviewScreen {
         if ($textSteps.Count -gt 0) { $lines += (T 'urg.updateWithoutLoop' $($textSteps.Count)) }
     }
     $data = if ($SelectedOnly) { 'urgentb:play:sel' } else { 'urgentb:play:all' }
+    if ($SelectedOnly) {
+        $data += ':' + (Get-UrgentSelectionReviewCode -Plan $plan.Value -ChatId $ChatId -UserId $UserId)
+        $listed = @{}
+        foreach ($step in $plan.Value.Steps) {
+            if ($listed.ContainsKey($step.ItemId)) { continue }
+            $listed[$step.ItemId] = $true
+            $lines += ('• ' + (ConvertTo-TelegramHtmlText (Get-NewsScreenLine ([string]$step.Text) 42)))
+        }
+    }
     $rows = @()
     $rows += , @( (New-Button (T 'urgent.startNow') $data -Style success) )
     if (-not (Test-UrgentSceneLoop) -and $textSteps.Count -gt 0) {

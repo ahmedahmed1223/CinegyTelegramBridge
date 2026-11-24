@@ -243,6 +243,7 @@ function Get-WebStatusSnapshot {
         feed = Get-WebFeedStatus -Now $Now
         layers = @($layers)
         urgentNoticeId = Get-UrgentWebNoticeId
+        urgentRevision = [int](Get-JsonProp $script:UrgentBoard 'Revision')
     }
 }
 
@@ -1258,6 +1259,7 @@ function Get-WebPresetPage {
         })
     return @{
         items = $items; fields = $fields; page = $window.Page; pageCount = $window.PageCount
+        lastValues = Get-WebLastTemplateText -Template $Template -Fields $fields
         revision = [string](Get-JsonProp $Template 'PresetRevision'); canManage = $CanManage
     }
 }
@@ -2547,7 +2549,6 @@ function Invoke-WebUrgentWrite {
     }
     if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
     if (-not (Invoke-UrgentEdit -Result $result -ChatId $actor -Quiet)) { return @{ ok = $false; error = 'urgent_save_failed' } }
-    Update-UrgentHomeScreens -Action edit | Out-Null
     Add-AuditEntry "Web urgent $action by $(Format-UserAuditActor -UserId $actor) ($id)"
     return @{ ok = $true }
 }
@@ -3989,6 +3990,12 @@ function Invoke-WebUrgentPlayback {
         $result = New-UrgentBoardPlan -ChatId $actor -SelectedIds $ids -SelectedOnly:$selectedOnly -ModeOverride $modeOverride
         if (-not $result.Success) { return @{ ok = $false; error = 'refused'; data = [string]$result.Error } }
         $plan = $result.Value
+        if ($selectedOnly) {
+            $plannedIds = @($plan.Steps.ItemId | Sort-Object -Unique)
+            if ($plannedIds.Count -ne $ids.Count -or @($ids | Where-Object { $_ -cnotin $plannedIds }).Count) {
+                return @{ ok = $false; error = 'urgent_stale' }
+            }
+        }
         $live = Get-WebUrgentLayerStatus -Layer $layer
         $stamp = Get-CinegyLayerReviewStamp -Status $live
         if (-not $stamp) { return @{ ok = $false; error = 'refused'; data = (T 'air.layerCheckFailed') } }

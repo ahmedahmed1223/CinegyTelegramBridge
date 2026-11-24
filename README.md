@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.8
+
+Telegram binds selected playback to the reviewed stories. A successful start clears the consumed selection, and web row badges follow the same checkboxes used for playback.
+
+Saved urgent board edits refresh open Telegram boards and the web newsroom. The web template editor can reuse the last successful show's public text fields from either channel during the current bridge session.
+
 ## Version 9.1.7
 
 The web interface reports accepted Show, Hide and Exit commands from Telegram and the web. The bridge retains a short event queue and applies template rules, personal mute and access checks before delivery.

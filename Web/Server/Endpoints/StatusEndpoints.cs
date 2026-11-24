@@ -19,7 +19,7 @@ public sealed record FeedStatus(string State, string ActiveSource, bool BackupCo
     long LastCheckAt, int OutageCount, int OutageSeconds, IReadOnlyList<FeedOutage> Recent);
 
 public sealed record BridgeStatus(string Version, long StartedAt, long PublishedAt, TelegramStatus Telegram, CinegyStatus Cinegy,
-    IReadOnlyList<LayerStatus> Layers, FeedStatus? Feed, string? UrgentNoticeId = null);
+    IReadOnlyList<LayerStatus> Layers, FeedStatus? Feed, string? UrgentNoticeId = null, int? UrgentRevision = null);
 
 public sealed record StatusEnvelope(bool Online, BridgeStatus? Status);
 public sealed record LivePlayback(string? Url);

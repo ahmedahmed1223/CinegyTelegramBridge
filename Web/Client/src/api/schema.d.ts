@@ -13031,6 +13031,11 @@ export interface components {
             feed: components["schemas"]["FeedStatus"];
             /** @default null */
             urgentNoticeId: string | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            urgentRevision: number | null;
         } | null;
         BridgeUserResponse: {
             /** Format: int64 */
@@ -14798,6 +14803,10 @@ export interface components {
             pageCount: number;
             revision: string;
             canManage: boolean;
+            /** @default null */
+            lastValues: {
+                [key: string]: string;
+            } | null;
         };
         TemplatePresetRequest: {
             action: string;

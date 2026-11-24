@@ -211,7 +211,8 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
                 {board.items.map((item, index) => {
                   if (edit && edit.id === item.id) return editorRow(edit)
                   const rank = item.position ?? board.page * 20 + index + 1
-                  const state = status[item.state]
+                  const selectionState = item.id && selected.includes(item.id) ? 'selected' : 'ready'
+                  const state = status[item.state === 'on_air' || item.state === 'disabled' ? item.state : selectionState]
                   const itemId = item.id
                   const displayed = !!itemId && liveManual?.itemId === itemId
                   const canShow = !!itemId && item.enabled && !edit && !busy && !searchPending

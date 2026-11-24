@@ -16,9 +16,10 @@ it('previews all or selected rows explicitly, using the chosen session mode', as
   vi.mocked(api.GET).mockResolvedValue({ data: { run: null, preview: null }, response })
   vi.mocked(api.POST).mockResolvedValue({ data: { preview, run: null }, response })
   const client = new QueryClient()
+  const onStarted = vi.fn()
   render(
     <MantineProvider env="test">
-      <QueryClientProvider client={client}><UrgentPlayback selected={['row-2']} /></QueryClientProvider>
+      <QueryClientProvider client={client}><UrgentPlayback selected={['row-2']} onStarted={onStarted} /></QueryClientProvider>
     </MantineProvider>,
   )
   await screen.findByText('لا توجد دورة نشطة.')
@@ -36,4 +37,8 @@ it('previews all or selected rows explicitly, using the chosen session mode', as
     body: expect.objectContaining({ action: 'preview', selectedIds: ['row-2'], mode: 'auto_hide' }),
   }))
   expect(api.POST).toHaveBeenCalledTimes(2)
+  expect(onStarted).not.toHaveBeenCalled()
+  vi.mocked(api.POST).mockResolvedValueOnce({ data: { run: { id: 'run' } }, response })
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'تشغيل على الهواء' }))
+  await vi.waitFor(() => expect(onStarted).toHaveBeenCalledWith(['row-2']))
 })

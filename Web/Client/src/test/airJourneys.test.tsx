@@ -13,6 +13,7 @@ import { LivePage } from '../pages/live/LivePage'
 import { UrgentTable } from '../pages/newsroom/UrgentTable'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
 import { StatusPage } from '../pages/status/StatusPage'
+import { ShowModal } from '../pages/templates/ShowModal'
 
 vi.mock('../api/air', () => ({ getTemplates: vi.fn() }))
 
@@ -33,11 +34,25 @@ function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage'],
 function emptySnapshot(freshUntil: number): BridgeStatus {
   return {
     version: '8.141.0', startedAt: 0, publishedAt: Date.now(), layers: [], feed: null,
-    urgentNoticeId: null,
+    urgentNoticeId: null, urgentRevision: null,
     cinegy: { address: 'local', channel: 0, health: 'healthy', freshUntil, lastReadAt: Date.now() },
     telegram: { state: 'connected', failures: 0 },
   }
 }
+
+it('shows shared template text without overwriting the operator until they choose to reuse it', async () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { lastValues: { title: 'النص الذي عُرض' } }, response: new Response() })
+  try {
+    renderPage(<ShowModal template={{ key: 'banner', name: 'قالب', layer: 3, category: null, disabled: false,
+      fields: [{ name: 'title', label: 'العنوان', required: true, sensitive: false, maxLength: 80 }] }} onClose={() => {}} />)
+    const field = screen.getByRole('textbox', { name: /العنوان/ })
+    fireEvent.change(field, { target: { value: 'مسودة الويب' } })
+    const reuse = await screen.findByRole('button', { name: 'استخدام النص المعروض سابقًا' })
+    expect(field).toHaveValue('مسودة الويب')
+    fireEvent.click(reuse)
+    expect(field).toHaveValue('النص الذي عُرض')
+  } finally { get.mockRestore() }
+})
 
 function urgentSnapshot(): BridgeStatus {
   return { ...emptySnapshot(Date.now() - 1000), layers: [

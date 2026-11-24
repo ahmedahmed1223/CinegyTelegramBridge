@@ -1050,7 +1050,17 @@ function Invoke-CallbackQuery {
         'urgentb:dmode' { Invoke-UrgentDefaultSwitch -ChatId $chatId -Field Mode | Out-Null; break }
         'urgentb:review:sel' { Show-UrgentReviewScreen -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null; break }
         'urgentb:review:all' { Show-UrgentReviewScreen -ChatId $chatId -UserId $userId | Out-Null; break }
-        'urgentb:play:sel' { Start-UrgentBoardRun -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null; break }
+        'urgentb:play:sel' { Show-UrgentReviewScreen -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null; break }
+        'urgentb:play:sel:*' {
+            $candidate = New-UrgentBoardPlan -ChatId $chatId -SelectedOnly
+            if ($candidate.Success -and (Get-CallbackArg $data 'urgentb:play:sel:') -ceq (Get-UrgentSelectionReviewCode -Plan $candidate.Value -ChatId $chatId -UserId $userId)) {
+                Start-UrgentBoardRun -ChatId $chatId -UserId $userId -SelectedOnly -ReviewedPlan $candidate.Value | Out-Null
+            } else {
+                Send-TelegramMessage -ChatId $chatId -Text (T 'reply.urgentChanged')
+                Show-UrgentReviewScreen -ChatId $chatId -UserId $userId -SelectedOnly | Out-Null
+            }
+            break
+        }
         'urgentb:play:all' { Start-UrgentBoardRun -ChatId $chatId -UserId $userId | Out-Null; break }
         # Every run control answers on the message it was pressed on.
         'urgentb:stop' { Stop-UrgentBoardRun -ChatId $chatId -UserId $userId -Reason 'manual' -MessageId ([int](Get-JsonProp $msgObj 'message_id')) | Out-Null; break }

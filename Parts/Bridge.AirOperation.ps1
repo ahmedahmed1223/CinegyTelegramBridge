@@ -700,6 +700,23 @@ function Send-PreShowValues {
     elseif (-not $SuppressPayloadLog -and (Get-Setting 'LogAirXml')) { Write-BridgeLog "Air pre-show POSTBOX ($Key): $($primed.Xml)" }
 }
 
+$script:LastWebTemplateText = @{}
+
+function Get-WebLastTemplateText {
+    param($Template, $Fields)
+    $result = @{}
+    $saved = $script:LastWebTemplateText[$Template.Key]
+    if (-not $saved -or $saved.Path -ne $Template.Path -or $saved.Layer -ne $Template.Layer) { return $result }
+    $types = Get-TemplateFieldTypeOverrides -Template $Template
+    foreach ($field in $Fields) {
+        $type = $types[$field.name] ?? (Get-Setting 'AirVariableType')
+        if (-not $field.sensitive -and $type -in 'Text','String' -and $saved.Values.ContainsKey($field.name)) {
+            $result[$field.name] = [string]$saved.Values[$field.name]
+        }
+    }
+    return $result
+}
+
 function Get-PublicTemplateValues {
     param($Template, [hashtable]$Variables)
     $publicValues = Copy-ShowVariables -Variables $Variables
@@ -1042,6 +1059,9 @@ function Invoke-ShowTemplateResult {
             $snapshot.DevicePath = if ($ReviewedRollback) { $ExpectedDevicePath } else { (Resolve-AirGfxDevice -Layer ([int]$template.Layer)).StatusPath }
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $publicValues }
+        if ($script:WebChannel) {
+            $script:LastWebTemplateText[$Key] = @{ Values=$publicValues; Path=$template.Path; Layer=$template.Layer }
+        }
         $script:MissingGraphicState.Remove($Key) | Out-Null
         Set-OnAirShownRecord -Layer ([int]$template.Layer) -Record @{
             Key = $Key; At = (Get-Date); UserId = $UserId; ActiveId = $activeId

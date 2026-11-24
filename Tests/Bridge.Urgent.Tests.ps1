@@ -958,6 +958,24 @@ Describe 'Editing the board from its buttons' {
         $script:UrgentBoard.Items[1].Text | Should -Be 'عاجل 3'
     }
 
+    It 'refuses the old confirmation after selection changes and starts only the newly reviewed story' {
+        Mock Start-UrgentBoardRun { $true }
+        $first = [string]$script:UrgentBoard.Items[0].Id
+        $next = [string]$script:UrgentBoard.Items[2].Id
+        Set-UrgentSelectedIds -ChatId 100 -Ids @($first)
+        $old = (New-UrgentBoardPlan -ChatId 100 -SelectedOnly).Value
+        $token = Get-UrgentSelectionReviewCode -Plan $old -ChatId 100 -UserId 101
+        Set-UrgentSelectedIds -ChatId 100 -Ids @($next)
+        Invoke-TestUrgentNumberCallback "urgentb:play:sel:$token"
+        Should -Invoke Start-UrgentBoardRun -Exactly -Times 0
+        $new = (New-UrgentBoardPlan -ChatId 100 -SelectedOnly).Value
+        $token = Get-UrgentSelectionReviewCode -Plan $new -ChatId 100 -UserId 101
+        Invoke-TestUrgentNumberCallback "urgentb:play:sel:$token"
+        Should -Invoke Start-UrgentBoardRun -Exactly -Times 1 -ParameterFilter {
+            $SelectedOnly -and (@($ReviewedPlan.Steps.ItemId | Sort-Object -Unique) -join ',') -ceq $next
+        }
+    }
+
     It 'keeps an old delete keyboard attached to its story after a move' {
         $id = [string]$script:UrgentBoard.Items[0].Id
         $keyboard = Get-UrgentItemKeyboard -Position 0

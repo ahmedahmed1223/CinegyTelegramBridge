@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.8'; Items = @('Saved urgent rows refresh across Telegram and the web. Open a template to see and reuse its last displayed text.',
+                        'Review the selected headlines before playback. Starting a selected run clears its checkboxes for the next batch.') },
                 @{ Version = '9.1.7'; Items = @('Web alerts report accepted Show, Hide and Exit commands from Telegram and the web, according to each template notification rule.') },
                 @{ Version = '9.1.6'; Items = @('Review Hide or Exit beside each urgent row, or enter a layer number in Air Control to check its scene directly.') },
                 @{ Version = '9.1.5'; Items = @('Use Review urgent removal in the web newsroom when the urgent template is tracked on a layer without an individual stop button.',
@@ -403,6 +405,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.8'; Items = @('تتحدث صفوف العواجل بعد الحفظ بين البوت والويب. افتح القالب في الويب لقراءة آخر نص معروض واستخدامه مجددًا.',
+                        'راجع عناوين العواجل المحددة قبل التشغيل. بعد بدء الدورة يُمسح تحديد الدفعة حتى تختار الدفعة التالية.') },
                 @{ Version = '9.1.7'; Items = @('تظهر في الويب تنبيهات قبول عرض القالب وإخفائه وخروج مشهده من الويب وتليجرام بحسب قواعد القالب وصلاحيات المشغّل.') },
                 @{ Version = '9.1.6'; Items = @('راجع إخفاء العاجل المعروض أو خروجه بجانب كل صف، أو أدخل رقم الطبقة في لوحة الهواء للتحقق من مشهدها.') },
                 @{ Version = '9.1.5'; Items = @('اضغط «مراجعة إخفاء العاجل» في جدول الويب إذا كان الجسر يتابع قالب العاجل على طبقة ولم يظهر زر إيقاف العرض الفردي.',

@@ -2,8 +2,9 @@ import { Alert, Button, Group, Modal, NumberInput, Stack, Text, TextInput } from
 import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconSend } from '@tabler/icons-react'
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { showTemplate, type TemplateDto } from '../../api/air'
-import type { Schemas } from '../../api/client'
+import { api, errorCode, type Schemas } from '../../api/client'
 import { TemplatePresets } from './TemplatePresets'
 
 interface ShowModalProps {
@@ -17,6 +18,18 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [choosingPreset, setChoosingPreset] = useState(false)
+  const previous = useQuery({
+    queryKey: ['template-presets', template.key, 0],
+    refetchInterval: 4000, retry: false,
+    queryFn: async ({ signal }) => {
+      const { data, error, response } = await api.GET('/api/air/templates/{key}/presets', {
+        params: { path: { key: template.key }, query: { page: 0 } }, signal,
+      })
+      if (!data) throw new Error(errorCode(error, response))
+      return data
+    },
+  })
+  const lastValues = previous.isSuccess ? previous.data.lastValues : null
   const [preset, setPreset] = useState<{ item: Schemas['TemplatePresetItem']; revision: string } | null>(null)
 
   const handleFieldChange = (name: string, value: string) => {
@@ -92,6 +105,13 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
                 onClick={() => { setPreset(null); setVariables({}); setError(null) }}>إزالة النص الجاهز</Button>
             </>}
           </Group>
+          {lastValues && Object.keys(lastValues).length > 0 && <Stack gap={4}>
+            <Text size="sm" fw={600}>آخر نص عُرض بهذا القالب</Text>
+            {template.fields.filter(f => !f.sensitive && lastValues[f.name] != null).map(f =>
+              <Text size="sm" key={f.name} dir="rtl">{f.label || f.name} · {lastValues[f.name]}</Text>)}
+            <Button size="compact-sm" variant="light" type="button" disabled={submitting}
+              onClick={() => { setPreset(null); setVariables({ ...lastValues }); setError(null) }}>استخدام النص المعروض سابقًا</Button>
+          </Stack>}
 
           {template.fields.length === 0 ? (
             <Text size="sm" c="dimmed">

@@ -2,6 +2,10 @@
   max-inline-size: 78rem;
 }
 
+.airBanner {
+  border-inline-start: 4px solid var(--mantine-color-red-7);
+}
+
 .tabs {
   border: 1px solid var(--cgb-line);
   background: var(--cgb-canvas);

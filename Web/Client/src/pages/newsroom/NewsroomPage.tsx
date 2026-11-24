@@ -9,6 +9,7 @@ import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { PageHeader } from '../../components/PageHeader'
 import { UrgentPlayback } from './UrgentPlayback'
+import { UrgentAirBanner } from './UrgentAirBanner'
 import { UrgentTiming } from './UrgentTiming'
 import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
@@ -162,6 +163,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
 
     {filters}
 
+    {view === 'urgent' && <UrgentAirBanner items={result?.items ?? []} />}
     {content.isError && view === 'urgent' && result && (
       <Alert color="orange" role="alert">تعذّر تحديث جدول العواجل. تظهر آخر نسخة وصلت من الجسر.</Alert>
     )}

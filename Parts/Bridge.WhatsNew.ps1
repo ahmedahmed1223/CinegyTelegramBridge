@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.9'; Items = @('The urgent board shows the live layer and Hide and Exit controls above the table, including for an individual manually displayed row.') },
                 @{ Version = '9.1.8'; Items = @('Saved urgent rows refresh across Telegram and the web. Open a template to see and reuse its last displayed text.',
                         'Review the selected headlines before playback. Starting a selected run clears its checkboxes for the next batch.') },
                 @{ Version = '9.1.7'; Items = @('Web alerts report accepted Show, Hide and Exit commands from Telegram and the web, according to each template notification rule.') },
@@ -405,6 +406,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.9'; Items = @('تابع العاجل المعروض ورقم طبقته من شريط أعلى الجدول، وأخفه أو أرسل أمر الخروج بعد المراجعة حتى عند عرض صف واحد يدويًا.') },
                 @{ Version = '9.1.8'; Items = @('تتحدث صفوف العواجل بعد الحفظ بين البوت والويب. افتح القالب في الويب لقراءة آخر نص معروض واستخدامه مجددًا.',
                         'راجع عناوين العواجل المحددة قبل التشغيل. بعد بدء الدورة يُمسح تحديد الدفعة حتى تختار الدفعة التالية.') },
                 @{ Version = '9.1.7'; Items = @('تظهر في الويب تنبيهات قبول عرض القالب وإخفائه وخروج مشهده من الويب وتليجرام بحسب قواعد القالب وصلاحيات المشغّل.') },

@@ -11,6 +11,7 @@ import { sessionKey } from '../api/session'
 import { LiveStatusContext } from '../layout/LiveStatusContext'
 import { LivePage } from '../pages/live/LivePage'
 import { UrgentTable } from '../pages/newsroom/UrgentTable'
+import { UrgentAirBanner } from '../pages/newsroom/UrgentAirBanner'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
 import { StatusPage } from '../pages/status/StatusPage'
 import { ShowModal } from '../pages/templates/ShowModal'
@@ -59,6 +60,19 @@ function urgentSnapshot(): BridgeStatus {
     { layer: 7, key: 'Urgent', name: 'العاجل', at: Date.now() - 3000, hideAt: 0, source: 'telegram', by: '' },
   ] }
 }
+
+it('keeps both reviewed controls on the urgent banner for a single manual row outside the current page', async () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: { layer: 7, itemId: 'other-page', review: 'manual' } }, response: new Response() })
+  try {
+    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+      <UrgentAirBanner items={[]} />
+    </LiveStatusContext.Provider>)
+    const banner = screen.getByRole('region', { name: 'العاجل المعروض' })
+    expect(await within(banner).findByText(/عرض يدوي/)).toBeVisible()
+    expect(within(banner).getByRole('button', { name: 'إخفاء العاجل المعروض' })).toBeEnabled()
+    expect(within(banner).getByRole('button', { name: 'خروج المعروض (EXIT)' })).toBeEnabled()
+  } finally { get.mockRestore() }
+})
 
 it.each([true, false])('opens tracked layer actions with a stale reading and bridgeOnline=%s', (bridgeOnline) => {
   renderPage(

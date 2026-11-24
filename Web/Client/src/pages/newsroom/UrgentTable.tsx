@@ -169,18 +169,6 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
       {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
-      {liveManual ? <Group justify="space-between">
-        <Text size="sm">عرض فردي على الطبقة {liveManual.layer}</Text>
-        <Tooltip label="إيقاف العرض وإخفاء العاجل"><ActionIcon color="red" variant="light" size={44} aria-label="إيقاف العرض وإخفاء العاجل"
-          disabled={busy || !manual.isSuccess} onClick={confirmHide}><IconEyeOff size={18} /></ActionIcon></Tooltip>
-      </Group> : trackedUrgent && <Group justify="space-between">
-        <Text size="sm">قالب العاجل على الطبقة {trackedUrgent.layer} بحسب آخر قراءة</Text>
-        <Tooltip label="مراجعة إخفاء العاجل"><ActionIcon color="red" variant="light" size={44} aria-label="مراجعة إخفاء العاجل"
-          disabled={busy || !live.bridgeOnline}
-          onClick={() => setRemoval({ layer: trackedUrgent.layer, expectedTemplateKey: trackedUrgent.key, operation: 'hide' })}>
-          <IconEyeOff size={18} />
-        </ActionIcon></Tooltip>
-      </Group>}
       <Paper radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
           event.preventDefault()

@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.9
+
+The urgent board displays the live layer and reviewed Hide and Exit controls above the table. Operators retain access while searching and paging, including when a single row was shown manually.
+
 ## Version 9.1.8
 
 Telegram binds selected playback to the reviewed stories. A successful start clears the consumed selection, and web row badges follow the same checkboxes used for playback.

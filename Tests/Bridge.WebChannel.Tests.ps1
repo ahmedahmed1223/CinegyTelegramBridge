@@ -4292,6 +4292,18 @@ Describe 'Web channel: the pipe' {
             Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line $line | ConvertFrom-Json
         }
         (& $sendPreset 'air.presets' @{ actor = 4323; key = 'Programme' }).error | Should -Be 'forbidden'
+        $previousText = $script:LastWebTemplateText['Programme']
+        try {
+            $script:LastWebTemplateText['Programme'] = @{ Path = $scene; Layer = 7; Values = @{ title = 'مشترك'; studioCode = 'private-fixture-code' } }
+            foreach ($readerId in 4321, 4322) {
+                $shared = & $sendPreset 'air.presets' @{ actor = $readerId; key = 'Programme' }
+                $shared.data.lastValues.title | Should -Be 'مشترك'
+                ($shared | ConvertTo-Json -Depth 8) | Should -Not -Match 'private-fixture'
+            }
+        } finally {
+            if ($null -ne $previousText) { $script:LastWebTemplateText['Programme'] = $previousText }
+            else { $script:LastWebTemplateText.Remove('Programme') }
+        }
         $list = & $sendPreset 'air.presets' @{ actor = 4322; key = 'Programme' }
         $list.ok | Should -BeTrue
         $list.data.canManage | Should -BeFalse
@@ -5436,7 +5448,7 @@ Describe 'Web channel: the pipe' {
     }
 
     It 'saves template fields as columns and rejects stale edits made after the board changed' {
-        Mock Test-Authorized { $UserId -eq 4321 }
+        Mock Test-Authorized { $UserId -in 4321,4322 }
         Mock Test-UrgentBoardAvailable { $true }
         Mock Get-UrgentBoardFile { Join-Path $TestDrive 'web-urgent.json' }
         Mock Get-UrgentTemplate {
@@ -5460,6 +5472,10 @@ Describe 'Web channel: the pipe' {
             $row.Title | Should -Be 'تنبيه'
             $row.Text | Should -Be 'خبر جديد'
             $row.UpdatedBy | Should -Be 4321
+            $second = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"content.list","args":{"actor":4322,"view":"urgent"}}') | ConvertFrom-Json
+            $second.ok | Should -BeTrue
+            $second.data.items[0].id | Should -Be $row.Id
+            $second.data.items[0].values.strap | Should -Be 'خبر جديد'
 
             $timing = @{
                 op = 'urgent.write'

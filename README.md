@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.10
+
+The urgent newsroom reads the last displayed public text directly from the shared template, including after a direct show with no corresponding board row.
+
 ## Version 9.1.9
 
 The urgent board displays the live layer and reviewed Hide and Exit controls above the table. Operators retain access while searching and paging, including when a single row was shown manually.

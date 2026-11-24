@@ -2,9 +2,9 @@ import { Alert, Button, Group, Modal, NumberInput, Stack, Text, TextInput } from
 import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconSend } from '@tabler/icons-react'
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { showTemplate, type TemplateDto } from '../../api/air'
-import { api, errorCode, type Schemas } from '../../api/client'
+import type { Schemas } from '../../api/client'
+import { useTemplateText } from './useTemplateText'
 import { TemplatePresets } from './TemplatePresets'
 
 interface ShowModalProps {
@@ -18,18 +18,8 @@ export function ShowModal({ template, onClose }: ShowModalProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [choosingPreset, setChoosingPreset] = useState(false)
-  const previous = useQuery({
-    queryKey: ['template-presets', template.key, 0],
-    refetchInterval: 4000, retry: false,
-    queryFn: async ({ signal }) => {
-      const { data, error, response } = await api.GET('/api/air/templates/{key}/presets', {
-        params: { path: { key: template.key }, query: { page: 0 } }, signal,
-      })
-      if (!data) throw new Error(errorCode(error, response))
-      return data
-    },
-  })
-  const lastValues = previous.isSuccess ? previous.data.lastValues : null
+  const previous = useTemplateText(template.key)
+  const lastValues = previous.isSuccess ? previous.data : null
   const [preset, setPreset] = useState<{ item: Schemas['TemplatePresetItem']; revision: string } | null>(null)
 
   const handleFieldChange = (name: string, value: string) => {

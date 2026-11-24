@@ -61,6 +61,18 @@ function urgentSnapshot(): BridgeStatus {
   ] }
 }
 
+it('shows the last urgent text in the newsroom without a saved row or a manual control', async () => {
+  const get = vi.spyOn(api, 'GET').mockImplementation(async path => ({
+    data: path === '/api/air/templates/{key}/presets' ? { lastValues: { strap: 'عاجل من مشغّل آخر' } } : { live: null },
+    response: new Response(),
+  }))
+  try {
+    renderPage(<UrgentAirBanner items={[]} />)
+    expect(await screen.findByText('عاجل من مشغّل آخر')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'إخفاء العاجل المعروض' })).not.toBeInTheDocument()
+  } finally { get.mockRestore() }
+})
+
 it('keeps both reviewed controls on the urgent banner for a single manual row outside the current page', async () => {
   const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: { layer: 7, itemId: 'other-page', review: 'manual' } }, response: new Response() })
   try {

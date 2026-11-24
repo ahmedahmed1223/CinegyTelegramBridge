@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.10'; Items = @('The newsroom shows the last urgent text from either channel to operators with access to the template, including direct shows without a saved row.') },
                 @{ Version = '9.1.9'; Items = @('The urgent board shows the live layer and Hide and Exit controls above the table, including for an individual manually displayed row.') },
                 @{ Version = '9.1.8'; Items = @('Saved urgent rows refresh across Telegram and the web. Open a template to see and reuse its last displayed text.',
                         'Review the selected headlines before playback. Starting a selected run clears its checkboxes for the next batch.') },
@@ -406,6 +407,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.10'; Items = @('تعرض إدارة العواجل آخر نص عُرض من الويب أو البوت حتى لو لم يُحفظ في الجدول، للمشغّلين الذين يملكون صلاحية القالب.') },
                 @{ Version = '9.1.9'; Items = @('تابع العاجل المعروض ورقم طبقته من شريط أعلى الجدول، وأخفه أو أرسل أمر الخروج بعد المراجعة حتى عند عرض صف واحد يدويًا.') },
                 @{ Version = '9.1.8'; Items = @('تتحدث صفوف العواجل بعد الحفظ بين البوت والويب. افتح القالب في الويب لقراءة آخر نص معروض واستخدامه مجددًا.',
                         'راجع عناوين العواجل المحددة قبل التشغيل. بعد بدء الدورة يُمسح تحديد الدفعة حتى تختار الدفعة التالية.') },

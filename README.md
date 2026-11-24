@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.6
+
+Every urgent row offers Hide and Exit for the currently displayed urgent scene. Air Control also opens a scene review by layer number when its status feed has no usable snapshot.
+
 ## Version 9.1.5
 
 The urgent table can open the layer removal review when the bridge tracks an urgent template without a confirmed individual show. Air Control lets operators open layer reviews while the bridge is online, even when the shared snapshot is stale. The bridge verifies the selected scene before applying a reviewed action.

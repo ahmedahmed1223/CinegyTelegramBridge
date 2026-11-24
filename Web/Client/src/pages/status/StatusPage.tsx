@@ -1,6 +1,6 @@
-import { Alert, Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Group, NumberInput, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconPlugConnected, IconStack2, IconArrowBackUp } from '@tabler/icons-react'
+import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconEyeOff, IconLogout, IconPlugConnected, IconStack2, IconArrowBackUp } from '@tabler/icons-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '../../components/PageHeader'
@@ -28,15 +28,30 @@ export function StatusPage() {
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [editingLayer, setEditingLayer] = useState<number | null>(null)
   const [timedLayer, setTimedLayer] = useState<number | null>(null)
-  const [removal, setRemoval] = useState<{ layer: number; operation: RemovalOperation; expectedTemplateKey: string } | null>(null)
+  const [removal, setRemoval] = useState<{ layer: number; operation: RemovalOperation; expectedTemplateKey?: string } | null>(null)
+  const [layerNumber, setLayerNumber] = useState<number | string>('')
   const live = useLiveStatus()
   const now = useNow()
   const status = live.status
+  const layerControls = <Group align="end">
+    <NumberInput label="رقم الطبقة" min={1} allowDecimal={false} allowNegative={false} value={layerNumber}
+      onChange={value => setLayerNumber(typeof value === 'bigint' ? Number(value) : value)} w={120} />
+    {(['hide', 'exit'] as const).map(operation => {
+      const label = operation === 'hide' ? 'مراجعة إخفاء الطبقة' : 'مراجعة خروج المشهد (EXIT)'
+      return <Tooltip key={operation} label={label}><ActionIcon size={44} aria-label={label} color={operation === 'hide' ? 'red' : 'orange'} variant="light"
+      disabled={typeof layerNumber !== 'number' || !Number.isSafeInteger(layerNumber) || layerNumber < 1}
+      onClick={() => setRemoval({ layer: Number(layerNumber), operation })}>
+      {operation === 'hide' ? <IconEyeOff size={18} /> : <IconLogout size={18} />}
+      </ActionIcon></Tooltip>
+    })}
+  </Group>
 
   if (!status) {
     return (
       <Stack>
         <PageHeader title="لوحة الهواء" />
+        {layerControls}
+        {removal && <LayerRemovalModal {...removal} onClose={() => setRemoval(null)} />}
         {live.stream !== 'connecting' && !live.bridgeOnline ? (
           <Alert color="red" icon={<IconAlertTriangle />} title="الجسر لا يجيب">
             خادم الويب يعمل، لكنه لا يصل إلى الجسر. تأكّد أن الجسر يعمل وأن «واجهة الويب» مفعّلة من برنامج التحكم.
@@ -163,6 +178,7 @@ export function StatusPage() {
             </Badge>
           )}
         </Group>
+        {layerControls}
         {layers.length === 0 ? (
           <Paper p="xl" radius="lg" ta="center">
             <Text fw={600}>{fresh ? 'لا شيء على الهواء' : 'حالة الطبقات غير مؤكَّدة'}</Text>
@@ -173,7 +189,7 @@ export function StatusPage() {
         ) : (
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
             {layers.map((layer) => (
-              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh} bridgeOnline={live.bridgeOnline}
+              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh}
                 onEditText={() => setEditingLayer(layer.layer)} onTimer={() => setTimedLayer(layer.layer)}
                 onRemove={(operation) => setRemoval({ layer: layer.layer, operation, expectedTemplateKey: layer.key })} />
             ))}

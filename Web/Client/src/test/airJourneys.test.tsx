@@ -45,9 +45,9 @@ function urgentSnapshot(): BridgeStatus {
   ] }
 }
 
-it('lets an online operator review a tracked layer while the shared reading is stale', () => {
+it.each([true, false])('opens tracked layer actions with a stale reading and bridgeOnline=%s', (bridgeOnline) => {
   renderPage(
-    <LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+    <LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline, status: urgentSnapshot() }}>
       <StatusPage />
     </LiveStatusContext.Provider>,
   )
@@ -63,13 +63,16 @@ it.each([['Urgent', true], ['Bulletin', false]])('reviews urgent removal without
   try {
     renderPage(
       <LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
-        <UrgentTable board={{ items: [], page: 0, pageCount: 1, total: 0, collectionTotal: 0, revision: 1,
+        <UrgentTable board={{ items: [{ id: 'row-1', title: 'خبر', state: 'ready', enabled: true, rows: null,
+          values: { Text: 'خبر' }, position: 1 }], page: 0, pageCount: 1, total: 1, collectionTotal: 1, revision: 1,
           fields: [{ name: 'Text', label: 'الخبر', required: true, sensitive: false, maxLength: 200 }] }}
           filtered={false} searchPending={false} selected={[]} onToggle={() => {}} onClear={() => {}}
           onSaved={async () => {}} onEditingChange={() => {}} />
       </LiveStatusContext.Provider>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'مراجعة إخفاء العاجل' }))
+    const row = screen.getByText('خبر').closest('tr')!
+    expect(within(row).getByRole('button', { name: 'خروج المعروض (EXIT)' })).toBeEnabled()
+    fireEvent.click(within(row).getByRole('button', { name: 'إخفاء العاجل المعروض' }))
     const dialog = screen.getByRole('dialog')
     if (matches) {
       await waitFor(() => expect(within(dialog).getByRole('button', { name: 'تأكيد الإخفاء' })).toBeEnabled())
@@ -96,6 +99,8 @@ it('distinguishes an expired empty snapshot from a confirmed empty snapshot', ()
   )
   const { unmount } = renderPage(page(now - 1000))
   expect(screen.getByText('حالة الطبقات غير مؤكَّدة')).toBeVisible()
+  fireEvent.change(screen.getByLabelText('رقم الطبقة'), { target: { value: '7' } })
+  expect(screen.getByRole('button', { name: 'مراجعة خروج المشهد (EXIT)' })).toBeEnabled()
   expect(screen.queryByText('لا شيء على الهواء')).not.toBeInTheDocument()
   unmount()
 

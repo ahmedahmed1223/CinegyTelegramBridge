@@ -35,14 +35,14 @@ async function request(layer: number, body: Schemas['AirLayerRemovalCommand'], s
 
 export function LayerRemovalModal({
   layer, operation, expectedTemplateKey, onClose,
-}: { layer: number; operation: RemovalOperation; expectedTemplateKey: string; onClose: () => void }) {
+}: { layer: number; operation: RemovalOperation; expectedTemplateKey?: string; onClose: () => void }) {
   const now = useNow()
   const query = useQuery({
     queryKey: ['air-layer-removal-review', layer, operation, expectedTemplateKey],
     queryFn: async ({ signal }) => {
       const preview = (await request(layer, { action: 'preview', operation, review: null }, signal)).preview
       if (!preview) throw new Error('layer_removal_unverified')
-      if (preview.layer !== layer || preview.operation !== operation || preview.templateKey !== expectedTemplateKey) {
+      if (preview.layer !== layer || preview.operation !== operation || !preview.templateKey || (expectedTemplateKey !== undefined && preview.templateKey !== expectedTemplateKey)) {
         throw new Error('layer_removal_stale')
       }
       return preview
@@ -78,6 +78,9 @@ export function LayerRemovalModal({
         {error && <Alert color="red" role="alert">{removalError(error)}</Alert>}
         {expired && !apply.isPending && <Alert color="yellow">انتهت مهلة المراجعة.</Alert>}
         {review && <Text size="sm">المشهد <strong>{review.templateKey}</strong> على الطبقة {review.layer}.</Text>}
+        {review && <Text size="sm">{operation === 'hide'
+          ? 'عند التأكيد سيُرسل أمر إخفاء هذا المشهد من الهواء.'
+          : 'عند التأكيد سيخرج المشهد من حلقة التكرار ويتابع التشغيل حسب تصميم القالب.'}</Text>}
         <Group justify="end">
           <Button variant="default" disabled={apply.isPending} onClick={onClose}>إلغاء</Button>
           {(error || expired) ? (

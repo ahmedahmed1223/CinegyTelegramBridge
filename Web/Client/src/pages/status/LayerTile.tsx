@@ -1,5 +1,5 @@
-import { ActionIcon, Badge, Button, Group, Menu, Progress, Stack, Text, Tooltip } from '@mantine/core'
-import { IconClockHour4, IconDotsVertical, IconEyeOff, IconLogout, IconPencil, IconUser } from '@tabler/icons-react'
+import { ActionIcon, Badge, Group, Progress, Stack, Text, Tooltip } from '@mantine/core'
+import { IconClockHour4, IconEyeOff, IconLogout, IconPencil, IconUser } from '@tabler/icons-react'
 import type { LayerStatus } from '../../api/client'
 import { formatClock } from '../../lib/time'
 import classes from './LayerTile.module.css'
@@ -15,11 +15,11 @@ const sourceLabel: Record<string, string> = {
  * only while the reading is fresh: a clock ticking over an unconfirmed
  * reading would claim more than the bridge knows.
  */
-export function LayerTile({ layer, now, fresh, bridgeOnline, onEditText, onTimer, onRemove }: {
+export function LayerTile({ layer, now, fresh, onEditText, onTimer, onRemove }: {
   layer: LayerStatus
   now: number
   fresh: boolean
-  bridgeOnline: boolean
+
   onEditText: () => void
   onTimer: () => void
   onRemove: (operation: RemovalOperation) => void
@@ -46,27 +46,6 @@ export function LayerTile({ layer, now, fresh, bridgeOnline, onEditText, onTimer
                 {layer.name}
               </Badge>
             )}
-            <Menu shadow="md" width={160} position="bottom-end">
-              <Menu.Target>
-                <ActionIcon variant="subtle" color="gray" size="sm" aria-label="خيارات الطبقة">
-                  <IconDotsVertical size={16} />
-                </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Item disabled={!bridgeOnline} leftSection={<IconClockHour4 size={14} />} onClick={onTimer}>
-                  مؤقّت الإخفاء
-                </Menu.Item>
-                <Menu.Item disabled={!bridgeOnline} leftSection={<IconPencil size={14} />} onClick={onEditText}>
-                  تعديل النص المباشر
-                </Menu.Item>
-                <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} disabled={!bridgeOnline} onClick={() => onRemove('hide')}>
-                  إخفاء (HIDE)
-                </Menu.Item>
-                <Menu.Item color="orange" leftSection={<IconLogout size={14} />} disabled={!bridgeOnline} onClick={() => onRemove('exit')}>
-                  خروج (EXIT)
-                </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
           </Group>
         </Group>
 
@@ -94,9 +73,12 @@ export function LayerTile({ layer, now, fresh, bridgeOnline, onEditText, onTimer
               {origin ?? (layer.by || 'الجسر')}
             </Text>
           </Group>
-          <Button size="compact-xs" color="red" variant="light" leftSection={<IconEyeOff size={12} />} disabled={!bridgeOnline} onClick={() => onRemove('hide')}>
-            إخفاء
-          </Button>
+          <Group gap={4}>
+            <Tooltip label="مؤقّت الإخفاء"><ActionIcon aria-label="مؤقّت الإخفاء" size={44} variant="light" onClick={onTimer}><IconClockHour4 size={18} /></ActionIcon></Tooltip>
+            <Tooltip label="تعديل النص المباشر"><ActionIcon aria-label="تعديل النص المباشر" size={44} variant="light" onClick={onEditText}><IconPencil size={18} /></ActionIcon></Tooltip>
+            <Tooltip label="إخفاء"><ActionIcon aria-label="إخفاء" size={44} color="red" variant="light" onClick={() => onRemove('hide')}><IconEyeOff size={18} /></ActionIcon></Tooltip>
+            <Tooltip label="خروج المشهد (EXIT)"><ActionIcon aria-label="خروج المشهد (EXIT)" size={44} color="orange" variant="light" onClick={() => onRemove('exit')}><IconLogout size={18} /></ActionIcon></Tooltip>
+          </Group>
         </Group>
       </Stack>
     </div>

@@ -1,6 +1,8 @@
 import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { IconArrowDown, IconArrowUp, IconClockPlay, IconEdit, IconPlayerPlay, IconPlayerStop, IconPlus, IconSettings, IconTrash } from '@tabler/icons-react'
+import { useQuery } from '@tanstack/react-query'
+import { getTemplates } from '../../api/air'
+import { IconArrowDown, IconArrowUp, IconClockPlay, IconEdit, IconEyeOff, IconLogout, IconPlayerPlay, IconPlus, IconSettings, IconTrash } from '@tabler/icons-react'
 import { useEffect, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
@@ -35,7 +37,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
   const [edit, setEdit] = useState<Edit | null>(null)
   const [timingEdit, setTimingEdit] = useState<{ item: ContentItem; revision: number } | null>(null)
   const [manualAction, setManualAction] = useState<{ itemId: string; mode: 'direct' | 'timed' } | null>(null)
-  const [removal, setRemoval] = useState<{ layer: number; expectedTemplateKey: string } | null>(null)
+  const [removal, setRemoval] = useState<{ layer: number; expectedTemplateKey: string; operation: 'hide' | 'exit' } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const fields = board.fields ?? []
@@ -44,6 +46,10 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
   const live = useLiveStatus()
   // The breaking-news template uses the bridge's fixed MojazUrgentKey.
   const trackedUrgent = live.status?.layers.find((layer) => layer.key.toLowerCase() === 'urgent')
+  const registry = useQuery({ queryKey: ['urgent-control-templates'], queryFn: () => getTemplates(), enabled: !trackedUrgent && !liveManual, retry: false })
+  const urgentTemplate = registry.data?.find(template => template.key.toLowerCase() === 'urgent')
+  const urgentLayer = liveManual?.layer ?? trackedUrgent?.layer ?? urgentTemplate?.layer
+  const urgentKey = trackedUrgent?.key ?? urgentTemplate?.key ?? 'Urgent'
   const editing = !!edit || !!timingEdit || !!manualAction || !!removal || busy
   useEffect(() => {
     onEditingChange(editing)
@@ -54,7 +60,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
     if (!liveManual) return
     modals.openConfirmModal({
       title: 'إخفاء العاجل المعروض',
-      children: <Text size="sm">سيُخفى العاجل الذي عرضته من الطبقة {liveManual.layer}.</Text>,
+      children: <Text size="sm">عند التأكيد سيُخفى العاجل المعروض من الهواء على الطبقة {liveManual.layer}.</Text>,
       labels: { confirm: 'إخفاء العاجل', cancel: 'إلغاء' },
       confirmProps: { color: 'red' },
       onConfirm: () => void (async () => {
@@ -165,15 +171,15 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
       {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
       {liveManual ? <Group justify="space-between">
         <Text size="sm">عرض فردي على الطبقة {liveManual.layer}</Text>
-        <Button color="red" variant="light" size="sm" leftSection={<IconPlayerStop size={17} />}
-          disabled={busy || !manual.isSuccess} onClick={confirmHide}>إيقاف العرض وإخفاء العاجل</Button>
+        <Tooltip label="إيقاف العرض وإخفاء العاجل"><ActionIcon color="red" variant="light" size={44} aria-label="إيقاف العرض وإخفاء العاجل"
+          disabled={busy || !manual.isSuccess} onClick={confirmHide}><IconEyeOff size={18} /></ActionIcon></Tooltip>
       </Group> : trackedUrgent && <Group justify="space-between">
         <Text size="sm">قالب العاجل على الطبقة {trackedUrgent.layer} بحسب آخر قراءة</Text>
-        <Button color="red" variant="light" size="sm" leftSection={<IconPlayerStop size={17} />}
+        <Tooltip label="مراجعة إخفاء العاجل"><ActionIcon color="red" variant="light" size={44} aria-label="مراجعة إخفاء العاجل"
           disabled={busy || !live.bridgeOnline}
-          onClick={() => setRemoval({ layer: trackedUrgent.layer, expectedTemplateKey: trackedUrgent.key })}>
-          مراجعة إخفاء العاجل
-        </Button>
+          onClick={() => setRemoval({ layer: trackedUrgent.layer, expectedTemplateKey: trackedUrgent.key, operation: 'hide' })}>
+          <IconEyeOff size={18} />
+        </ActionIcon></Tooltip>
       </Group>}
       <Paper radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
@@ -237,10 +243,18 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
                               <ActionIcon size={44} variant="light" aria-label={`عرض العاجل ${rank} بمؤقّت`} disabled={!canShow}
                                 onClick={() => { if (itemId) setManualAction({ itemId, mode: 'timed' }) }}><IconClockPlay size={17} /></ActionIcon>
                             </Tooltip>
-                            {displayed && <Tooltip label="إيقاف العرض وإخفاء العاجل">
-                              <ActionIcon size={44} color="red" variant="light" aria-label={`إيقاف وإخفاء العاجل ${rank}`} disabled={busy || !manual.isSuccess}
-                                onClick={confirmHide}><IconPlayerStop size={17} /></ActionIcon>
-                            </Tooltip>}
+                          </Group>
+                          <Group gap={4} aria-label="التحكم بالعاجل المعروض على الهواء" role="group">
+                            <Tooltip label="إخفاء العاجل المعروض"><ActionIcon size={44} variant="light" color="red"
+                              aria-label="إخفاء العاجل المعروض" disabled={busy || !urgentLayer}
+                              onClick={() => { if (displayed) confirmHide(); else if (urgentLayer) setRemoval({ layer: urgentLayer, expectedTemplateKey: urgentKey, operation: 'hide' }) }}>
+                              <IconEyeOff size={18} />
+                            </ActionIcon></Tooltip>
+                            <Tooltip label="خروج المعروض (EXIT)"><ActionIcon size={44} variant="light" color="orange"
+                              aria-label="خروج المعروض (EXIT)" disabled={busy || !urgentLayer}
+                              onClick={() => { if (urgentLayer) setRemoval({ layer: urgentLayer, expectedTemplateKey: urgentKey, operation: 'exit' }) }}>
+                              <IconLogout size={18} />
+                            </ActionIcon></Tooltip>
                           </Group>
                           <Group wrap="nowrap" gap={4} aria-label="إجراءات التحرير" role="group">
                             <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy || searchPending} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
@@ -272,7 +286,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
         stale={timingEdit.revision !== board.revision} error={error} onClose={() => { setTimingEdit(null); setError('') }}
         onSave={(timing) => void write({ action: 'timing', id: timingEdit.item.id, revision: timingEdit.revision, timing })} />}
       {manualAction && <UrgentManual {...manualAction} fields={fields} onClose={() => setManualAction(null)} onChanged={() => onSaved(false)} />}
-      {removal && <LayerRemovalModal {...removal} operation="hide" onClose={() => setRemoval(null)} />}
+      {removal && <LayerRemovalModal {...removal} onClose={() => setRemoval(null)} />}
     </Stack>
   )
 }

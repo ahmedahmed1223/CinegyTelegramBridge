@@ -6,10 +6,11 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { expect, it, vi } from 'vitest'
 import { getTemplates } from '../api/air'
-import type { BridgeStatus, Schemas } from '../api/client'
+import { api, type BridgeStatus, type Schemas } from '../api/client'
 import { sessionKey } from '../api/session'
 import { LiveStatusContext } from '../layout/LiveStatusContext'
 import { LivePage } from '../pages/live/LivePage'
+import { UrgentTable } from '../pages/newsroom/UrgentTable'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
 import { StatusPage } from '../pages/status/StatusPage'
 
@@ -37,6 +38,54 @@ function emptySnapshot(freshUntil: number): BridgeStatus {
     telegram: { state: 'connected', failures: 0 },
   }
 }
+
+function urgentSnapshot(): BridgeStatus {
+  return { ...emptySnapshot(Date.now() - 1000), layers: [
+    { layer: 7, key: 'Urgent', name: 'العاجل', at: Date.now() - 3000, hideAt: 0, source: 'telegram', by: '' },
+  ] }
+}
+
+it('lets an online operator review a tracked layer while the shared reading is stale', () => {
+  renderPage(
+    <LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+      <StatusPage />
+    </LiveStatusContext.Provider>,
+  )
+  expect(screen.getByText('قراءة غير مؤكَّدة')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'إخفاء' })).toBeEnabled()
+})
+
+it.each([['Urgent', true], ['Bulletin', false]])('reviews urgent removal without a manual token when Cinegy reports %s', async (templateKey, matches) => {
+  const post = vi.spyOn(api, 'POST').mockResolvedValue({ data: { preview: {
+    layer: 7, templateKey, operation: 'hide', review: 'test', expiresAt: Date.now() + 60_000,
+  } }, response: new Response() })
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: null }, response: new Response() })
+  try {
+    renderPage(
+      <LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+        <UrgentTable board={{ items: [], page: 0, pageCount: 1, total: 0, collectionTotal: 0, revision: 1,
+          fields: [{ name: 'Text', label: 'الخبر', required: true, sensitive: false, maxLength: 200 }] }}
+          filtered={false} searchPending={false} selected={[]} onToggle={() => {}} onClear={() => {}}
+          onSaved={async () => {}} onEditingChange={() => {}} />
+      </LiveStatusContext.Provider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'مراجعة إخفاء العاجل' }))
+    const dialog = screen.getByRole('dialog')
+    if (matches) {
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'تأكيد الإخفاء' })).toBeEnabled())
+    } else {
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('تغيّر المشهد')
+      expect(within(dialog).queryByRole('button', { name: 'تأكيد الإخفاء' })).not.toBeInTheDocument()
+    }
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post).toHaveBeenCalledWith('/api/air/layers/{layer}/removal', expect.objectContaining({
+      body: { action: 'preview', operation: 'hide', review: null },
+    }))
+  } finally {
+    post.mockRestore()
+    get.mockRestore()
+  }
+})
 
 it('distinguishes an expired empty snapshot from a confirmed empty snapshot', () => {
   const now = Date.now()

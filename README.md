@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.5
+
+The urgent table can open the layer removal review when the bridge tracks an urgent template without a confirmed individual show. Air Control lets operators open layer reviews while the bridge is online, even when the shared snapshot is stale. The bridge verifies the selected scene before applying a reviewed action.
+
 ## Version 9.1.4
 
 The web bulletin opens the same form from **Add row** and **Add row with a picture**. Enter the headline, story and location, choose the previous picture or upload a new one, and save once. The standard design places the optional location on the first line of the story because it has no separate location field.

@@ -15,10 +15,11 @@ const sourceLabel: Record<string, string> = {
  * only while the reading is fresh: a clock ticking over an unconfirmed
  * reading would claim more than the bridge knows.
  */
-export function LayerTile({ layer, now, fresh, onEditText, onTimer, onRemove }: {
+export function LayerTile({ layer, now, fresh, bridgeOnline, onEditText, onTimer, onRemove }: {
   layer: LayerStatus
   now: number
   fresh: boolean
+  bridgeOnline: boolean
   onEditText: () => void
   onTimer: () => void
   onRemove: (operation: RemovalOperation) => void
@@ -52,16 +53,16 @@ export function LayerTile({ layer, now, fresh, onEditText, onTimer, onRemove }: 
                 </ActionIcon>
               </Menu.Target>
               <Menu.Dropdown>
-                <Menu.Item disabled={!fresh} leftSection={<IconClockHour4 size={14} />} onClick={onTimer}>
+                <Menu.Item disabled={!bridgeOnline} leftSection={<IconClockHour4 size={14} />} onClick={onTimer}>
                   مؤقّت الإخفاء
                 </Menu.Item>
-                <Menu.Item disabled={!fresh} leftSection={<IconPencil size={14} />} onClick={onEditText}>
+                <Menu.Item disabled={!bridgeOnline} leftSection={<IconPencil size={14} />} onClick={onEditText}>
                   تعديل النص المباشر
                 </Menu.Item>
-                <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} disabled={!fresh} onClick={() => onRemove('hide')}>
+                <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} disabled={!bridgeOnline} onClick={() => onRemove('hide')}>
                   إخفاء (HIDE)
                 </Menu.Item>
-                <Menu.Item color="orange" leftSection={<IconLogout size={14} />} disabled={!fresh} onClick={() => onRemove('exit')}>
+                <Menu.Item color="orange" leftSection={<IconLogout size={14} />} disabled={!bridgeOnline} onClick={() => onRemove('exit')}>
                   خروج (EXIT)
                 </Menu.Item>
               </Menu.Dropdown>
@@ -93,7 +94,7 @@ export function LayerTile({ layer, now, fresh, onEditText, onTimer, onRemove }: 
               {origin ?? (layer.by || 'الجسر')}
             </Text>
           </Group>
-          <Button size="compact-xs" color="red" variant="light" leftSection={<IconEyeOff size={12} />} disabled={!fresh} onClick={() => onRemove('hide')}>
+          <Button size="compact-xs" color="red" variant="light" leftSection={<IconEyeOff size={12} />} disabled={!bridgeOnline} onClick={() => onRemove('hide')}>
             إخفاء
           </Button>
         </Group>

@@ -28,7 +28,7 @@ export function StatusPage() {
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [editingLayer, setEditingLayer] = useState<number | null>(null)
   const [timedLayer, setTimedLayer] = useState<number | null>(null)
-  const [removal, setRemoval] = useState<{ layer: number; operation: RemovalOperation } | null>(null)
+  const [removal, setRemoval] = useState<{ layer: number; operation: RemovalOperation; expectedTemplateKey: string } | null>(null)
   const live = useLiveStatus()
   const now = useNow()
   const status = live.status
@@ -173,9 +173,9 @@ export function StatusPage() {
         ) : (
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
             {layers.map((layer) => (
-              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh}
+              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh} bridgeOnline={live.bridgeOnline}
                 onEditText={() => setEditingLayer(layer.layer)} onTimer={() => setTimedLayer(layer.layer)}
-                onRemove={(operation) => setRemoval({ layer: layer.layer, operation })} />
+                onRemove={(operation) => setRemoval({ layer: layer.layer, operation, expectedTemplateKey: layer.key })} />
             ))}
           </SimpleGrid>
         )}

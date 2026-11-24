@@ -34,14 +34,17 @@ async function request(layer: number, body: Schemas['AirLayerRemovalCommand'], s
 }
 
 export function LayerRemovalModal({
-  layer, operation, onClose,
-}: { layer: number; operation: RemovalOperation; onClose: () => void }) {
+  layer, operation, expectedTemplateKey, onClose,
+}: { layer: number; operation: RemovalOperation; expectedTemplateKey: string; onClose: () => void }) {
   const now = useNow()
   const query = useQuery({
-    queryKey: ['air-layer-removal-review', layer, operation],
+    queryKey: ['air-layer-removal-review', layer, operation, expectedTemplateKey],
     queryFn: async ({ signal }) => {
       const preview = (await request(layer, { action: 'preview', operation, review: null }, signal)).preview
       if (!preview) throw new Error('layer_removal_unverified')
+      if (preview.layer !== layer || preview.operation !== operation || preview.templateKey !== expectedTemplateKey) {
+        throw new Error('layer_removal_stale')
+      }
       return preview
     },
     retry: false,
@@ -72,7 +75,7 @@ export function LayerRemovalModal({
       closeOnClickOutside={!apply.isPending} closeOnEscape={!apply.isPending} withCloseButton={!apply.isPending}>
       <Stack>
         {query.isFetching && <Loader size="sm" aria-label="جاري التحقق من المشهد" />}
-        {error && <Alert color="red">{removalError(error)}</Alert>}
+        {error && <Alert color="red" role="alert">{removalError(error)}</Alert>}
         {expired && !apply.isPending && <Alert color="yellow">انتهت مهلة المراجعة.</Alert>}
         {review && <Text size="sm">المشهد <strong>{review.templateKey}</strong> على الطبقة {review.layer}.</Text>}
         <Group justify="end">

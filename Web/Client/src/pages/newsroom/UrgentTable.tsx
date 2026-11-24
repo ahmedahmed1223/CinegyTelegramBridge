@@ -4,6 +4,8 @@ import { IconArrowDown, IconArrowUp, IconClockPlay, IconEdit, IconPlayerPlay, Ic
 import { useEffect, useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { useLiveStatus } from '../../layout/LiveStatusContext'
+import { LayerRemovalModal } from '../status/LayerRemovalModal'
 import classes from './NewsroomPage.module.css'
 import { UrgentRowTiming } from './UrgentRowTiming'
 import { UrgentManual } from './UrgentManual'
@@ -33,12 +35,16 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
   const [edit, setEdit] = useState<Edit | null>(null)
   const [timingEdit, setTimingEdit] = useState<{ item: ContentItem; revision: number } | null>(null)
   const [manualAction, setManualAction] = useState<{ itemId: string; mode: 'direct' | 'timed' } | null>(null)
+  const [removal, setRemoval] = useState<{ layer: number; expectedTemplateKey: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const fields = board.fields ?? []
   const manual = useUrgentManual()
   const liveManual = manual.data?.live
-  const editing = !!edit || !!timingEdit || !!manualAction || busy
+  const live = useLiveStatus()
+  // The breaking-news template uses the bridge's fixed MojazUrgentKey.
+  const trackedUrgent = live.status?.layers.find((layer) => layer.key.toLowerCase() === 'urgent')
+  const editing = !!edit || !!timingEdit || !!manualAction || !!removal || busy
   useEffect(() => {
     onEditingChange(editing)
     return () => onEditingChange(false)
@@ -157,10 +163,17 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
       {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
-      {liveManual && <Group justify="space-between">
+      {liveManual ? <Group justify="space-between">
         <Text size="sm">عرض فردي على الطبقة {liveManual.layer}</Text>
         <Button color="red" variant="light" size="sm" leftSection={<IconPlayerStop size={17} />}
           disabled={busy || !manual.isSuccess} onClick={confirmHide}>إيقاف العرض وإخفاء العاجل</Button>
+      </Group> : trackedUrgent && <Group justify="space-between">
+        <Text size="sm">قالب العاجل على الطبقة {trackedUrgent.layer} بحسب آخر قراءة</Text>
+        <Button color="red" variant="light" size="sm" leftSection={<IconPlayerStop size={17} />}
+          disabled={busy || !live.bridgeOnline}
+          onClick={() => setRemoval({ layer: trackedUrgent.layer, expectedTemplateKey: trackedUrgent.key })}>
+          مراجعة إخفاء العاجل
+        </Button>
       </Group>}
       <Paper radius="lg" className={classes.urgentGrid}>
         <form onSubmit={(event) => {
@@ -259,6 +272,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
         stale={timingEdit.revision !== board.revision} error={error} onClose={() => { setTimingEdit(null); setError('') }}
         onSave={(timing) => void write({ action: 'timing', id: timingEdit.item.id, revision: timingEdit.revision, timing })} />}
       {manualAction && <UrgentManual {...manualAction} fields={fields} onClose={() => setManualAction(null)} onChanged={() => onSaved(false)} />}
+      {removal && <LayerRemovalModal {...removal} operation="hide" onClose={() => setRemoval(null)} />}
     </Stack>
   )
 }

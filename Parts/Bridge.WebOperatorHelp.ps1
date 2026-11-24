@@ -37,6 +37,10 @@ function Invoke-WebOperatorHelp {
     # The shared release ledger owns versions and order. A release may mix
     # several audiences in one Bot line, so expose only reviewed Web summaries.
     $publicUpdates = @{
+        '9.1.5' = @(
+            'استخدم «مراجعة إخفاء العاجل» من جدول العواجل عندما يظهر القالب على طبقة ويغيب زر إيقاف العرض الفردي.'
+            'افتح أدوات الطبقة في لوحة الهواء عند اتصال الجسر، وراجع المشهد قبل تأكيد الإجراء.'
+        )
         '9.1.4' = 'أضف العنوان والخبر والمكان واختر الصورة السابقة أو صورة جديدة من نافذة واحدة، ثم احفظ الصف.'
         '9.1.3' = @(
             'أدخل عنوان الموجز ومتنه واختر الصورة في صف واحد، ثم احفظه.'

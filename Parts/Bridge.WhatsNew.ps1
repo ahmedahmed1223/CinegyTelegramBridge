@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.5'; Items = @('Use Review urgent removal in the web newsroom when the urgent template is tracked on a layer without an individual stop button.',
+                        'Open layer controls while the bridge is online even when the general reading is stale. Review the selected layer before confirming an action.') },
                 @{ Version = '9.1.4'; Items = @('In the web bulletin, enter the headline, story and location in the same window where you choose the previous picture or upload a new one. Save once to add the row.') },
                 @{ Version = '9.1.3'; Items = @('In the web bulletin, enter the headline and story and choose a photo before saving the row. You can also reuse a picture or keep the previous one.',
                         'Phone photos are turned upright before being cropped to fit the bulletin template.') },
@@ -399,6 +401,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.5'; Items = @('اضغط «مراجعة إخفاء العاجل» في جدول الويب إذا كان الجسر يتابع قالب العاجل على طبقة ولم يظهر زر إيقاف العرض الفردي.',
+                        'يمكن فتح أدوات الطبقة ما دام الجسر متصلًا عند تقادم قراءة لوحة الهواء. راجع الطبقة المحددة قبل تأكيد الإجراء.') },
                 @{ Version = '9.1.4'; Items = @('أدخل العنوان والخبر والمكان واختر الصورة السابقة أو ارفع صورة جديدة من نافذة إضافة صف الموجز في الويب. اضغط «حفظ الصف» لإضافته.') },
                 @{ Version = '9.1.3'; Items = @('أضف العنوان والخبر والصورة في صف الموجز من الويب بضغطة حفظ واحدة. يمكنك أيضًا إعادة استخدام صورة أو متابعة الصورة السابقة.',
                         'تُضبط جهة صورة الهاتف قبل قصّها لتناسب قالب الموجز.') },

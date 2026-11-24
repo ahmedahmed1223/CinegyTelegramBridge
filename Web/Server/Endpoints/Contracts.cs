@@ -418,7 +418,8 @@ public sealed record ShiftHistoryPage(ShiftHistoryItem[] Items, int Page, int Pa
     string StationTimeZone, ShiftHistoryOption[] Targets, ShiftHistoryOperatorOption[] Operators, ShiftHistoryEventOption[] Kinds,
     int HiddenTargets, int HiddenOperators);
 public sealed record ShiftHistoryExport(string Csv, int Count, bool Truncated);
-public sealed record PersonalAirNotice(bool TelegramAvailable, bool? Muted);
+public sealed record AirNoticeEvent(string Id, string Action, string Key, int Layer, long At);
+public sealed record PersonalAirNotice(bool TelegramAvailable, bool? Muted, AirNoticeEvent[]? Events = null);
 public sealed record PersonalAirNoticeChange(bool? Muted, bool? ExpectedMuted);
 public sealed record TemplateAirNoticeRule(string Key, string Scope, bool CanChange);
 public sealed record TemplateAirNoticePage(TemplateAirNoticeRule[] Items, int Page, int PageCount, int Total);

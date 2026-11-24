@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.7
+
+The web interface reports accepted Show, Hide and Exit commands from Telegram and the web. The bridge retains a short event queue and applies template rules, personal mute and access checks before delivery.
+
 ## Version 9.1.6
 
 Every urgent row offers Hide and Exit for the currently displayed urgent scene. Air Control also opens a scene review by layer number when its status feed has no usable snapshot.

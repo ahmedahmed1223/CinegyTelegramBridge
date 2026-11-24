@@ -10,7 +10,7 @@ import { bridgeLamp, cinegyLamp, telegramLamp } from '../lib/lamps'
 import { LivePage } from '../pages/live/LivePage'
 import { PersonalAirReminders } from '../pages/live/PersonalAirReminders'
 import { LiveStatusContext } from './LiveStatusContext'
-import { UrgentNotice } from './UrgentNotice'
+import { AirNotices } from './AirNotices'
 import { SignalLamp } from './SignalLamp'
 import { UserMenu } from './UserMenu'
 import classes from './Shell.module.css'
@@ -50,7 +50,7 @@ export function Shell() {
 
   return (
     <LiveStatusContext.Provider value={live}>
-      <UrgentNotice actor={session.data?.id} noticeId={live.bridgeOnline ? status?.urgentNoticeId : null} />
+      {session.data?.id && <AirNotices key={session.data.id} actor={session.data.id} noticeId={live.bridgeOnline ? status?.urgentNoticeId : null} />}
       <AppShell
         header={{ height: 68 }}
         navbar={{ width: 256, breakpoint: 'sm', collapsed: { mobile: !opened } }}

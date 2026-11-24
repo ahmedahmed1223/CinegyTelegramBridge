@@ -2,7 +2,6 @@ import { Anchor, Stack, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
-import { Link } from 'react-router'
 import { api, errorCode } from '../api/client'
 import { manualKey } from '../pages/newsroom/urgentManualApi'
 
@@ -35,7 +34,7 @@ export function UrgentNotice({ actor, noticeId }: { actor?: number | null; notic
       color: 'red',
       message: <Stack gap={4}>
         <Text size="sm">أكّد Cinegy عرض العاجل.</Text>
-        <Anchor component={Link} to="/newsroom?section=urgent" size="sm">افتح العواجل</Anchor>
+        <Anchor href="/newsroom?section=urgent" size="sm">افتح العواجل</Anchor>
       </Stack>,
     })
   }, [actor, client, notice.data, noticeId])

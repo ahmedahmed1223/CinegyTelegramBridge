@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { UrgentNotice } from './UrgentNotice'
+import { AirNotices } from './AirNotices'
 
 vi.mock('@mantine/notifications', () => ({ notifications: { show: vi.fn() } }))
 vi.mock('../api/client', () => ({ api: { GET: vi.fn() }, errorCode: vi.fn() }))
@@ -13,6 +14,21 @@ vi.mock('../api/client', () => ({ api: { GET: vi.fn() }, errorCode: vi.fn() }))
 afterEach(() => {
   cleanup()
   vi.resetAllMocks()
+})
+
+it('shows successive air operations once across reloads', async () => {
+  sessionStorage.clear()
+  vi.mocked(api.GET).mockResolvedValue({ data: { events: [
+    { id: 'one', action: 'SHOW', key: 'Urgent', layer: 7, at: 1 },
+    { id: 'two', action: 'EXIT', key: 'Banner', layer: 2, at: 2 },
+  ] }, response: new Response() })
+  const view = () => render(<QueryClientProvider client={new QueryClient()}><AirNotices actor={123} /></QueryClientProvider>)
+  const first = view()
+  await waitFor(() => expect(notifications.show).toHaveBeenCalledTimes(2))
+  first.unmount()
+  view()
+  await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(2))
+  expect(notifications.show).toHaveBeenCalledTimes(2)
 })
 
 it('notifies once for an actor-approved confirmed event and ignores a marker without their notice', async () => {

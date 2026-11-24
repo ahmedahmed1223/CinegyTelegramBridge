@@ -111,6 +111,9 @@ function Write-AirOperationResult {
     Add-UserOperationHistory -OperationId $OperationId -Action $Action -Result $Result -DurationMs $DurationMs -UserId $UserId -Layer $Layer -Target $Target -Values $Values
     Write-AuditRecord -OperationId $OperationId -EventName air_control -Result $Result -UserId $UserId -UserName $cleanUserName -ChatId $ChatId -Action $Action -Layer $Layer -Target $Target -DurationMs $DurationMs -Message $ErrorText -Values $Values
     Write-BridgeLog $message $level
+    if ($Result -eq 'success' -and $Action -in 'SHOW','HIDE','EXIT') {
+        Add-WebAirEvent -Id $OperationId -Action $Action -Key $Target -Layer $Layer
+    }
 }
 
 function Get-TemplateNotifyScope {

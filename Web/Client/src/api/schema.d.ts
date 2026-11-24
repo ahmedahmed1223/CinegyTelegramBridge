@@ -12790,6 +12790,15 @@ export interface components {
             effectiveAfter: boolean | null;
             review: string | null;
         };
+        AirNoticeEvent: {
+            id: string;
+            action: string;
+            key: string;
+            /** Format: int32 */
+            layer: number;
+            /** Format: int64 */
+            at: number;
+        };
         AirRerunCommand: {
             kind: string;
             action: string;
@@ -13837,6 +13846,8 @@ export interface components {
         PersonalAirNotice: {
             telegramAvailable: boolean;
             muted: boolean | null;
+            /** @default null */
+            events: components["schemas"]["AirNoticeEvent"][] | null;
         };
         PersonalAirNoticeChange: {
             muted: boolean | null;

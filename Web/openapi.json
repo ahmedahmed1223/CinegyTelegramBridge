@@ -12820,6 +12820,35 @@
           }
         }
       },
+      "AirNoticeEvent": {
+        "required": [
+          "id",
+          "action",
+          "key",
+          "layer",
+          "at"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "layer": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "at": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "AirRerunCommand": {
         "required": [
           "kind",
@@ -16221,6 +16250,14 @@
           },
           "muted": {
             "type": "boolean",
+            "nullable": true
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AirNoticeEvent"
+            },
+            "default": null,
             "nullable": true
           }
         }

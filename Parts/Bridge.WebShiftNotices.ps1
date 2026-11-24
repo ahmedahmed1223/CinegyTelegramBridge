@@ -1,10 +1,35 @@
+$script:WebAirEvents = [Collections.Generic.Queue[object]]::new()
+
+function Add-WebAirEvent {
+    param([string]$Id, [string]$Action, [string]$Key, [int]$Layer)
+    if (-not $script:WebChannel -or -not $Key -or $Layer -le 0) { return }
+    $scope = Get-TemplateNotifyScope -Key $Key
+    if ($scope -notin 'all','admins') { return }
+    while ($script:WebAirEvents.Count -ge 64) { $script:WebAirEvents.Dequeue() | Out-Null }
+    $script:WebAirEvents.Enqueue(@{ id=$Id; action=$Action; key=$Key; layer=$Layer; at=[datetimeoffset]::UtcNow.ToUnixTimeMilliseconds(); scope=$scope })
+}
+
 function Get-WebPersonalAirNotice {
     param([long]$Actor)
 
     $supported = -not (Test-WebOnlyUserId -UserId $Actor)
+    $muted = Test-AirNoticeMuted -UserId $Actor
+    $cutoff = [datetimeoffset]::UtcNow.AddMinutes(-2).ToUnixTimeMilliseconds()
+    $events = @(if (-not $muted -and $script:WebAirEvents.Count) {
+        $admin = Test-Admin -ChatId $Actor -UserId $Actor
+        foreach ($entry in $script:WebAirEvents) {
+            if ($entry.at -lt $cutoff) { continue }
+            $scope = Get-TemplateNotifyScope -Key $entry.key
+            if ($scope -notin 'all','admins' -or (-not $admin -and 'admins' -in $entry.scope,$scope)) { continue }
+            if ((Test-TemplateAccess -Key $entry.key -Layer $entry.layer -ChatId $Actor -UserId $Actor).Allowed) {
+                @{ id=$entry.id; action=$entry.action; key=$entry.key; layer=$entry.layer; at=$entry.at }
+            }
+        }
+    })
     return @{
+        events = $events
         telegramAvailable = $supported
-        muted = if ($supported) { Test-AirNoticeMuted -UserId $Actor } else { $null }
+        muted = if ($supported) { $muted } else { $null }
     }
 }
 

@@ -1,6 +1,26 @@
 #requires -Version 7
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
+Describe 'Browser air events' {
+    It 'retains successive operations and filters by current audience, mute and access' {
+        $previousChannel = $script:WebChannel
+        $script:WebChannel = @{}
+        try {
+            Mock Get-TemplateNotifyScope { 'all' }
+            Mock Test-AirNoticeMuted { $UserId -eq 32 }
+            Mock Test-Admin { $false }
+            Mock Test-TemplateAccess { @{ Allowed = ($UserId -ne 33) } }
+            Add-WebAirEvent -Id 'from-web' -Action SHOW -Key Urgent -Layer 7
+            Add-WebAirEvent -Id 'from-bot' -Action HIDE -Key Urgent -Layer 7
+            (Get-WebPersonalAirNotice -Actor 31).events.id | Should -Be @('from-web','from-bot')
+            (Get-WebPersonalAirNotice -Actor 32).events.Count | Should -Be 0
+            (Get-WebPersonalAirNotice -Actor 33).events.Count | Should -Be 0
+            Mock Get-TemplateNotifyScope { 'admins' }
+            (Get-WebPersonalAirNotice -Actor 31).events.Count | Should -Be 0
+        } finally { $script:WebAirEvents.Clear(); $script:WebChannel = $previousChannel }
+    }
+}
+
 Describe 'Web layer removal compatibility' {
     It 'requires a reviewed request on the legacy HIDE and EXIT operations when the station enables confirmation' {
         Mock Test-Authorized { $true }

@@ -10,7 +10,7 @@ const rulesKey = ['shift-notices', 'rules'] as const
 const scopes = [
   { value: 'none', label: 'لا أحد' },
   { value: 'admins', label: 'المشرفون' },
-  { value: 'all', label: 'مستخدمو تيليجرام المصرّح لهم' },
+  { value: 'all', label: 'جميع المشغّلين المصرّح لهم' },
 ]
 const noticesMessages: Readonly<Record<string, string>> = {
   notices_invalid: 'إعداد التنبيه غير صالح.',
@@ -55,11 +55,11 @@ function PersonalNotices({ actor }: { actor: number }) {
     <Paper p="md" withBorder>
       <Stack gap="sm">
         <Group justify="space-between">
-          <Title order={3} size="h4">تنبيهاتي في تيليجرام</Title>
+          <Title order={3} size="h4">تنبيهاتي</Title>
           {personal.isError && <Button variant="subtle" size="compact-sm" onClick={() => void personal.refetch()}>إعادة التحميل</Button>}
         </Group>
         {personal.isPending && <Skeleton h={65} aria-label="جارٍ تحميل إعداد التنبيهات" />}
-        {data && !data.telegramAvailable && <Text size="sm" c="dimmed">هذا الحساب للويب فقط. لا يستقبل تنبيهات تيليجرام.</Text>}
+        {data && !data.telegramAvailable && <Text size="sm" c="dimmed">تصل تنبيهات هذا الحساب داخل الويب.</Text>}
         {data?.telegramAvailable && typeof data.muted === 'boolean' && (
           <Switch label="استقبال تنبيهات عرض القوالب ورفعها" checked={!data.muted}
             description="قد تصلك تنبيهات التعارض أثناء تجهيز قالب على الهواء حتى إذا كتمت تنبيهات العرض."
@@ -70,6 +70,13 @@ function PersonalNotices({ actor }: { actor: number }) {
             }} />
         )}
         {saved && <Text size="sm" role="status">حُفظ إعداد التنبيه.</Text>}
+        {data?.events && <>
+          <Title order={4} size="sm">تنبيهات الهواء خلال آخر دقيقتين</Title>
+          {data.events.length === 0 && <Text size="sm" c="dimmed">لا توجد تنبيهات حديثة لهذا الحساب.</Text>}
+          {data.events.slice().reverse().map(event => <Text key={event.id} size="sm">
+            {new Date(event.at).toLocaleTimeString('ar')} · {event.action === 'SHOW' ? 'عرض' : event.action === 'HIDE' ? 'إخفاء' : 'خروج'} · <bdi>{event.key}</bdi> · الطبقة {event.layer}
+          </Text>)}
+        </>}
         {error && <Alert color="orange" role="alert">{noticeMessage(error)}</Alert>}
       </Stack>
     </Paper>

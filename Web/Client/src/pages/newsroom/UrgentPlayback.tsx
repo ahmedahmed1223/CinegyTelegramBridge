@@ -157,17 +157,31 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
                 الطبقة {format.format(review.plan.layer)} تعرض الآن {review.plan.graphicName || 'مشهدًا قائمًا'}.
               </Alert>
             )}
-            <Stack gap="xs" component="ol" mt={0} mb={0} ps="lg">
-              {review.plan.steps.map((step, index) => (
-                <li key={index}>
-                  <Text size="sm" dir="auto">{step.text}</Text>
-                  <Text size="xs" c="dimmed">بداية {format.format(step.startSeconds)} ث · مدة {format.format(step.holdSeconds)} ث</Text>
-                </li>
-              ))}
-            </Stack>
-            {review.plan.stepCount > review.plan.steps.length && (
-              <Text size="sm" c="dimmed">تظهر أول {format.format(review.plan.steps.length)} خطوة من {format.format(review.plan.stepCount)}.</Text>
-            )}
+            {review.plan.headlines && <Stack gap="xs">
+              <Text fw={600}>{review.selected.length ? 'العواجل المختارة' : 'عواجل الدورة'}</Text>
+              <Stack gap="xs" component="ol" aria-label="عناوين المعاينة" mt={0} mb={0} ps="lg">
+                {review.plan.headlines.map((text, index) => <li key={index}><Text size="sm" dir="auto">{text}</Text></li>)}
+              </Stack>
+              {review.plan.itemCount > review.plan.headlines.length && (
+                <Text size="sm" c="dimmed">تظهر أول {format.format(review.plan.headlines.length)} عنوانًا من {format.format(review.plan.itemCount)}.</Text>
+              )}
+            </Stack>}
+            <details open={!review.plan.headlines}>
+              <Text component="summary" size="sm" fw={600}>
+                التوقيت والتكرار ({format.format(review.plan.stepCount)} خطوة عرض)
+              </Text>
+              <Stack gap="xs" component="ol" mt="xs" mb={0} ps="lg">
+                {review.plan.steps.map((step, index) => (
+                  <li key={index}>
+                    <Text size="sm" dir="auto">{step.text}</Text>
+                    <Text size="xs" c="dimmed">بداية {format.format(step.startSeconds)} ث · مدة {format.format(step.holdSeconds)} ث</Text>
+                  </li>
+                ))}
+              </Stack>
+              {review.plan.stepCount > review.plan.steps.length && (
+                <Text size="sm" c="dimmed">تظهر أول {format.format(review.plan.steps.length)} خطوة من {format.format(review.plan.stepCount)}.</Text>
+              )}
+            </details>
             {review.plan.notes.map((note, index) => <Alert key={index} color="orange">{note}</Alert>)}
             {error && <Alert color="red" role="alert">{error}</Alert>}
             <Group justify="flex-end">

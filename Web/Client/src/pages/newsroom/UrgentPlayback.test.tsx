@@ -10,8 +10,12 @@ vi.mock('../../api/client', () => ({ api: { GET: vi.fn(), POST: vi.fn() } }))
 it('previews all or selected rows explicitly, using the chosen session mode', async () => {
   const response = new Response(null, { status: 200 })
   const preview: Schemas['UrgentRunPreview'] = {
-    review: 'synthetic-review', totalSeconds: 18, itemCount: 1, stepCount: 1, layer: 5,
-    replacesGraphic: false, graphicName: '', notes: [], steps: [],
+    review: 'synthetic-review', totalSeconds: 18, itemCount: 1, stepCount: 2, layer: 5,
+    replacesGraphic: false, graphicName: '', notes: [], headlines: ['العاجل المختار'],
+    steps: [
+      { text: 'العاجل المختار', startSeconds: 0, holdSeconds: 9 },
+      { text: 'العاجل المختار', startSeconds: 9, holdSeconds: 9 },
+    ],
   }
   vi.mocked(api.GET).mockResolvedValue({ data: { run: null, preview: null }, response })
   vi.mocked(api.POST).mockResolvedValue({ data: { preview, run: null }, response })
@@ -32,7 +36,11 @@ it('previews all or selected rows explicitly, using the chosen session mode', as
   }))
   fireEvent.click(within(all).getByRole('button', { name: 'العودة' }))
   fireEvent.click(screen.getByRole('button', { name: /تشغيل المحدد/ }))
-  await screen.findByRole('dialog', { name: 'مراجعة تشغيل المحدد' })
+  const selected = await screen.findByRole('dialog', { name: 'مراجعة تشغيل المحدد' })
+  const headlines = within(selected).getByRole('list', { name: 'عناوين المعاينة' })
+  expect(within(headlines).getAllByRole('listitem')).toHaveLength(1)
+  const timing = within(selected).getByText(/التوقيت والتكرار/)
+  expect(timing.closest('details')).not.toHaveAttribute('open')
   expect(api.POST).toHaveBeenNthCalledWith(2, '/api/content/urgent/playback', expect.objectContaining({
     body: expect.objectContaining({ action: 'preview-selected', selectedIds: ['row-2'], mode: 'auto_hide' }),
   }))

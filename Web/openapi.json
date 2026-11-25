@@ -21251,6 +21251,14 @@
             "items": {
               "$ref": "#/components/schemas/UrgentPreviewStep"
             }
+          },
+          "headlines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": null,
+            "nullable": true
           }
         },
         "nullable": true

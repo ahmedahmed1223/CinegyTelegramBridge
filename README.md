@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.12
+
+The urgent playback review lists each planned headline once and keeps the timing and repeat steps in an expandable section.
+
 ## Version 9.1.11
 
 The web sends an explicit selected-row action during urgent playback review and confirmation. The bridge rejects a missing selection, and Telegram describes the repeat order for the selected rows.

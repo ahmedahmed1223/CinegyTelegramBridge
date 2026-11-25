@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.12'; Items = @('The web playback review shows each headline once. Open timing and repeats to see the full playback sequence.') },
                 @{ Version = '9.1.11'; Items = @('Play Selected requires specific urgent rows. The Telegram review describes how those selected rows repeat.',
                         'Find the live urgent and sequence controls at the top of the web urgent section.') },
                 @{ Version = '9.1.10'; Items = @('The newsroom shows the last urgent text from either channel to operators with access to the template, including direct shows without a saved row.') },
@@ -409,6 +410,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.12'; Items = @('تعرض معاينة تشغيل العواجل في الويب كل عنوان مرة واحدة. افتح «التوقيت والتكرار» لمراجعة خطوات العرض.') },
                 @{ Version = '9.1.11'; Items = @('يتطلب تشغيل المحدد اختيار صفوف بعينها. توضح مراجعة البوت أن التكرار يخص الصفوف المحددة.',
                         'تظهر أدوات التحكم بالعاجل المعروض وبالدورة أعلى قسم العواجل في الويب.') },
                 @{ Version = '9.1.10'; Items = @('تعرض إدارة العواجل آخر نص عُرض من الويب أو البوت حتى لو لم يُحفظ في الجدول، للمشغّلين الذين يملكون صلاحية القالب.') },

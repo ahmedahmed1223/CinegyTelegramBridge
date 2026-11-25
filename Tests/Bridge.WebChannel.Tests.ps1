@@ -3032,6 +3032,7 @@ Describe 'Web channel: the pipe' {
             $subset = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($selected | ConvertTo-Json -Compress)) | ConvertFrom-Json
             $subset.ok | Should -BeTrue
             $subset.data.preview.itemCount | Should -Be 1
+            @($subset.data.preview.headlines) | Should -Be @('خبر آخر')
             @($subset.data.preview.steps.text | Sort-Object -Unique) | Should -Be @('خبر آخر')
             $selected.args.action = 'start-selected'
             $selected.args.review = $subset.data.preview.review

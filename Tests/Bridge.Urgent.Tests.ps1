@@ -628,6 +628,25 @@ Describe 'Running the breaking-news board' {
         [int]$script:UrgentBoardRun.Step | Should -Be 1
     }
 
+    It 'sends only the two reviewed headlines to Cinegy through each repeat of a selected run' {
+        New-TestUrgentBoard -Count 4 | Out-Null
+        $config.Settings | Add-Member UrgentBoardRepeats 2 -Force
+        $ids = @($script:UrgentBoard.Items[1].Id, $script:UrgentBoard.Items[3].Id)
+        $review = New-UrgentBoardPlan -ChatId 100 -SelectedIds $ids -SelectedOnly
+        $review.Success | Should -BeTrue
+
+        Start-UrgentBoardRun -ChatId 100 -UserId 101 -SelectedOnly -ReviewedPlan $review.Value -Quiet | Should -BeTrue
+        $script:SelectedStepHeadlines = [System.Collections.Generic.List[string]]::new()
+        Mock Send-PostboxValues {
+            $script:SelectedStepHeadlines.Add([string]$Values['Headline.Text'])
+            [pscustomobject]@{ Success = $true; Xml = ''; Error = '' }
+        }
+        1..3 | ForEach-Object { Step-TestUrgentRun }
+
+        Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter { $Variables['Headline.Text'] -eq 'عاجل 2' }
+        @($script:SelectedStepHeadlines.ToArray()) | Should -Be @('عاجل 4', 'عاجل 2', 'عاجل 4')
+    }
+
     It 'hides an auto-hide line at its deadline even when the next line uses text mode' {
         $id = [string]$script:UrgentBoard.Items[0].Id
         $edited = Set-UrgentItem -Board $script:UrgentBoard -ItemId $id -Field Mode -Value 'auto_hide'

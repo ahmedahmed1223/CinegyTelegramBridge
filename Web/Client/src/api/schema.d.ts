@@ -15383,6 +15383,8 @@ export interface components {
             graphicName: string;
             notes: string[];
             steps: components["schemas"]["UrgentPreviewStep"][];
+            /** @default null */
+            headlines: string[] | null;
         } | null;
         UrgentRunStatus: {
             id: string;

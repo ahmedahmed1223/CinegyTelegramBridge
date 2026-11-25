@@ -124,7 +124,7 @@ public sealed record UrgentWriteRequest(string Action, int Revision, string? Id 
 public sealed record UrgentPlaybackRequest(string Action, string[]? SelectedIds = null, string? Review = null, string? RunId = null, int? Step = null, string? Mode = null);
 public sealed record UrgentRunStatus(string Id, string State, int Step, int StepCount, string Current, string Next);
 public sealed record UrgentPreviewStep(string Text, double StartSeconds, double HoldSeconds);
-public sealed record UrgentRunPreview(string Review, double TotalSeconds, int ItemCount, int StepCount, int Layer, bool ReplacesGraphic, string GraphicName, string[] Notes, UrgentPreviewStep[] Steps);
+public sealed record UrgentRunPreview(string Review, double TotalSeconds, int ItemCount, int StepCount, int Layer, bool ReplacesGraphic, string GraphicName, string[] Notes, UrgentPreviewStep[] Steps, string[]? Headlines = null);
 public sealed record UrgentPlaybackResponse(UrgentRunStatus? Run, UrgentRunPreview? Preview);
 public sealed record UrgentManualRequest(string Action, string? ItemId = null, int? AutoHideSeconds = null, string? Review = null);
 public sealed record UrgentManualPreview(string Review, int Layer, Dictionary<string, string> Values, int AutoHideSeconds,

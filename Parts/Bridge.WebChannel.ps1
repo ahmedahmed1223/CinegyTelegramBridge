@@ -4009,11 +4009,16 @@ function Invoke-WebUrgentPlayback {
         } | ConvertTo-Json -Depth 12 -Compress
         $review = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
         if ($action -in 'preview', 'preview-selected') {
+            $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            $headlines = @(foreach ($step in $plan.Steps) {
+                    if ($seen.Add([string]$step.ItemId)) { Get-NewsScreenLine $step.Text 160 }
+                })
             return @{ ok = $true; data = @{ preview = @{
                 review = $review; totalSeconds = $plan.TotalSeconds; itemCount = $plan.ItemCount; stepCount = $plan.StepCount
                 layer = $layer; replacesGraphic = $stamp -ne 'empty'
                 graphicName = Get-NewsScreenLine ([string](Get-JsonProp $live 'ActiveName')) 100
                 notes = @($plan.Notes)
+                headlines = @($headlines | Select-Object -First 40)
                 steps = @($plan.Steps | Select-Object -First 20 | ForEach-Object {
                     @{ text = Get-NewsScreenLine $_.Text 160; startSeconds = $_.VisibleAtSeconds; holdSeconds = $_.HoldSeconds }
                 })

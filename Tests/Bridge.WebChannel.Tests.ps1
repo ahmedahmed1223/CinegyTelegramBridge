@@ -5236,6 +5236,8 @@ Describe 'Web channel: the pipe' {
             $running = (& $callBulletin 'start').data.run
             $running.id | Should -Match '^mojaz-'
             $running.rowCount | Should -Be 2
+            $running.current | Should -Be 'الخبر المراجع'
+            $running.next | Should -Be 'تعديل بعد المراجعة'
             Should -Invoke Invoke-ShowTemplateResult -Times 1 -Exactly -ParameterFilter {
                 $ExpectedLayerStamp -eq 'active:different-item' -and $ExpectedLayer -eq 4 -and $RequireEventIdentity
             }

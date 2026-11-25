@@ -11,6 +11,7 @@ import { sessionKey } from '../api/session'
 import { LiveStatusContext } from '../layout/LiveStatusContext'
 import { LivePage } from '../pages/live/LivePage'
 import { NewsroomPage } from '../pages/newsroom/NewsroomPage'
+import { BulletinRunStatus } from '../pages/newsroom/BulletinPlayback'
 import { UrgentTable } from '../pages/newsroom/UrgentTable'
 import { UrgentAirBanner } from '../pages/newsroom/UrgentAirBanner'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
@@ -19,7 +20,7 @@ import { ShowModal } from '../pages/templates/ShowModal'
 
 vi.mock('../api/air', () => ({ getTemplates: vi.fn() }))
 
-function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage'], playback?: { url: string | null }) {
+function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage'], playback?: { url: string | null }, path = '/') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   queryClient.setQueryData(sessionKey, { id: 1, name: 'مشغّل تجريبي', role: 'admin', method: 'test', webOnly: true })
   if (schedule) queryClient.setQueryData(['template-schedule', 0], schedule)
@@ -27,7 +28,7 @@ function renderPage(page: ReactNode, schedule?: Schemas['TemplateSchedulePage'],
   return render(
     <MantineProvider env="test">
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter>{page}</MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>{page}</MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   )
@@ -53,6 +54,27 @@ it('shows shared template text without overwriting the operator until they choos
     expect(field).toHaveValue('مسودة الويب')
     fireEvent.click(reuse)
     expect(field).toHaveValue('النص الذي عُرض')
+  } finally { get.mockRestore() }
+})
+
+it('shows current and next bulletin headlines beside the stop and camera controls', () => {
+  renderPage(<BulletinRunStatus id="bulletin" supported playback={{
+    canStart: true, busy: true, review: null, layer: null, replacing: null, pausesTicker: null, canQueueAfterUrgent: false,
+    run: { id: 'run', state: 'playing', row: 2, rowCount: 3, current: 'خبر الموجز الحالي', next: 'خبر الموجز التالي' },
+  }}><button>معاينة الموجز</button></BulletinRunStatus>)
+  const panel = screen.getByRole('region', { name: 'تشغيل الموجز' })
+  expect(within(panel).getByText('خبر الموجز الحالي')).toBeVisible()
+  expect(within(panel).getByText('خبر الموجز التالي')).toBeVisible()
+  expect(within(panel).getByRole('button', { name: 'إيقاف العرض' })).toBeEnabled()
+  expect(within(panel).getByRole('button', { name: 'التقاط صورة من البث' })).toBeEnabled()
+})
+
+it('offers capture in the bulletin library before any bulletin is opened', async () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { items: [], page: 0, pageCount: 1, total: 0 }, response: new Response() })
+  try {
+    renderPage(<NewsroomPage />, undefined, undefined, '/newsroom?section=bulletins')
+    expect(await screen.findByRole('heading', { name: 'مكتبة الموجز' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'التقاط صورة من البث' })).toBeEnabled()
   } finally { get.mockRestore() }
 })
 

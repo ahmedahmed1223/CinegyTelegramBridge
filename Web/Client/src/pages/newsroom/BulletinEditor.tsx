@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Button, Group, Menu, NativeSelect, Pagination, Paper, Select, Skeleton, Stack,
+  ActionIcon, Alert, Button, Group, Menu, NativeSelect, Pagination, Paper, Select, Skeleton, Stack,
   Table, Text, Textarea, TextInput, Title, Tooltip,
 } from '@mantine/core'
 import { modals } from '@mantine/modals'
@@ -13,6 +13,7 @@ import { BulletinNewRowDialog, BulletinPhotoDialog } from './BulletinPhotoDialog
 import { BulletinSceneImageDialog } from './BulletinSceneImageDialog'
 import { BulletinPreview } from './BulletinPreview'
 import { BulletinRunStatus } from './BulletinPlayback'
+import { CapturePanel } from '../live/CapturePanel'
 import { BulletinSchedule } from './BulletinSchedule'
 import { BulletinManagementDialog, type BulletinManagementOperation } from './BulletinManagementDialog'
 import { BulletinAfterUrgentButton } from './BulletinAfterUrgentButton'
@@ -234,21 +235,24 @@ export function BulletinEditor({ id, onBack, onSaved }: {
         <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={() => void query.refetch()} loading={query.isFetching} disabled={editing || edit.isPending}>تحديث</Button>
       </Group>
       {query.error && <Alert color="red" role="alert">{query.error.message}</Alert>}
+      {!bulletin && <Paper withBorder p="md"><CapturePanel photoOnly /></Paper>}
       {query.isPending && <Skeleton h={150} aria-label="جارٍ تحميل الموجز" />}
       {bulletin && (
         <>
           <Group justify="space-between" align="flex-start">
             <div className={classes.bulletinTitle}>
-              <Group gap="xs">
-                <Title order={3} dir="auto">{bulletin.name}</Title>
-                {onAir && <Badge color={sceneUnconfirmed ? 'orange' : 'red'} variant="light">
-                  {sceneUnconfirmed ? 'بانتظار التحقق' : 'على الهواء'}
-                </Badge>}
-              </Group>
+              <Title order={3} dir="auto">{bulletin.name}</Title>
               <Text size="sm" c="dimmed">{number.format(bulletin.total)} صف · النسخة {number.format(bulletin.revision)} · <bdi>{bulletin.design}</bdi></Text>
             </div>
+          </Group>
+          <BulletinRunStatus id={id} playback={playback.data} supported={bulletin.playbackSupported} statusError={playback.error?.message}>
             <Group gap="xs">
               <Button variant="default" disabled={busy || editing} onClick={() => setPreviewing(true)}>معاينة الموجز</Button>
+              {playback.data?.canQueueAfterUrgent && <BulletinAfterUrgentButton bulletin={bulletin} disabled={busy || editing}
+                onQueued={() => { void queryClient.invalidateQueries({ queryKey: ['bulletin-schedule', id] }) }} />}
+            </Group>
+          </BulletinRunStatus>
+          <Group gap="xs">
               <Button variant="default" disabled={busy || editing} onClick={() => setScheduling(true)}>المواعيد</Button>
               {availableDesigns.length > 0 && <Button variant="default" disabled={busy || editing || onAir}
                 onClick={() => { edit.reset(); setSavedNote(''); setDesignChange({ key: null, revision: bulletin.revision }) }}>
@@ -260,13 +264,10 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               <Button variant="default" leftSection={<IconCopy size={16} />} onClick={() => setNameMode('copy')} disabled={busy || editing}>نسخ</Button>
               <Button variant="subtle" color="red" disabled={busy || editing || onAir || sceneUnconfirmed}
                 onClick={() => { setSavedNote(''); setManagement('delete') }}>حذف الموجز</Button>
-            </Group>
           </Group>
           {nameMode && <BulletinNameForm mode={nameMode} current={bulletin} onSave={acceptSaved} onCancel={() => setNameMode(null)} />}
           {previewing && <BulletinPreview bulletin={bulletin} playback={playback.data} onClose={() => setPreviewing(false)} />}
           {scheduling && <BulletinSchedule bulletin={bulletin} onClose={() => setScheduling(false)} />}
-          {playback.data?.canQueueAfterUrgent && <BulletinAfterUrgentButton bulletin={bulletin} disabled={busy || editing}
-            onQueued={() => { void queryClient.invalidateQueries({ queryKey: ['bulletin-schedule', id] }) }} />}
           {management && <BulletinManagementDialog bulletin={bulletin} operation={management} onClose={() => setManagement(null)}
             onSaved={(result) => {
               setManagement(null)
@@ -324,9 +325,6 @@ export function BulletinEditor({ id, onBack, onSaved }: {
               onCancel={() => { setEditingTiming(false); edit.reset() }}
               onSave={(timing) => edit.mutate({ action: 'timing', id, revision: bulletin.revision, page: bulletin.page, timing })} />
           )}
-          {!bulletin.playbackSupported && <Alert color="gray">التشغيل على الهواء غير متاح لهذا التصميم في هذا الإصدار.</Alert>}
-          {playback.error && <Alert color="orange" role="alert">{messageFor(playback.error.message)}</Alert>}
-          {(bulletin.playbackSupported || onAir) && <BulletinRunStatus id={id} playback={playback.data} />}
           <Group justify="space-between">
             <Title order={4}>صفوف الموجز</Title>
             <Group gap="xs">

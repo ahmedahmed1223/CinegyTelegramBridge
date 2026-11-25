@@ -13319,6 +13319,10 @@ export interface components {
             row: number;
             /** Format: int32 */
             rowCount: number;
+            /** @default null */
+            current: string | null;
+            /** @default null */
+            next: string | null;
         } | null;
         BulletinSceneImageApply: {
             id: string;

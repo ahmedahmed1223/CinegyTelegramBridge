@@ -8,6 +8,7 @@ import { useSearchParams } from 'react-router'
 import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { PageHeader } from '../../components/PageHeader'
+import { CapturePanel } from '../live/CapturePanel'
 import { UrgentPlayback } from './UrgentPlayback'
 import { UrgentTiming } from './UrgentTiming'
 import { UrgentTable } from './UrgentTable'
@@ -142,6 +143,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       <UrgentPlayback items={result?.items ?? []} selected={selected} hasRows={(result?.collectionTotal ?? result?.total ?? 0) > 0}
         onStarted={ids => setSelected(previous => previous.filter(id => !ids.includes(id)))} />
     }
+    {view === 'bulletins' && <Paper withBorder p="md"><CapturePanel photoOnly /></Paper>}
 
     {view === 'bulletins' && creatingBulletin && (
       <BulletinNameForm mode="create" onCancel={() => setCreatingBulletin(false)} onSave={(value) => {

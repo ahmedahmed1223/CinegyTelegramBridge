@@ -96,7 +96,7 @@ public sealed record BulletinPreview(int Revision, string Stamp, BulletinField[]
     bool PlaybackSupported, int PlannedCount, double? ExitSeconds, string? ImageField);
 public sealed record BulletinScheduleItem(string Id, long ScheduledAtMs, string Status, bool CanCancel, string Reason);
 public sealed record BulletinSchedulePage(BulletinScheduleItem[] Items, bool CanSchedule, int Page, int PageCount);
-public sealed record BulletinRun(string Id, string State, int Row, int RowCount);
+public sealed record BulletinRun(string Id, string State, int Row, int RowCount, string? Current = null, string? Next = null);
 public sealed record BulletinPlayback(bool CanStart, bool Busy, BulletinRun? Run = null, string? Review = null,
     int? Layer = null, bool? Replacing = null, bool? PausesTicker = null, bool CanQueueAfterUrgent = false);
 public sealed record BulletinPlaybackRequest(string Action, string Id, int? Revision = null, string? Stamp = null,

@@ -14525,6 +14525,16 @@
           "rowCount": {
             "type": "integer",
             "format": "int32"
+          },
+          "current": {
+            "type": "string",
+            "default": null,
+            "nullable": true
+          },
+          "next": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         },
         "default": null,

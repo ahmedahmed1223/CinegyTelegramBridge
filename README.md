@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.14
+
+The bulletin desk shows the current and next headlines from the running plan. The bulletin library and editor offer broadcast photo capture even when no bulletin is on air.
+
 ## Version 9.1.13
 
 The urgent newsroom puts the current and next headlines beside the live controls. Operators can capture, preview, and download a photo of the channel output from the same section.

@@ -2064,19 +2064,47 @@ function Test-WebBulletinPlayoutAccess {
         (Test-TemplateShowPolicy -Key $key -Layer $layer -IsAdmin:(Test-Admin -ChatId $Actor -UserId $Actor)).Allowed)
 }
 
+function Get-WebBulletinRunHeadline {
+    param($Row, $Playback, $Template)
+    $designFields = @(Get-JsonProp $Playback 'DesignFields' | Where-Object { $_ })
+    if ($designFields.Count -eq 0) {
+        $title = [string](Get-JsonProp $Row 'Title')
+        if ([string]::IsNullOrWhiteSpace($title)) { $title = [string](Get-JsonProp $Row 'Text') }
+        return Get-NewsScreenLine $title 160
+    }
+    $registeredFields = @(Get-JsonProp $Template 'Fields')
+    foreach ($field in $designFields) {
+        if ((Get-JsonProp $field 'Kind') -ne 'text') { continue }
+        $name = [string](Get-JsonProp $field 'Name')
+        $fieldIndex = [array]::IndexOf($registeredFields, $name)
+        if ($fieldIndex -lt 0 -or (Test-TemplateFieldSensitive -Template $Template -Index $fieldIndex -Name $name)) { continue }
+        $value = Get-MojazRowFieldValue -Row $Row -FieldName $name -Kind text
+        if (-not [string]::IsNullOrWhiteSpace($value)) { return Get-NewsScreenLine $value 160 }
+    }
+    return ''
+}
+
 function Get-WebBulletinPlaybackState {
-    param([string]$Id, [bool]$CanStart)
+    param([string]$Id, [bool]$CanStart, [long]$Actor)
     $playback = $script:MojazPlayback
     $run = $null
     if ([string](Get-JsonProp $playback 'BulletinId') -ceq $Id -and (Get-JsonProp $playback 'OperationId')) {
+        $rows = @(Get-JsonProp $playback 'Rows')
+        $index = [int](Get-JsonProp $playback 'Index')
+        $key = Get-MojazRunDesignKey -Playback $playback
+        $layer = Get-MojazRunLayer -Playback $playback
+        $canRead = $layer -gt 0 -and (Test-TemplateAccess -Key $key -Layer $layer -ChatId $Actor -UserId $Actor).Allowed
+        $template = if ($canRead -and (Get-JsonProp $playback 'DesignFields')) { (Get-TemplateStore).Map[$key] }
         $run = @{
             id = [string](Get-JsonProp $playback 'OperationId')
             state = if (-not (Get-MojazRunSceneStamp -Playback $playback)) { 'scene_unconfirmed' }
                 elseif (Get-JsonProp $playback 'FieldsBlocked') { 'fields_blocked' }
                 elseif (Get-JsonProp $playback 'StopFailed') { 'stop_unconfirmed' }
                 else { 'playing' }
-            row = [int](Get-JsonProp $playback 'Index') + 1
-            rowCount = @(Get-JsonProp $playback 'Rows').Count
+            row = $index + 1
+            rowCount = $rows.Count
+            current = if ($canRead -and $index -ge 0 -and $index -lt $rows.Count) { Get-WebBulletinRunHeadline -Row $rows[$index] -Playback $playback -Template $template }
+            next = if ($canRead -and $index -ge 0 -and $index + 1 -lt $rows.Count) { Get-WebBulletinRunHeadline -Row $rows[$index + 1] -Playback $playback -Template $template }
         }
     }
     $canQueueAfterUrgent = $CanStart -and -not $run -and (Test-MojazUrgentOnAir)
@@ -2094,7 +2122,7 @@ function Invoke-WebBulletinPlayback {
     if (-not $bulletin) { return @{ ok = $false; error = 'not_found' } }
     $action = [string](Get-JsonProp $Arguments 'action')
     $canStart = Test-WebBulletinPlayoutAccess -Bulletin $bulletin -Actor $actor
-    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart } }
+    if ($action -eq 'status') { return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart -Actor $actor } }
     if ($action -notin 'review', 'start', 'stop') { return @{ ok = $false; error = 'bulletin_invalid' } }
     if ($action -eq 'start') {
         $pending = Use-WebAirReview -Actor $actor -Token ([string](Get-JsonProp $Arguments 'review')) -Reviews $script:WebBulletinPlaybackReviews
@@ -2119,7 +2147,7 @@ function Invoke-WebBulletinPlayback {
             return @{ ok = $false; error = 'bulletin_stop_unconfirmed' }
         }
         Publish-WebChannelState -Force
-        return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart }
+        return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart -Actor $actor }
     }
     if (-not $canStart) { return @{ ok = $false; error = 'bulletin_playback_unavailable' } }
     $layer = [int](Get-JsonProp (Get-MojazPlaybackTemplate -Bulletin $bulletin) 'Layer')
@@ -2153,7 +2181,7 @@ function Invoke-WebBulletinPlayback {
         return @{ ok = $false; error = 'bulletin_playback_refused' }
     }
     Publish-WebChannelState -Force
-    return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart }
+    return @{ ok = $true; data = Get-WebBulletinPlaybackState -Id $id -CanStart $canStart -Actor $actor }
 }
 
 function Get-WebBulletinSchedules {

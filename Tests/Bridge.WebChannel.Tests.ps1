@@ -211,15 +211,17 @@ Describe 'Web channel: the pipe' {
             @{ Key = 'access'; AdminOnly = $true }
         }
         Mock Get-WhatsNewSections {
-            foreach ($version in '9.1.4', '9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
+            foreach ($version in '9.1.11', '9.1.4', '9.1.3', '9.1.1', '9.1.0', '9.0.0', '8.129.0') {
                 @{ Version = $version; Items = @('private-bot-release') }
             }
         }
         $operator = Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"help.operator","args":{"actor":7110,"role":"owner"}}' | ConvertFrom-Json
         $operator.ok | Should -BeTrue
         $operator.data.chapters.id | Should -Be @('templates')
-        $operator.data.releases.version | Should -Be @('9.1.4', '9.1.3', '9.1.1', '9.1.0', '9.0.0')
-        $operator.data.releases[0].Items.Count | Should -Be 1
+        $operator.data.releases.version | Should -Be @('9.1.11', '9.1.4', '9.1.3', '9.1.1', '9.1.0')
+        $operator.data.releases[0].Items | Should -HaveCount 2
+        $operator.data.releases[0].Items[0] | Should -Match 'تشغيل المحدد'
+        $operator.data.releases[0].Items[1] | Should -Match 'أعلى إدارة العواجل'
 
         Mock Get-WhatsNewSections {
             @{ Version = '9.1.4'; Items = @('private-bot-release') }

@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.13
+
+The urgent newsroom puts the current and next headlines beside the live controls. Operators can capture, preview, and download a photo of the channel output from the same section.
+
 ## Version 9.1.12
 
 The urgent playback review lists each planned headline once and keeps the timing and repeat steps in an expandable section.

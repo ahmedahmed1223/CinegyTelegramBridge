@@ -37,6 +37,7 @@ function Invoke-WebOperatorHelp {
     # The shared release ledger owns versions and order. A release may mix
     # several audiences in one Bot line, so expose only reviewed Web summaries.
     $publicUpdates = @{
+        '9.1.13' = 'تابع العاجل الحالي والتالي من لوحة التشغيل أعلى إدارة العواجل، واستخدم «التقاط صورة من البث» لمعاينة خرج القناة وتنزيل الصورة.'
         '9.1.12' = 'تظهر عناوين العواجل المختارة مرة واحدة في المعاينة. افتح «التوقيت والتكرار» إذا أردت مراجعة عدد مرات العرض وترتيبها.'
         '9.1.11' = @(
             'يعرض «تشغيل المحدد» الصفوف التي اخترتها في المعاينة، ويرفض الجسر بدء الدورة إذا فقد قائمة التحديد.'

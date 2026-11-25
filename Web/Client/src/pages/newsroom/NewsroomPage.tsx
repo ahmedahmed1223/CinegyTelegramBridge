@@ -9,7 +9,6 @@ import { api, errorCode } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { PageHeader } from '../../components/PageHeader'
 import { UrgentPlayback } from './UrgentPlayback'
-import { UrgentAirBanner } from './UrgentAirBanner'
 import { UrgentTiming } from './UrgentTiming'
 import { UrgentTable } from './UrgentTable'
 import { TickerEditor } from './TickerEditor'
@@ -139,11 +138,10 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       )}
     </Group>
 
-    {view === 'urgent' && <>
-      <UrgentAirBanner items={result?.items ?? []} />
-      <UrgentPlayback selected={selected} hasRows={(result?.collectionTotal ?? result?.total ?? 0) > 0}
+    {view === 'urgent' &&
+      <UrgentPlayback items={result?.items ?? []} selected={selected} hasRows={(result?.collectionTotal ?? result?.total ?? 0) > 0}
         onStarted={ids => setSelected(previous => previous.filter(id => !ids.includes(id)))} />
-    </>}
+    }
 
     {view === 'bulletins' && creatingBulletin && (
       <BulletinNameForm mode="create" onCancel={() => setCreatingBulletin(false)} onSave={(value) => {

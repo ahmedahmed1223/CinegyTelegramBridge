@@ -5,6 +5,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
+import { UrgentAirBanner } from './UrgentAirBanner'
+import classes from './NewsroomPage.module.css'
 
 type Request = Schemas['UrgentPlaybackRequest']
 type Preview = Schemas['UrgentRunPreview']
@@ -16,7 +18,7 @@ const sessionModes = [
   { value: 'auto_hide', label: 'إخفاء بعد الخبر' },
 ]
 
-export function UrgentPlayback({ selected, hasRows = true, onStarted }: { selected: string[]; hasRows?: boolean; onStarted: (ids: string[]) => void }) {
+export function UrgentPlayback({ items, selected, hasRows = true, onStarted }: { items: Schemas['ContentItem'][]; selected: string[]; hasRows?: boolean; onStarted: (ids: string[]) => void }) {
   const [review, setReview] = useState<{ plan: Preview; selected: string[]; mode: string | null } | null>(null)
   const [mode, setMode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -81,7 +83,7 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
   }
 
   return (
-    <Paper withBorder px="md" py="sm" radius="md">
+    <Paper withBorder px="md" py="md" radius="md">
       <Stack gap="sm">
         <Group justify="space-between" align="flex-start">
           <Stack gap={2}>
@@ -98,6 +100,7 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
             </Badge>
           )}
         </Group>
+        <UrgentAirBanner items={items} run={run} />
         {status.isError && <Alert color="orange" role="alert">
           <Group justify="space-between">
             <Text size="sm">{status.error.message}</Text>
@@ -106,7 +109,7 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
         </Alert>}
         {!review && error && <Alert color="red" role="alert">{error}</Alert>}
         {!run && (
-          <Stack gap="xs" align="flex-start">
+          <div className={classes.airToolbar}>
             <NativeSelect label="نمط هذه الدورة" data={sessionModes} value={mode} disabled={!status.isSuccess || busy || !hasRows}
               onChange={(event) => setMode(event.currentTarget.value)} />
             <Group gap="xs">
@@ -120,12 +123,10 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
               </Button>
             </Group>
             {busy && !review && <Text size="sm" c="dimmed" role="status">جارٍ إعداد المعاينة…</Text>}
-          </Stack>
+          </div>
         )}
         {run && (
           <Stack gap="xs">
-            {run.current && <Text size="sm" dir="auto"><strong>الحالي</strong> · {run.current}</Text>}
-            {run.next && <Text size="sm" c="dimmed" dir="auto"><strong>التالي</strong> · {run.next}</Text>}
             <Group gap="xs">
               {run.state !== 'stop_unconfirmed' && (
                 <>

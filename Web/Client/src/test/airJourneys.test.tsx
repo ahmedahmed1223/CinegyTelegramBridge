@@ -65,7 +65,7 @@ function urgentSnapshot(): BridgeStatus {
 it('keeps urgent control at the top of the newsroom when the table cannot load', async () => {
   const get = vi.spyOn(api, 'GET').mockImplementation(async path => {
     if (path === '/api/content/urgent/playback') return {
-      data: { run: { id: 'run', state: 'playing', step: 0, stepCount: 2 }, preview: null },
+      data: { run: { id: 'run', state: 'playing', step: 0, stepCount: 2, current: 'العاجل الحالي', next: 'عنوان العاجل القادم' }, preview: null },
       response: new Response(),
     }
     return { error: { code: 'bridge_unavailable' }, response: new Response(null, { status: 503 }) }
@@ -76,11 +76,32 @@ it('keeps urgent control at the top of the newsroom when the table cannot load',
     </LiveStatusContext.Provider>)
     const stop = await screen.findByRole('button', { name: 'إيقاف الدورة وإخفاء العاجل' })
     expect(stop).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'إيقاف مؤقت' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'العاجل التالي' })).toBeEnabled()
+    const banner = screen.getByRole('region', { name: 'العاجل المعروض' })
+    expect(within(banner).getByText('العاجل الحالي')).toBeVisible()
+    expect(within(banner).getByText('عنوان العاجل القادم')).toBeVisible()
+    expect(within(banner).getByRole('button', { name: 'التقاط صورة من البث' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'إخفاء العاجل المعروض' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'خروج المعروض (EXIT)' })).toBeEnabled()
     const search = screen.getByRole('searchbox', { name: 'بحث في العواجل' })
     expect(stop.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   } finally { get.mockRestore() }
+})
+
+it('captures a photo from the urgent desk and provides its authenticated download', async () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: {}, response: new Response() })
+  const post = vi.spyOn(api, 'POST').mockResolvedValue({
+    data: { id: 'urgent-photo', state: 'ready', kind: 'photo', source: 'main', completedAt: Date.now(), expiresAt: Date.now() + 60_000 },
+    response: new Response(),
+  })
+  try {
+    renderPage(<UrgentAirBanner items={[]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'التقاط صورة من البث' }))
+    expect(await screen.findByRole('img', { name: 'صورة ملتقطة من خرج القناة' })).toBeVisible()
+    expect(post).toHaveBeenCalledWith('/api/live/captures', { body: { kind: 'photo' } })
+    expect(screen.getByRole('link', { name: 'تنزيل الصورة' })).toHaveAttribute('href', '/api/live/captures/urgent-photo/file')
+  } finally { post.mockRestore(); get.mockRestore() }
 })
 
 it('shows the last urgent text in the newsroom without a saved row or a manual control', async () => {

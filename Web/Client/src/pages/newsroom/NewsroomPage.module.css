@@ -3,7 +3,52 @@
 }
 
 .airBanner {
-  border-inline-start: 4px solid var(--mantine-color-red-7);
+  background: var(--cgb-sidebar);
+  border-radius: var(--mantine-radius-md);
+  padding: var(--mantine-spacing-md);
+}
+
+.airLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(12rem, 1fr);
+  align-items: start;
+  gap: var(--mantine-spacing-lg);
+}
+
+.airCopy {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.airHeadline {
+  color: var(--mantine-color-text);
+  font-weight: 700;
+  font-size: clamp(1.05rem, 1rem + 0.4vw, 1.35rem);
+  line-height: 1.55;
+}
+
+.airNext {
+  border-block-start: 1px solid var(--cgb-line);
+  margin-block-start: 0.25rem;
+  padding-block-start: 0.5rem;
+}
+
+.airActions {
+  min-inline-size: 0;
+}
+
+.airToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-sm);
+}
+
+@media (max-width: 48rem) {
+  .airLayout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mantine-spacing-sm);
+  }
 }
 
 .tabs {

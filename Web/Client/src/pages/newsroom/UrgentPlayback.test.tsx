@@ -23,7 +23,7 @@ it('previews all or selected rows explicitly, using the chosen session mode', as
   const onStarted = vi.fn()
   render(
     <MantineProvider env="test">
-      <QueryClientProvider client={client}><UrgentPlayback selected={['row-2']} onStarted={onStarted} /></QueryClientProvider>
+      <QueryClientProvider client={client}><UrgentPlayback items={[]} selected={['row-2']} onStarted={onStarted} /></QueryClientProvider>
     </MantineProvider>,
   )
   await screen.findByText('لا توجد دورة نشطة.')

@@ -15,6 +15,12 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.11
+
+The web sends an explicit selected-row action during urgent playback review and confirmation. The bridge rejects a missing selection, and Telegram describes the repeat order for the selected rows.
+
+The urgent newsroom places live and sequence controls above search and the table so operators can still reach them if the table fails to load.
+
 ## Version 9.1.10
 
 The urgent newsroom reads the last displayed public text directly from the shared template, including after a direct show with no corresponding board row.

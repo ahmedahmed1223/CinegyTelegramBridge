@@ -3022,6 +3022,20 @@ Describe 'Web channel: the pipe' {
 
             $start = @{ op = 'urgent.playback'; args = @{ actor = 4321; action = 'start'; review = $preview.data.preview.review } }
             $script:UrgentBoard = (Add-UrgentItem -Board $script:UrgentBoard -Text 'خبر آخر').Value
+            $selected = @{ op = 'urgent.playback'; args = @{ actor = 4321; action = 'preview-selected'; selectedIds = @() } }
+            $missing = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($selected | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $missing.error | Should -Be 'urgent_stale'
+            $secondId = $script:UrgentBoard.Items[1].Id
+            $selected.args.selectedIds = @($secondId)
+            $subset = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($selected | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $subset.ok | Should -BeTrue
+            $subset.data.preview.itemCount | Should -Be 1
+            @($subset.data.preview.steps.text | Sort-Object -Unique) | Should -Be @('خبر آخر')
+            $selected.args.action = 'start-selected'
+            $selected.args.review = $subset.data.preview.review
+            $selected.args.selectedIds = @()
+            $missing = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($selected | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $missing.error | Should -Be 'urgent_stale'
             $stale = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($start | ConvertTo-Json -Compress)) | ConvertFrom-Json
             $stale.error | Should -Be 'urgent_stale'
 
@@ -3075,6 +3089,19 @@ Describe 'Web channel: the pipe' {
             $status = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line '{"op":"urgent.playback","args":{"actor":4321,"action":"status"}}') | ConvertFrom-Json
             $status.data.run.state | Should -Be 'stop_unconfirmed'
             $status.data.run.id | Should -Be $started.data.run.id
+            $script:UrgentBoardRun = $null
+            $playbackScene.ActiveId = 'old-graphic'
+            $selected.args.selectedIds = @($secondId)
+            $selected.args.action = 'preview-selected'
+            $subset = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($selected | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $subset.ok | Should -BeTrue
+            $selected.args.action = 'start-selected'
+            $selected.args.review = $subset.data.preview.review
+            $subsetStarted = (Invoke-WebPipeRequest -PipeName $script:WebChannelPipeName -Line ($selected | ConvertTo-Json -Compress)) | ConvertFrom-Json
+            $subsetStarted.ok | Should -BeTrue
+            $script:UrgentBoardRun.Scope | Should -Be 'selected'
+            @($script:UrgentBoardRun.Steps.ItemId | Sort-Object -Unique) | Should -Be @($secondId)
+            (Add-UrgentRunStep -Item $newRow) | Should -Be 0
         }
         finally {
             $script:UrgentBoard = $previousBoard

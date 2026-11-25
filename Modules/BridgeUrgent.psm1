@@ -538,9 +538,11 @@ function New-UrgentRunPlan {
 function Get-UrgentPlanSummary {
     <# The one line the operator reads before anything reaches air. Built here
        so the review screen and the log say the same sentence. #>
-    param($Plan)
+    param($Plan, [switch]$SelectedOnly)
     if (-not $Plan) { return '' }
-    $order = if ([string](Get-UrgentProperty $Plan 'RepeatMode' 'cycle') -eq 'item') { 'كل عاجل مرّات ثم التالي' } else { 'الجدول كاملًا ثم يعيد' }
+    $order = if ([string](Get-UrgentProperty $Plan 'RepeatMode' 'cycle') -eq 'item') { 'كل عاجل مرّات ثم التالي' }
+    elseif ($SelectedOnly) { 'الصفوف المحددة ثم يعيد' }
+    else { 'الجدول كاملًا ثم يعيد' }
     $total = [double](Get-UrgentProperty $Plan 'TotalSeconds' 0)
     $roundedTotal = [long][math]::Round($total)
     $minutes = [long][math]::Floor($roundedTotal / 60)

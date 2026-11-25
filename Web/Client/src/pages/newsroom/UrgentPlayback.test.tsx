@@ -34,11 +34,14 @@ it('previews all or selected rows explicitly, using the chosen session mode', as
   fireEvent.click(screen.getByRole('button', { name: /تشغيل المحدد/ }))
   await screen.findByRole('dialog', { name: 'مراجعة تشغيل المحدد' })
   expect(api.POST).toHaveBeenNthCalledWith(2, '/api/content/urgent/playback', expect.objectContaining({
-    body: expect.objectContaining({ action: 'preview', selectedIds: ['row-2'], mode: 'auto_hide' }),
+    body: expect.objectContaining({ action: 'preview-selected', selectedIds: ['row-2'], mode: 'auto_hide' }),
   }))
   expect(api.POST).toHaveBeenCalledTimes(2)
   expect(onStarted).not.toHaveBeenCalled()
   vi.mocked(api.POST).mockResolvedValueOnce({ data: { run: { id: 'run' } }, response })
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'تشغيل على الهواء' }))
   await vi.waitFor(() => expect(onStarted).toHaveBeenCalledWith(['row-2']))
+  expect(api.POST).toHaveBeenNthCalledWith(3, '/api/content/urgent/playback', expect.objectContaining({
+    body: expect.objectContaining({ action: 'start-selected', selectedIds: ['row-2'], review: preview.review }),
+  }))
 })

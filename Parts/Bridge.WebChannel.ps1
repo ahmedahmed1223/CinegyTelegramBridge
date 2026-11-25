@@ -3972,12 +3972,14 @@ function Invoke-WebUrgentPlayback {
     $layer = [int]$template.Layer
     $access = Test-TemplateAccess -Key $script:MojazUrgentKey -Layer $layer -ChatId $actor -UserId $actor
     if (-not $access.Allowed) { return @{ ok = $false; error = 'forbidden' } }
-    if ($action -in 'preview', 'start') {
+    if ($action -in 'preview', 'start', 'preview-selected', 'start-selected') {
         if (-not (Test-UrgentBoardAvailable)) { return @{ ok = $false; error = 'content_disabled' } }
         if ($script:UrgentBoardRun -or $script:MojazPlayback) { return @{ ok = $false; error = 'urgent_air_busy' } }
         $policy = Test-TemplateShowPolicy -Key $script:MojazUrgentKey -Layer $layer -IsAdmin:(Test-Admin -ChatId $actor -UserId $actor)
         if (-not $policy.Allowed) { return @{ ok = $false; error = 'refused'; data = $policy.Reason } }
         $ids = @(Get-JsonProp $Arguments 'selectedIds' | Where-Object { $null -ne $_ })
+        $requiresSelection = $action -in 'preview-selected', 'start-selected'
+        if ($requiresSelection -and $ids.Count -eq 0) { return @{ ok = $false; error = 'urgent_stale' } }
         if ($ids.Count -gt 40) { return @{ ok = $false; error = 'urgent_invalid' } }
         $modeOverride = Get-JsonProp $Arguments 'mode'
         if ($null -ne $modeOverride) {
@@ -4006,7 +4008,7 @@ function Invoke-WebUrgentPlayback {
             template = $template; scene = $stamp; plan = $plan; selectedOnly = $selectedOnly; mode = $modeOverride
         } | ConvertTo-Json -Depth 12 -Compress
         $review = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($reviewed)))
-        if ($action -eq 'preview') {
+        if ($action -in 'preview', 'preview-selected') {
             return @{ ok = $true; data = @{ preview = @{
                 review = $review; totalSeconds = $plan.TotalSeconds; itemCount = $plan.ItemCount; stepCount = $plan.StepCount
                 layer = $layer; replacesGraphic = $stamp -ne 'empty'

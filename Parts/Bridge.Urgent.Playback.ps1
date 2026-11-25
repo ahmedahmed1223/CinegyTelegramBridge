@@ -291,7 +291,7 @@ function Start-UrgentBoardRun {
         return $false
     }
 
-    $summary = Get-UrgentPlanSummary -Plan $plan
+    $summary = Get-UrgentPlanSummary -Plan $plan -SelectedOnly:$SelectedOnly
     $script:UrgentBoardRun = @{
         Step = 0
         Layer = Get-JsonProp $template 'Layer'

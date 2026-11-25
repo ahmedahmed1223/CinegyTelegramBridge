@@ -1471,7 +1471,7 @@ function Show-UrgentReviewScreen {
     }
     $scope = if ($SelectedOnly) { (T 'urgent.scopeSelected') } else { (T 'urgent.scopeWhole') }
     $lines = @((T 'urg.reviewBeforePlay' $scope), '')
-    $lines += (Get-UrgentPlanSummary -Plan $plan.Value)
+    $lines += (Get-UrgentPlanSummary -Plan $plan.Value -SelectedOnly:$SelectedOnly)
     $holds = @($plan.Value.Steps | ForEach-Object { [double]$_.HoldSeconds } | Sort-Object -Unique)
     $holdLabel = if ($holds.Count -eq 1) { "$($holds[0])" } else { "$($holds[0])–$($holds[-1])" }
     $lines += (T 'urg.actualGap' $holdLabel)

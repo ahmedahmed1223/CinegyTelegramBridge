@@ -10,6 +10,7 @@ import { api, type BridgeStatus, type Schemas } from '../api/client'
 import { sessionKey } from '../api/session'
 import { LiveStatusContext } from '../layout/LiveStatusContext'
 import { LivePage } from '../pages/live/LivePage'
+import { NewsroomPage } from '../pages/newsroom/NewsroomPage'
 import { UrgentTable } from '../pages/newsroom/UrgentTable'
 import { UrgentAirBanner } from '../pages/newsroom/UrgentAirBanner'
 import { TemplateSchedulePage } from '../pages/schedule/TemplateSchedulePage'
@@ -60,6 +61,27 @@ function urgentSnapshot(): BridgeStatus {
     { layer: 7, key: 'Urgent', name: 'العاجل', at: Date.now() - 3000, hideAt: 0, source: 'telegram', by: '' },
   ] }
 }
+
+it('keeps urgent control at the top of the newsroom when the table cannot load', async () => {
+  const get = vi.spyOn(api, 'GET').mockImplementation(async path => {
+    if (path === '/api/content/urgent/playback') return {
+      data: { run: { id: 'run', state: 'playing', step: 0, stepCount: 2 }, preview: null },
+      response: new Response(),
+    }
+    return { error: { code: 'bridge_unavailable' }, response: new Response(null, { status: 503 }) }
+  })
+  try {
+    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+      <NewsroomPage />
+    </LiveStatusContext.Provider>)
+    const stop = await screen.findByRole('button', { name: 'إيقاف الدورة وإخفاء العاجل' })
+    expect(stop).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'إخفاء العاجل المعروض' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'خروج المعروض (EXIT)' })).toBeEnabled()
+    const search = screen.getByRole('searchbox', { name: 'بحث في العواجل' })
+    expect(stop.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  } finally { get.mockRestore() }
+})
 
 it('shows the last urgent text in the newsroom without a saved row or a manual control', async () => {
   const get = vi.spyOn(api, 'GET').mockImplementation(async path => ({

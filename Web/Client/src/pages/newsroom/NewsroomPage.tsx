@@ -139,6 +139,12 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       )}
     </Group>
 
+    {view === 'urgent' && <>
+      <UrgentAirBanner items={result?.items ?? []} />
+      <UrgentPlayback selected={selected} hasRows={(result?.collectionTotal ?? result?.total ?? 0) > 0}
+        onStarted={ids => setSelected(previous => previous.filter(id => !ids.includes(id)))} />
+    </>}
+
     {view === 'bulletins' && creatingBulletin && (
       <BulletinNameForm mode="create" onCancel={() => setCreatingBulletin(false)} onSave={(value) => {
         setCreatingBulletin(false)
@@ -163,7 +169,6 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
 
     {filters}
 
-    {view === 'urgent' && <UrgentAirBanner items={result?.items ?? []} />}
     {content.isError && view === 'urgent' && result && (
       <Alert color="orange" role="alert">تعذّر تحديث جدول العواجل. تظهر آخر نسخة وصلت من الجسر.</Alert>
     )}
@@ -180,8 +185,6 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
       </Stack>
     ) : result && view === 'urgent' ? (
       <>
-        <UrgentPlayback selected={selected} hasRows={(result.collectionTotal ?? result.total) > 0}
-          onStarted={ids => setSelected(previous => previous.filter(id => !ids.includes(id)))} />
         <UrgentTiming />
         <UrgentTable
           key={result.page}

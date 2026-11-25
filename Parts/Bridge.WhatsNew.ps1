@@ -31,6 +31,8 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.11'; Items = @('Play Selected requires specific urgent rows. The Telegram review describes how those selected rows repeat.',
+                        'Find the live urgent and sequence controls at the top of the web urgent section.') },
                 @{ Version = '9.1.10'; Items = @('The newsroom shows the last urgent text from either channel to operators with access to the template, including direct shows without a saved row.') },
                 @{ Version = '9.1.9'; Items = @('The urgent board shows the live layer and Hide and Exit controls above the table, including for an individual manually displayed row.') },
                 @{ Version = '9.1.8'; Items = @('Saved urgent rows refresh across Telegram and the web. Open a template to see and reuse its last displayed text.',
@@ -407,6 +409,8 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.11'; Items = @('يتطلب تشغيل المحدد اختيار صفوف بعينها. توضح مراجعة البوت أن التكرار يخص الصفوف المحددة.',
+                        'تظهر أدوات التحكم بالعاجل المعروض وبالدورة أعلى قسم العواجل في الويب.') },
                 @{ Version = '9.1.10'; Items = @('تعرض إدارة العواجل آخر نص عُرض من الويب أو البوت حتى لو لم يُحفظ في الجدول، للمشغّلين الذين يملكون صلاحية القالب.') },
                 @{ Version = '9.1.9'; Items = @('تابع العاجل المعروض ورقم طبقته من شريط أعلى الجدول، وأخفه أو أرسل أمر الخروج بعد المراجعة حتى عند عرض صف واحد يدويًا.') },
                 @{ Version = '9.1.8'; Items = @('تتحدث صفوف العواجل بعد الحفظ بين البوت والويب. افتح القالب في الويب لقراءة آخر نص معروض واستخدامه مجددًا.',

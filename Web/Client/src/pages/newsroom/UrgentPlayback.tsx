@@ -43,13 +43,15 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
       })
       if (!data) {
         const code = errorCode(refusal, response)
-        setError(refusal?.message || messageFor(code))
+        setError(code === 'urgent_stale' && body.action.endsWith('-selected')
+          ? 'تغيّر تحديد العواجل. اختر الصفوف وراجعها من جديد.'
+          : refusal?.message || messageFor(code))
         if (code === 'urgent_stale') setReview(null)
-      } else if (body.action === 'preview' && data.preview) {
+      } else if ((body.action === 'preview' || body.action === 'preview-selected') && data.preview) {
         setReview({ plan: data.preview, selected: body.selectedIds ?? [], mode: body.mode ?? null })
         return
       } else {
-        if (body.action === 'start' && data.run && body.selectedIds?.length) onStarted(body.selectedIds)
+        if (body.action === 'start-selected' && data.run && body.selectedIds?.length) onStarted(body.selectedIds)
         setReview(null)
       }
       await status.refetch()
@@ -113,7 +115,7 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
                 تشغيل الكل
               </Button>
               <Button variant="default" disabled={!status.isSuccess || busy || !hasRows || !selected.length}
-                onClick={() => void send({ action: 'preview', selectedIds: [...selected], mode: mode || null })}>
+                onClick={() => void send({ action: 'preview-selected', selectedIds: [...selected], mode: mode || null })}>
                 تشغيل المحدد{selected.length > 0 && ` (${format.format(selected.length)})`}
               </Button>
             </Group>
@@ -171,7 +173,7 @@ export function UrgentPlayback({ selected, hasRows = true, onStarted }: { select
             <Group justify="flex-end">
               <Button variant="default" disabled={busy} onClick={closeReview}>العودة</Button>
               <Button color="red" loading={busy} disabled={!!run || !status.isSuccess}
-                onClick={() => void send({ action: 'start', review: review.plan.review, selectedIds: review.selected, mode: review.mode })}>
+                onClick={() => void send({ action: review.selected.length ? 'start-selected' : 'start', review: review.plan.review, selectedIds: review.selected, mode: review.mode })}>
                 تشغيل على الهواء
               </Button>
             </Group>

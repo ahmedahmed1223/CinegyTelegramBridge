@@ -10,6 +10,7 @@ import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
 import { isAdmin, useSession } from '../../api/session'
 import { ScheduleHoldControl } from './ScheduleHoldControl'
+import { ScheduleMaterialsPanel, useScheduleMaterials } from './ScheduleMaterialsPanel'
 
 type SchedulePage = Schemas['TemplateSchedulePage']
 type ScheduleItem = Schemas['PendingTemplateSchedule']
@@ -91,49 +92,6 @@ function ScheduleTable({ items, label, onManage, clockValid }: {
         </Table.Tbody>
       </Table>
     </Table.ScrollContainer>
-  )
-}
-
-function useScheduleMaterials(page: number, enabled: boolean) {
-  return useQuery({
-    queryKey: ['schedule-materials', page],
-    enabled, retry: false,
-    queryFn: async ({ signal }) => {
-      const { data, error, response } = await api.GET('/api/schedule/materials', { params: { query: { page } }, signal })
-      if (!data) throw new Error(errorCode(error, response))
-      return data
-    },
-  })
-}
-
-function ScheduleMaterials() {
-  const [page, setPage] = useState(0)
-  const materials = useScheduleMaterials(page, true)
-  const list = materials.data
-  return (
-    <Paper withBorder p="md">
-      <Stack gap="sm">
-        <Group justify="space-between">
-          <Title order={3} size="h4">جدول مواد القناة</Title>
-          <Button variant="subtle" size="compact-sm" loading={materials.isFetching} onClick={() => void materials.refetch()}>تحديث</Button>
-        </Group>
-        {materials.isPending && <Skeleton h={90} aria-label="جارٍ تحميل المواد" />}
-        {materials.error && <Alert color="orange" role="alert">{scheduleMessage(materials.error)}</Alert>}
-        {list && !list.activeKnown && <Text size="sm" c="dimmed">تعذّر معرفة المادة المعروضة الآن.</Text>}
-        {list && list.items.length === 0 && <Text size="sm" c="dimmed">لا توجد مواد في جدول القناة.</Text>}
-        {list && list.items.length > 0 && <Table.ScrollContainer minWidth={460} type="native" tabIndex={0} aria-label="جدول مواد القناة">
-          <Table aria-label="جدول مواد القناة">
-            <Table.Thead><Table.Tr><Table.Th scope="col">المادة</Table.Th><Table.Th scope="col">وقت البداية</Table.Th><Table.Th scope="col">الحالة</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>{list.items.map((item) => <Table.Tr key={item.id}>
-              <Table.Td><bdi dir="auto">{item.name}</bdi></Table.Td>
-              <Table.Td><bdi dir="ltr">{item.stationTime}</bdi></Table.Td>
-              <Table.Td>{item.active ? 'على الهواء' : '—'}</Table.Td>
-            </Table.Tr>)}</Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>}
-        {list && list.pageCount > 1 && <Pagination total={list.pageCount} value={list.page + 1} onChange={(next) => setPage(next - 1)} />}
-      </Stack>
-    </Paper>
   )
 }
 
@@ -416,7 +374,7 @@ export function TemplateSchedulePage() {
         </Group>
       </Group>
       {feedback && <Text size="sm" role="status">{feedback}</Text>}
-      {showMaterials && schedule?.materialsEnabled && <ScheduleMaterials />}
+      {showMaterials && schedule?.materialsEnabled && <ScheduleMaterialsPanel />}
       {schedules.isError && <Alert color="orange" role="alert">
         <Group justify="space-between">
           <Text size="sm">{scheduleMessage(schedules.error)}</Text>

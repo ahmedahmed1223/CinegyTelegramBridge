@@ -43,6 +43,32 @@ function emptySnapshot(freshUntil: number): BridgeStatus {
   }
 }
 
+it('loads the on-air playlist and the station rundown when the air dashboard opens', async () => {
+  const now = Date.now()
+  const get = vi.spyOn(api, 'GET').mockImplementation(async path => ({
+    data: path === '/api/status/programme' ? {
+      checkedAtMs: now, statusAvailable: true, scheduleAvailable: true,
+      current: { listed: true, label: 'المادة الحالية' }, cued: { listed: true, label: 'المادة المجهزة' },
+    } : {
+      items: [{ id: 'material', name: 'برنامج مدرج في الجدول', stationTime: '2026-11-26 19:00 +02:00', durationSeconds: 90, active: true }],
+      page: 0, pageCount: 1, total: 1, activeKnown: true,
+    },
+    response: new Response(),
+  }))
+  try {
+    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: emptySnapshot(now + 60_000) }}>
+      <StatusPage />
+    </LiveStatusContext.Provider>)
+    expect(await screen.findByText('المادة الحالية')).toBeVisible()
+    expect(screen.getByText('المادة المجهزة')).toBeVisible()
+    const rundown = await screen.findByRole('table', { name: 'جدول البث' })
+    expect(within(rundown).getByText('برنامج مدرج في الجدول')).toBeVisible()
+    expect(within(rundown).getByText('على الهواء')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'التقاط صورة من البث' })).toBeEnabled()
+    expect(get.mock.calls.map(([path]) => path)).toEqual(expect.arrayContaining(['/api/status/programme', '/api/schedule/materials']))
+  } finally { get.mockRestore() }
+})
+
 it('shows shared template text without overwriting the operator until they choose to reuse it', async () => {
   const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { lastValues: { title: 'النص الذي عُرض' } }, response: new Response() })
   try {

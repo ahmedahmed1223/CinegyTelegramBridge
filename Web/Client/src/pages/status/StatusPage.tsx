@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Badge, Button, Group, NumberInput, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Grid, Group, NumberInput, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconBrandTelegram, IconCpu, IconDeviceTv, IconEyeOff, IconLogout, IconPlugConnected, IconStack2, IconArrowBackUp } from '@tabler/icons-react'
 import { useState, type ReactNode } from 'react'
@@ -8,6 +8,8 @@ import { useNow } from '../../hooks/useNow'
 import { useLiveStatus } from '../../layout/LiveStatusContext'
 import { cinegyLamp, telegramLamp } from '../../lib/lamps'
 import { formatAgo, formatClock, formatDateTime, isFresh } from '../../lib/time'
+import { CapturePanel } from '../live/CapturePanel'
+import { ScheduleMaterialsPanel } from '../schedule/ScheduleMaterialsPanel'
 import { AirOperationsMenu } from './AirOperationsMenu'
 import { LayerComparisonModal } from './LayerComparisonModal'
 import { LayerTile } from './LayerTile'
@@ -33,6 +35,17 @@ export function StatusPage() {
   const live = useLiveStatus()
   const now = useNow()
   const status = live.status
+  const programmeControls = <Grid align="stretch">
+    <Grid.Col span={{ base: 12, md: 8 }}>
+      <ProgrammeNowNextPanel disabled={!live.bridgeOnline} />
+    </Grid.Col>
+    <Grid.Col span={{ base: 12, md: 4 }}>
+      <Paper withBorder radius="md" p="md" component="section" aria-label="التقاط من خرج القناة">
+        <CapturePanel photoOnly />
+      </Paper>
+    </Grid.Col>
+  </Grid>
+  const broadcastSchedule = <ScheduleMaterialsPanel enabled={live.bridgeOnline} autoRefresh title="جدول البث" />
   const layerControls = <Group align="end">
     <NumberInput label="رقم الطبقة" min={1} allowDecimal={false} allowNegative={false} value={layerNumber}
       onChange={value => setLayerNumber(typeof value === 'bigint' ? Number(value) : value)} w={120} />
@@ -50,6 +63,7 @@ export function StatusPage() {
     return (
       <Stack>
         <PageHeader title="لوحة الهواء" />
+        {programmeControls}
         {layerControls}
         {removal && <LayerRemovalModal {...removal} onClose={() => setRemoval(null)} />}
         {live.stream !== 'connecting' && !live.bridgeOnline ? (
@@ -63,6 +77,7 @@ export function StatusPage() {
             <Skeleton h={112} radius="md" />
           </SimpleGrid>
         )}
+        {broadcastSchedule}
       </Stack>
     )
   }
@@ -97,7 +112,7 @@ export function StatusPage() {
 
   return (
     <Stack gap="xl">
-      <PageHeader title="لوحة الهواء" description="تابع الطبقات المعروضة وحالة محرك البث."
+      <PageHeader title="لوحة الهواء" description="تابع ما يُبث الآن، جدول القناة والطبقات المعروضة."
         actions={
           <Group gap="sm">
             <AirOperationsMenu disabled={!live.bridgeOnline} onCopyStatus={() => void copyStatus()} />
@@ -108,7 +123,7 @@ export function StatusPage() {
             <Button component={Link} to="/live" variant="default" leftSection={<IconDeviceTv size={18} />}>البث المباشر</Button>
           </Group>
         } />
-      <ProgrammeNowNextPanel disabled={!live.bridgeOnline} />
+      {programmeControls}
       {comparisonOpen && <LayerComparisonModal onClose={() => setComparisonOpen(false)} />}
       {rollbackOpen && <LayerRollbackModal onClose={() => setRollbackOpen(false)} />}
       {editingLayer !== null && <LayerTextModal layer={editingLayer} onClose={() => setEditingLayer(null)} />}
@@ -121,6 +136,41 @@ export function StatusPage() {
         </Alert>
       )}
 
+      <Stack gap="sm">
+        <Group justify="space-between">
+          <Group gap="xs">
+            <Title order={2}>الطبقات على الهواء</Title>
+            {(fresh || layers.length > 0) && (
+              <Badge variant={layers.length > 0 ? 'filled' : 'default'} color="red" radius="sm" className="cgb-mono">
+                {layers.length}
+              </Badge>
+            )}
+          </Group>
+          {!fresh && layers.length > 0 && (
+            <Badge color="yellow" variant="light">
+              قراءة غير مؤكَّدة
+            </Badge>
+          )}
+        </Group>
+        {layerControls}
+        {layers.length === 0 ? (
+          <Paper p="xl" radius="lg" ta="center">
+            <Text fw={600}>{fresh ? 'لا شيء على الهواء' : 'حالة الطبقات غير مؤكَّدة'}</Text>
+            <Text size="sm" c="dimmed" mt={4}>
+              {fresh ? 'المحرك لا يعرض أي قالب من الجسر الآن.' : 'لا قراءة مؤكَّدة بعد، فلا يُجزم بأن الطبقات فارغة.'}
+            </Text>
+          </Paper>
+        ) : (
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+            {layers.map((layer) => (
+              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh}
+                onEditText={() => setEditingLayer(layer.layer)} onTimer={() => setTimedLayer(layer.layer)}
+                onRemove={(operation) => setRemoval({ layer: layer.layer, operation, expectedTemplateKey: layer.key })} />
+            ))}
+          </SimpleGrid>
+        )}
+      </Stack>
+      {broadcastSchedule}
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <SummaryCard
           icon={<IconCpu size={20} />}
@@ -161,41 +211,6 @@ export function StatusPage() {
           }
         />
       </SimpleGrid>
-
-      <Stack gap="sm">
-        <Group justify="space-between">
-          <Group gap="xs">
-            <Title order={2}>الطبقات على الهواء</Title>
-            {(fresh || layers.length > 0) && (
-              <Badge variant={layers.length > 0 ? 'filled' : 'default'} color="red" radius="sm" className="cgb-mono">
-                {layers.length}
-              </Badge>
-            )}
-          </Group>
-          {!fresh && layers.length > 0 && (
-            <Badge color="yellow" variant="light">
-              قراءة غير مؤكَّدة
-            </Badge>
-          )}
-        </Group>
-        {layerControls}
-        {layers.length === 0 ? (
-          <Paper p="xl" radius="lg" ta="center">
-            <Text fw={600}>{fresh ? 'لا شيء على الهواء' : 'حالة الطبقات غير مؤكَّدة'}</Text>
-            <Text size="sm" c="dimmed" mt={4}>
-              {fresh ? 'المحرك لا يعرض أي قالب من الجسر الآن.' : 'لا قراءة مؤكَّدة بعد، فلا يُجزم بأن الطبقات فارغة.'}
-            </Text>
-          </Paper>
-        ) : (
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-            {layers.map((layer) => (
-              <LayerTile key={layer.layer} layer={layer} now={now} fresh={fresh}
-                onEditText={() => setEditingLayer(layer.layer)} onTimer={() => setTimedLayer(layer.layer)}
-                onRemove={(operation) => setRemoval({ layer: layer.layer, operation, expectedTemplateKey: layer.key })} />
-            ))}
-          </SimpleGrid>
-        )}
-      </Stack>
     </Stack>
   )
 }

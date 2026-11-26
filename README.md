@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.17
+
+Air Control loads the current and cued programmes and the paginated broadcast schedule when it opens. It refreshes while visible and offers a broadcast photo capture alongside the programme status.
+
 ## Version 9.1.16
 
 Bulletin recovery retries unavailable layer reads and checks the confirmed scene identity before resuming or requesting exit. An unconfirmed exit keeps the run available for operator follow-up.

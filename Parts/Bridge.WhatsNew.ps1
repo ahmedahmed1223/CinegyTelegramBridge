@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.17'; Items = @('Air Control automatically loads the current and cued programmes and the broadcast schedule. Capture a photo of the broadcast from the same page.') },
                 @{ Version = '9.1.16'; Items = @('After a restart, the bridge retries an unavailable bulletin scene reading. It resumes the confirmed scene or requests exit if the run is overdue.') },
                 @{ Version = '9.1.15'; Items = @('The app is now named Graphics Management. Each browser tab shows its page name, a red alert appears when the bridge or the engine stops answering, and the status lamps stay visible on phones. Appearance follows the system light or dark setting by default.') },
                 @{ Version = '9.1.14'; Items = @('The web bulletin desk shows the current and next headlines. Broadcast photo capture is available in the bulletin library and editor even while idle.') },
@@ -414,6 +415,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.17'; Items = @('تُحمّل لوحة الهواء المادة الحالية والتالية وجدول البث تلقائيًا. يمكنك التقاط صورة من البث من الصفحة نفسها.') },
                 @{ Version = '9.1.16'; Items = @('يعيد الجسر التحقق من مشهد الموجز إذا تعذّرت قراءته بعد إعادة التشغيل. عند تأكيد الهوية يستأنف الموجز أو يطلب إخراجه إذا تجاوز موعد النهاية.') },
                 @{ Version = '9.1.15'; Items = @('صار اسم التطبيق «إدارة الجرافيك» في الويب ونافذة المدير. يحمل كل تبويب اسم صفحته، ويظهر شريط أحمر عند انقطاع الجسر أو المحرك، وتبقى لمبات الحالة ظاهرة على الجوال. يتبع المظهر إعداد النظام الفاتح أو الداكن افتراضيًا.') },
                 @{ Version = '9.1.14'; Items = @('تعرض لوحة الموجز في الويب الخبر الحالي والتالي، ويمكن التقاط صورة من البث من المكتبة أو المحرر حتى عند عدم وجود عرض نشط.') },

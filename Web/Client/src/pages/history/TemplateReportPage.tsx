@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Button, Group, Pagination, Paper, SegmentedControl, Select, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -99,30 +100,29 @@ export function TemplateReportPage() {
             ))}
           </SimpleGrid>
           {!data.items.length ? <Text c="dimmed">لا توجد عمليات عرض في هذه الفترة.</Text> : (
-            <Table.ScrollContainer minWidth={760}>
-              <Table striped>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>القالب</Table.Th><Table.Th>الطبقة</Table.Th><Table.Th>المشغّل</Table.Th>
-                    <Table.Th>البدء بتوقيت المحطة</Table.Th><Table.Th>النهاية بتوقيت المحطة</Table.Th>
-                    <Table.Th>المدة</Table.Th><Table.Th>سبب النهاية</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {data.items.map((run, index) => (
-                    <Table.Tr key={`${data.page}-${index}`}>
-                      <Table.Td><bdi>{run.name || '—'}</bdi></Table.Td>
-                      <Table.Td>{count.format(run.layer)}</Table.Td>
-                      <Table.Td><bdi>{run.operatorName || '—'}</bdi></Table.Td>
-                      <Table.Td><bdi dir="ltr">{run.started || '—'}</bdi></Table.Td>
-                      <Table.Td>{run.ended ? <bdi dir="ltr">{run.ended}</bdi> : 'بلا نهاية مسجّلة'}</Table.Td>
-                      <Table.Td>{run.duration || '—'}</Table.Td>
-                      <Table.Td>{run.endedBy || '—'}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Table.ScrollContainer>
+            <AdjustableTable layoutKey="template-report" label="تقرير عرض القوالب" striped columns={[
+              { id: 'template', label: 'القالب', width: 140 },
+              { id: 'layer', label: 'الطبقة', width: 92 },
+              { id: 'operator', label: 'المشغّل', width: 126 },
+              { id: 'start', label: 'البدء بتوقيت المحطة', width: 175 },
+              { id: 'end', label: 'النهاية بتوقيت المحطة', width: 175 },
+              { id: 'duration', label: 'المدة', width: 95 },
+              { id: 'reason', label: 'سبب النهاية', width: 140 },
+            ]}>
+              <Table.Tbody>
+                {data.items.map((run, index) => (
+                  <AdjustableRow key={`${data.page}-${index}`}>
+                    <Table.Td><bdi>{run.name || '—'}</bdi></Table.Td>
+                    <Table.Td>{count.format(run.layer)}</Table.Td>
+                    <Table.Td><bdi>{run.operatorName || '—'}</bdi></Table.Td>
+                    <Table.Td><bdi dir="ltr">{run.started || '—'}</bdi></Table.Td>
+                    <Table.Td>{run.ended ? <bdi dir="ltr">{run.ended}</bdi> : 'بلا نهاية مسجّلة'}</Table.Td>
+                    <Table.Td>{run.duration || '—'}</Table.Td>
+                    <Table.Td>{run.endedBy || '—'}</Table.Td>
+                  </AdjustableRow>
+                ))}
+              </Table.Tbody>
+            </AdjustableTable>
           )}
           {data.pageCount > 1 && <Pagination total={data.pageCount} value={data.page + 1} onChange={(value) => setPage(value - 1)} />}
         </>

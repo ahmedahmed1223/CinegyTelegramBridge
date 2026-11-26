@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Button, Group, Paper, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { HandoverAcknowledgementPanel } from './HandoverAcknowledgementPanel'
@@ -70,17 +71,19 @@ function Handover({ report }: { report: Schemas['ShiftHandoverReport'] }) {
         ['العمليات المتعذّرة', report.failureCount], ['العمليات المرفوضة', report.blockedCount],
       ]} />
       {report.shows.length > 0 && (
-        <Table.ScrollContainer minWidth={620}>
-          <Table striped>
-            <Table.Thead><Table.Tr><Table.Th>القالب</Table.Th><Table.Th>مرات العرض</Table.Th><Table.Th>آخر ظهور بتوقيت المحطة</Table.Th><Table.Th>المشغّلون</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>
-              {report.shows.map((item, index) => (
-                <Table.Tr key={index}><Table.Td><bdi>{item.name || '—'}</bdi></Table.Td><Table.Td>{number.format(item.count)}</Table.Td>
-                  <Table.Td><bdi dir="ltr">{item.last}</bdi></Table.Td><Table.Td><bdi>{item.operators || '—'}</bdi></Table.Td></Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+        <AdjustableTable layoutKey="handover-report" label="تقرير ظهور القوالب" striped columns={[
+          { id: 'template', label: 'القالب', width: 155 },
+          { id: 'count', label: 'مرات العرض', width: 120 },
+          { id: 'last', label: 'آخر ظهور بتوقيت المحطة', width: 196 },
+          { id: 'operators', label: 'المشغّلون', width: 160 },
+        ]}>
+          <Table.Tbody>
+            {report.shows.map((item, index) => (
+              <AdjustableRow key={index}><Table.Td><bdi>{item.name || '—'}</bdi></Table.Td><Table.Td>{number.format(item.count)}</Table.Td>
+                <Table.Td><bdi dir="ltr">{item.last}</bdi></Table.Td><Table.Td><bdi>{item.operators || '—'}</bdi></Table.Td></AdjustableRow>
+            ))}
+          </Table.Tbody>
+        </AdjustableTable>
       )}
       {report.hiddenGroups > 0 && <Text size="sm" c="dimmed">قوالب إضافية {number.format(report.hiddenGroups)}</Text>}
       {report.lastRemoval && <Text>آخر إزالة <bdi dir="ltr">{report.lastRemoval}</bdi></Text>}

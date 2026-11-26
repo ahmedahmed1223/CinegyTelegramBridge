@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import {
   ActionIcon, Alert, Badge, Button, Group, NativeSelect, Pagination, Paper, Skeleton,
   Stack, Table, Text, Textarea, TextInput, Title, Tooltip,
@@ -246,18 +247,19 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
 
   function editRow(rank?: number, key = 'draft') {
     if (!board || !draft) return null
-    return <Table.Tr key={key}>
+    return <AdjustableRow key={key}>
       <Table.Td>{rank === undefined ? 'جديد' : number.format(rank)}</Table.Td>
-      {board.fields.map(({ name, label }, index) => <Table.Td key={name} className={classes.urgentCell}>
+      {board.fields.map(({ name, label }, index) => <Table.Td key={name}>
         <Textarea aria-label={label} dir="rtl" minRows={2} autosize maxRows={5} maxLength={board.maxFieldLength}
           autoFocus={index === 0} disabled={write.isPending} value={draft.values[name] ?? ''}
           onChange={(event) => setDraft({ ...draft, values: { ...draft.values, [name]: event.currentTarget.value } })} />
       </Table.Td>)}
-      <Table.Td colSpan={2}><Group gap="xs" wrap="nowrap">
+      <Table.Td />
+      <Table.Td><Group gap="xs" wrap="nowrap">
         <Button type="submit" loading={write.isPending} disabled={busy || (!draft.rowId && !Object.values(draft.values).some((value) => value.trim()))}>حفظ الصف</Button>
         <Button type="button" variant="subtle" disabled={write.isPending} onClick={() => { setDraft(null); write.reset() }}>إلغاء</Button>
       </Group></Table.Td>
-    </Table.Tr>
+    </AdjustableRow>
   }
 
   return <Stack gap="md">
@@ -340,49 +342,46 @@ function ProgrammeBoard({ id, onBack }: { id: string; onBack: () => void }) {
           if (!draft || busy) return
           write.mutate({ action: draft.rowId ? 'update' : 'add', id, page, revision: draft.revision, rowId: draft.rowId, values: draft.values })
         }}>
-          <Table.ScrollContainer minWidth={Math.max(490, board.fields.length * 165 + 225)} type="native" tabIndex={0} aria-label="جدول محتوى البرنامج">
-            <Table verticalSpacing="sm">
-              <Table.Thead><Table.Tr>
-                <Table.Th scope="col">الصف</Table.Th>
-                {board.fields.map(({ name, label }) => <Table.Th key={name} scope="col" className={classes.urgentCell}>{label}</Table.Th>)}
-                <Table.Th scope="col">الحالة</Table.Th>
-                <Table.Th scope="col">الإجراءات</Table.Th>
-              </Table.Tr></Table.Thead>
-              <Table.Tbody>
-                {draft && !draft.rowId && editRow()}
-                {board.rows.map((row) => draft?.rowId === row.id ? editRow(row.number, row.id) : <Table.Tr key={row.id}>
-                  <Table.Td><Stack gap={4} align="start">
-                    <Text size="sm">{number.format(row.number)}</Text>
-                    {board.liveRowId === row.id ? <Badge color="red" variant="light" size="xs">على الهواء</Badge>
-                      : <Button size="compact-xs" variant="light" leftSection={<IconPlayerPlay size={13} />}
-                        aria-label={`مراجعة عرض الصف ${number.format(row.number)}`}
-                        disabled={blocked || !row.enabled || !board.fields.length} onClick={() => {
-                          setAirNotice(null)
-                          setAir({ action: 'show', rowId: row.id, revision: board.revision })
-                        }}>عرض</Button>}
-                  </Stack></Table.Td>
-                  {board.fields.map(({ name }) => <Table.Td key={name} className={classes.urgentCell}>
-                    <Text size="sm" dir="rtl" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{row.values[name] || '—'}</Text>
-                  </Table.Td>)}
-                  <Table.Td><Button variant="subtle" size="compact-xs" color={row.enabled ? 'teal' : 'gray'} disabled={blocked}
-                    aria-label={`${row.enabled ? 'تعطيل' : 'تفعيل'} الصف ${number.format(row.number)}`}
-                    onClick={() => changeRow(row.enabled ? 'disable' : 'enable', row)}>{row.enabled ? 'مفعّل' : 'معطّل'}</Button></Table.Td>
-                  <Table.Td><Group gap={4} wrap="nowrap">
-                    <Tooltip label="رفع الصف"><ActionIcon variant="subtle" aria-label={`رفع الصف ${number.format(row.number)}`}
-                      disabled={blocked || row.number === 1} onClick={() => changeRow('up', row)}><IconArrowUp size={16} /></ActionIcon></Tooltip>
-                    <Tooltip label="خفض الصف"><ActionIcon variant="subtle" aria-label={`خفض الصف ${number.format(row.number)}`}
-                      disabled={blocked || row.number === (board.collectionTotal ?? board.total)} onClick={() => changeRow('down', row)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
-                    {board.canEdit && <>
-                      <Tooltip label="تحرير الصف"><ActionIcon variant="subtle" aria-label={`تحرير الصف ${number.format(row.number)}`}
-                        disabled={blocked || !board.fields.length} onClick={() => startRow(row)}><IconEdit size={16} /></ActionIcon></Tooltip>
-                      <Tooltip label="حذف الصف"><ActionIcon color="red" variant="subtle" aria-label={`حذف الصف ${number.format(row.number)}`}
-                        disabled={blocked} onClick={() => changeRow('remove', row)}><IconTrash size={16} /></ActionIcon></Tooltip>
-                    </>}
-                  </Group></Table.Td>
-                </Table.Tr>)}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+          <AdjustableTable layoutKey="programme" label="جدول محتوى البرنامج" verticalSpacing="sm" columns={[
+            { id: 'rank', label: 'الصف', width: 102, minWidth: 80 },
+            ...board.fields.map((field) => ({ id: `field:${field.name}`, label: field.label, width: 218, minWidth: 130 })),
+            { id: 'state', label: 'الحالة', width: 120, minWidth: 96 },
+            { id: 'actions', label: 'الإجراءات', width: 219, minWidth: 178 },
+          ]}>
+            <Table.Tbody>
+              {draft && !draft.rowId && editRow()}
+              {board.rows.map((row) => draft?.rowId === row.id ? editRow(row.number, row.id) : <AdjustableRow key={row.id}>
+                <Table.Td><Stack gap={4} align="start">
+                  <Text size="sm">{number.format(row.number)}</Text>
+                  {board.liveRowId === row.id ? <Badge color="red" variant="light" size="xs">على الهواء</Badge>
+                    : <Button size="compact-xs" variant="light" leftSection={<IconPlayerPlay size={13} />}
+                      aria-label={`مراجعة عرض الصف ${number.format(row.number)}`}
+                      disabled={blocked || !row.enabled || !board.fields.length} onClick={() => {
+                        setAirNotice(null)
+                        setAir({ action: 'show', rowId: row.id, revision: board.revision })
+                      }}>عرض</Button>}
+                </Stack></Table.Td>
+                {board.fields.map(({ name }) => <Table.Td key={name}>
+                  <Text size="sm" dir="rtl" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{row.values[name] || '—'}</Text>
+                </Table.Td>)}
+                <Table.Td><Button variant="subtle" size="compact-xs" color={row.enabled ? 'teal' : 'gray'} disabled={blocked}
+                  aria-label={`${row.enabled ? 'تعطيل' : 'تفعيل'} الصف ${number.format(row.number)}`}
+                  onClick={() => changeRow(row.enabled ? 'disable' : 'enable', row)}>{row.enabled ? 'مفعّل' : 'معطّل'}</Button></Table.Td>
+                <Table.Td><Group gap={4} wrap="nowrap">
+                  <Tooltip label="رفع الصف"><ActionIcon variant="subtle" aria-label={`رفع الصف ${number.format(row.number)}`}
+                    disabled={blocked || row.number === 1} onClick={() => changeRow('up', row)}><IconArrowUp size={16} /></ActionIcon></Tooltip>
+                  <Tooltip label="خفض الصف"><ActionIcon variant="subtle" aria-label={`خفض الصف ${number.format(row.number)}`}
+                    disabled={blocked || row.number === (board.collectionTotal ?? board.total)} onClick={() => changeRow('down', row)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
+                  {board.canEdit && <>
+                    <Tooltip label="تحرير الصف"><ActionIcon variant="subtle" aria-label={`تحرير الصف ${number.format(row.number)}`}
+                      disabled={blocked || !board.fields.length} onClick={() => startRow(row)}><IconEdit size={16} /></ActionIcon></Tooltip>
+                    <Tooltip label="حذف الصف"><ActionIcon color="red" variant="subtle" aria-label={`حذف الصف ${number.format(row.number)}`}
+                      disabled={blocked} onClick={() => changeRow('remove', row)}><IconTrash size={16} /></ActionIcon></Tooltip>
+                  </>}
+                </Group></Table.Td>
+              </AdjustableRow>)}
+            </Table.Tbody>
+          </AdjustableTable>
         </form>
       </Paper>}
       {board.pageCount > 1 && <Pagination disabled={blocked} total={board.pageCount} value={board.page + 1} onChange={(next) => setPage(next - 1)} />}

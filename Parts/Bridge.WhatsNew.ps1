@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.19'; Items = @('Drag the edge of a column header to resize it or use the grip to move it in the web broadcast schedule and other main tables. Your browser saves the layout.') },
                 @{ Version = '9.1.18'; Items = @('Bulletin playback records the verified scene identity at start so the bridge can recover it after restarting.') },
                 @{ Version = '9.1.17'; Items = @('Air Control automatically loads the current and cued programmes and the broadcast schedule. Capture a photo of the broadcast from the same page.') },
                 @{ Version = '9.1.16'; Items = @('After a restart, the bridge retries an unavailable bulletin scene reading. It resumes the confirmed scene or requests exit if the run is overdue.') },
@@ -416,6 +417,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.19'; Items = @('في جدول البث والجداول الرئيسية في الويب، اسحب حافة عنوان العمود لتغيير عرضه أو اسحب المقبض لنقله. يحفظ المتصفح التخطيط.') },
                 @{ Version = '9.1.18'; Items = @('يحفظ الجسر هوية مشهد الموجز المؤكدة عند بدء العرض، لتتاح استعادة الدورة بعد إعادة التشغيل.') },
                 @{ Version = '9.1.17'; Items = @('تُحمّل لوحة الهواء المادة الحالية والتالية وجدول البث تلقائيًا. يمكنك التقاط صورة من البث من الصفحة نفسها.') },
                 @{ Version = '9.1.16'; Items = @('يعيد الجسر التحقق من مشهد الموجز إذا تعذّرت قراءته بعد إعادة التشغيل. عند تأكيد الهوية يستأنف الموجز أو يطلب إخراجه إذا تجاوز موعد النهاية.') },

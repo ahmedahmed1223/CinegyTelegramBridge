@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useQuery } from '@tanstack/react-query'
@@ -123,11 +124,11 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
 
   function editorRow(row: Edit) {
     return (
-      <Table.Tr key={row.id ?? 'new'} className={classes.editRow}>
+      <AdjustableRow key={row.id ?? 'new'} className={classes.editRow}>
         <Table.Td />
         <Table.Td>{row.id ? '—' : 'جديد'}</Table.Td>
         {fields.map((field, index) => (
-          <Table.Td key={field.name} className={classes.urgentCell}>
+          <Table.Td key={field.name}>
             <Textarea
               aria-label={field.label}
               dir="rtl"
@@ -152,7 +153,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
             <Button variant="subtle" size="compact-sm" disabled={busy} onClick={() => { setEdit(null); setError('') }}>إلغاء</Button>
           </Group>
         </Table.Td>
-      </Table.Tr>
+      </AdjustableRow>
     )
   }
 
@@ -179,96 +180,88 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
             row: { values: edit.values, enabled: edit.enabled },
           })
         }}>
-          <Table.ScrollContainer minWidth={Math.max(480, 160 * fields.length + 260)} tabIndex={0} aria-label="جدول إدخال العواجل">
-            <Table verticalSpacing="sm" horizontalSpacing="sm" captionSide="top">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th scope="col" w={70}>تحديد</Table.Th>
-                  <Table.Th scope="col" w={55}>الترتيب</Table.Th>
-                  {fields.map((field) => (
-                    <Table.Th key={field.name} scope="col">
-                      {field.label}{field.required && <span aria-label="مطلوب"> *</span>}
-                    </Table.Th>
-                  ))}
-                  <Table.Th scope="col" w={100}>الحالة</Table.Th>
-                  <Table.Th scope="col" w={150}>الإجراءات</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {edit && !edit.id && editorRow(edit)}
-                {board.items.map((item, index) => {
-                  if (edit && edit.id === item.id) return editorRow(edit)
-                  const rank = item.position ?? board.page * 20 + index + 1
-                  const selectionState = item.id && selected.includes(item.id) ? 'selected' : 'ready'
-                  const state = status[item.state === 'on_air' || item.state === 'disabled' ? item.state : selectionState]
-                  const itemId = item.id
-                  const displayed = !!itemId && liveManual?.itemId === itemId
-                  const canShow = !!itemId && item.enabled && !edit && !busy && !searchPending
-                  return (
-                    <Table.Tr key={item.id ?? rank}>
-                      <Table.Td>
-                        {item.id && <Checkbox
-                          aria-label={`تحديد العاجل ${rank}`}
-                          checked={selected.includes(item.id)}
-                          disabled={!item.enabled && !selected.includes(item.id)}
-                          onChange={() => { if (item.id) onToggle(item.id) }}
-                        />}
+          <AdjustableTable layoutKey="urgent" label="جدول إدخال العواجل" verticalSpacing="sm" horizontalSpacing="sm" captionSide="top" columns={[
+            { id: 'select', label: 'تحديد', width: 85, minWidth: 68 },
+            { id: 'rank', label: 'الترتيب', width: 90, minWidth: 74 },
+            ...fields.map((field) => ({ id: `field:${field.name}`, label: field.label, width: 218, minWidth: 130,
+              header: <>{field.label}{field.required && <span aria-label="مطلوب"> *</span>}</> })),
+            { id: 'state', label: 'الحالة', width: 120, minWidth: 106 },
+            { id: 'actions', label: 'الإجراءات', width: 226, minWidth: 198 },
+          ]}>
+            <Table.Tbody>
+              {edit && !edit.id && editorRow(edit)}
+              {board.items.map((item, index) => {
+                if (edit && edit.id === item.id) return editorRow(edit)
+                const rank = item.position ?? board.page * 20 + index + 1
+                const selectionState = item.id && selected.includes(item.id) ? 'selected' : 'ready'
+                const state = status[item.state === 'on_air' || item.state === 'disabled' ? item.state : selectionState]
+                const itemId = item.id
+                const displayed = !!itemId && liveManual?.itemId === itemId
+                const canShow = !!itemId && item.enabled && !edit && !busy && !searchPending
+                return (
+                  <AdjustableRow key={item.id ?? rank}>
+                    <Table.Td>
+                      {item.id && <Checkbox
+                        aria-label={`تحديد العاجل ${rank}`}
+                        checked={selected.includes(item.id)}
+                        disabled={!item.enabled && !selected.includes(item.id)}
+                        onChange={() => { if (item.id) onToggle(item.id) }}
+                      />}
+                    </Table.Td>
+                    <Table.Td className="cgb-mono">{rank}</Table.Td>
+                    {fields.map((field) => (
+                      <Table.Td key={field.name}>
+                        <Text dir="rtl" size="sm" className={classes.headline}>{item.values?.[field.name] || '—'}</Text>
                       </Table.Td>
-                      <Table.Td className="cgb-mono">{rank}</Table.Td>
-                      {fields.map((field) => (
-                        <Table.Td key={field.name} className={classes.urgentCell}>
-                          <Text dir="rtl" size="sm" className={classes.headline}>{item.values?.[field.name] || '—'}</Text>
-                        </Table.Td>
-                      ))}
-                      <Table.Td>{state && <Badge color={state.color} variant="light">{state.label}</Badge>}</Table.Td>
-                      <Table.Td>
-                        <Stack gap={4}>
-                          <Group wrap="nowrap" gap={4} aria-label="إجراءات العرض" role="group">
-                            <Tooltip label="عرض مباشر">
-                              <ActionIcon size={44} variant="light" aria-label={`عرض مباشر للعاجل ${rank}`} disabled={!canShow}
-                                onClick={() => { if (itemId) setManualAction({ itemId, mode: 'direct' }) }}><IconPlayerPlay size={17} /></ActionIcon>
-                            </Tooltip>
-                            <Tooltip label="عرض بمؤقّت">
-                              <ActionIcon size={44} variant="light" aria-label={`عرض العاجل ${rank} بمؤقّت`} disabled={!canShow}
-                                onClick={() => { if (itemId) setManualAction({ itemId, mode: 'timed' }) }}><IconClockPlay size={17} /></ActionIcon>
-                            </Tooltip>
-                          </Group>
-                          <Group gap={4} aria-label="التحكم بالعاجل المعروض على الهواء" role="group">
-                            <Tooltip label="إخفاء العاجل المعروض"><ActionIcon size={44} variant="light" color="red"
-                              aria-label="إخفاء العاجل المعروض" disabled={busy || !urgentLayer}
-                              onClick={() => { if (displayed) confirmHide(); else if (urgentLayer) setRemoval({ layer: urgentLayer, expectedTemplateKey: urgentKey, operation: 'hide' }) }}>
-                              <IconEyeOff size={18} />
-                            </ActionIcon></Tooltip>
-                            <Tooltip label="خروج المعروض (EXIT)"><ActionIcon size={44} variant="light" color="orange"
-                              aria-label="خروج المعروض (EXIT)" disabled={busy || !urgentLayer}
-                              onClick={() => { if (urgentLayer) setRemoval({ layer: urgentLayer, expectedTemplateKey: urgentKey, operation: 'exit' }) }}>
-                              <IconLogout size={18} />
-                            </ActionIcon></Tooltip>
-                          </Group>
-                          <Group wrap="nowrap" gap={4} aria-label="إجراءات التحرير" role="group">
-                            <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy || searchPending} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
-                            <Tooltip label="توقيت الصف في الدورة">
-                              <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
-                                aria-label={`توقيت العاجل ${rank} في الدورة`} disabled={!item.id || !!edit || busy || searchPending}
-                                onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconSettings size={17} /></ActionIcon>
-                            </Tooltip>
-                            <ActionIcon variant="subtle" aria-label={`رفع العاجل ${rank}`} disabled={rank === 1 || !item.id || !!edit || busy} onClick={() => rowAction(item, 'up')}><IconArrowUp size={17} /></ActionIcon>
-                            <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === (board.collectionTotal ?? board.total) || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
-                            <ActionIcon variant="subtle" color="red" aria-label={`حذف العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => rowAction(item, 'remove')}><IconTrash size={17} /></ActionIcon>
-                          </Group>
-                        </Stack>
-                      </Table.Td>
-                    </Table.Tr>
-                  )
-                })}
-                {!board.items.length && !edit && (
-                  <Table.Tr><Table.Td colSpan={fields.length + 4}><Text c="dimmed" ta="center" py="sm">
-                    {filtered ? 'لا توجد عواجل تطابق البحث.' : 'الجدول فارغ. أضف أول عاجل.'}
-                  </Text></Table.Td></Table.Tr>
-                )}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+                    ))}
+                    <Table.Td>{state && <Badge color={state.color} variant="light">{state.label}</Badge>}</Table.Td>
+                    <Table.Td>
+                      <Stack gap={4}>
+                        <Group wrap="nowrap" gap={4} aria-label="إجراءات العرض" role="group">
+                          <Tooltip label="عرض مباشر">
+                            <ActionIcon size={44} variant="light" aria-label={`عرض مباشر للعاجل ${rank}`} disabled={!canShow}
+                              onClick={() => { if (itemId) setManualAction({ itemId, mode: 'direct' }) }}><IconPlayerPlay size={17} /></ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="عرض بمؤقّت">
+                            <ActionIcon size={44} variant="light" aria-label={`عرض العاجل ${rank} بمؤقّت`} disabled={!canShow}
+                              onClick={() => { if (itemId) setManualAction({ itemId, mode: 'timed' }) }}><IconClockPlay size={17} /></ActionIcon>
+                          </Tooltip>
+                        </Group>
+                        <Group gap={4} aria-label="التحكم بالعاجل المعروض على الهواء" role="group">
+                          <Tooltip label="إخفاء العاجل المعروض"><ActionIcon size={44} variant="light" color="red"
+                            aria-label="إخفاء العاجل المعروض" disabled={busy || !urgentLayer}
+                            onClick={() => { if (displayed) confirmHide(); else if (urgentLayer) setRemoval({ layer: urgentLayer, expectedTemplateKey: urgentKey, operation: 'hide' }) }}>
+                            <IconEyeOff size={18} />
+                          </ActionIcon></Tooltip>
+                          <Tooltip label="خروج المعروض (EXIT)"><ActionIcon size={44} variant="light" color="orange"
+                            aria-label="خروج المعروض (EXIT)" disabled={busy || !urgentLayer}
+                            onClick={() => { if (urgentLayer) setRemoval({ layer: urgentLayer, expectedTemplateKey: urgentKey, operation: 'exit' }) }}>
+                            <IconLogout size={18} />
+                          </ActionIcon></Tooltip>
+                        </Group>
+                        <Group wrap="nowrap" gap={4} aria-label="إجراءات التحرير" role="group">
+                          <ActionIcon variant="subtle" aria-label={`تعديل العاجل ${rank}`} disabled={!item.id || !!edit || busy || searchPending} onClick={() => startEdit(item)}><IconEdit size={17} /></ActionIcon>
+                          <Tooltip label="توقيت الصف في الدورة">
+                            <ActionIcon variant={item.timing?.intervalSeconds || item.timing?.repeats || item.timing?.mode ? 'light' : 'subtle'}
+                              aria-label={`توقيت العاجل ${rank} في الدورة`} disabled={!item.id || !!edit || busy || searchPending}
+                              onClick={() => { if (board.revision != null) { setError(''); setTimingEdit({ item, revision: board.revision }) } }}><IconSettings size={17} /></ActionIcon>
+                          </Tooltip>
+                          <ActionIcon variant="subtle" aria-label={`رفع العاجل ${rank}`} disabled={rank === 1 || !item.id || !!edit || busy} onClick={() => rowAction(item, 'up')}><IconArrowUp size={17} /></ActionIcon>
+                          <ActionIcon variant="subtle" aria-label={`خفض العاجل ${rank}`} disabled={rank === (board.collectionTotal ?? board.total) || !item.id || !!edit || busy} onClick={() => rowAction(item, 'down')}><IconArrowDown size={17} /></ActionIcon>
+                          <ActionIcon variant="subtle" color="red" aria-label={`حذف العاجل ${rank}`} disabled={!item.id || !!edit || busy} onClick={() => rowAction(item, 'remove')}><IconTrash size={17} /></ActionIcon>
+                        </Group>
+                      </Stack>
+                    </Table.Td>
+                  </AdjustableRow>
+                )
+              })}
+              {!board.items.length && !edit && (
+                <Table.Tr><Table.Td colSpan={fields.length + 4}><Text c="dimmed" ta="center" py="sm">
+                  {filtered ? 'لا توجد عواجل تطابق البحث.' : 'الجدول فارغ. أضف أول عاجل.'}
+                </Text></Table.Td></Table.Tr>
+              )}
+            </Table.Tbody>
+          </AdjustableTable>
         </form>
       </Paper>
       {timingEdit && <UrgentRowTiming title={timingEdit.item.title} timing={timingEdit.item.timing} busy={busy}

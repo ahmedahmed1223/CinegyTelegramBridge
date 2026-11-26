@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Badge, Button, Group, Pagination, Paper, Skeleton, Stack, Table, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { IconRefresh } from '@tabler/icons-react'
@@ -54,22 +55,21 @@ export function ScheduleMaterialsPanel({ enabled = true, autoRefresh = false, ti
         </Alert>}
         {list && !list.activeKnown && <Text size="sm" c="dimmed">تعذّر تحديد المادة المعروضة الآن.</Text>}
         {list && list.items.length === 0 && <Text size="sm" c="dimmed">لا توجد مواد في جدول القناة.</Text>}
-        {list && list.items.length > 0 && <Table.ScrollContainer minWidth={510} type="native" tabIndex={0} aria-label={title}>
-          <Table highlightOnHover aria-label={title}>
-            <Table.Thead><Table.Tr>
-              <Table.Th scope="col">المادة</Table.Th><Table.Th scope="col">البداية بتوقيت المحطة</Table.Th>
-              <Table.Th scope="col">المدة</Table.Th><Table.Th scope="col">الحالة</Table.Th>
-            </Table.Tr></Table.Thead>
-            <Table.Tbody>{list.items.map((item) => <Table.Tr key={item.id}>
-              <Table.Td><Text size="sm" dir="auto" style={{ overflowWrap: 'anywhere' }}>{item.name}</Text></Table.Td>
-              <Table.Td><bdi dir="ltr">{item.stationTime}</bdi></Table.Td>
-              <Table.Td><bdi dir="ltr">{formatClock(item.durationSeconds * 1000)}</bdi></Table.Td>
-              <Table.Td>{item.active ? <Badge variant="light" color={fresh ? 'red' : 'gray'}>
-                {fresh ? 'على الهواء' : 'عند آخر قراءة'}
-              </Badge> : '—'}</Table.Td>
-            </Table.Tr>)}</Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>}
+        {list && list.items.length > 0 && <AdjustableTable layoutKey="broadcast-schedule" label={title} highlightOnHover columns={[
+          { id: 'name', label: 'المادة', width: 240, minWidth: 130 },
+          { id: 'start', label: 'البداية بتوقيت المحطة', width: 204, minWidth: 120 },
+          { id: 'duration', label: 'المدة', width: 110 },
+          { id: 'state', label: 'الحالة', width: 124 },
+        ]}>
+          <Table.Tbody>{list.items.map((item) => <AdjustableRow key={item.id}>
+            <Table.Td><Text size="sm" dir="auto" style={{ overflowWrap: 'anywhere' }}>{item.name}</Text></Table.Td>
+            <Table.Td><bdi dir="ltr">{item.stationTime}</bdi></Table.Td>
+            <Table.Td><bdi dir="ltr">{formatClock(item.durationSeconds * 1000)}</bdi></Table.Td>
+            <Table.Td>{item.active ? <Badge variant="light" color={fresh ? 'red' : 'gray'}>
+              {fresh ? 'على الهواء' : 'عند آخر قراءة'}
+            </Badge> : '—'}</Table.Td>
+          </AdjustableRow>)}</Table.Tbody>
+        </AdjustableTable>}
         {list && list.pageCount > 1 && <Pagination total={list.pageCount} value={list.page + 1} onChange={(next) => setPage(next - 1)} />}
       </Stack>
     </Paper>

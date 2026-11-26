@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Button, Group, Paper, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core'
 import { useMutation } from '@tanstack/react-query'
 import { api, errorCode } from '../../api/client'
@@ -66,22 +67,21 @@ export function UsageSummaryPanel() {
             <Stack gap="xs">
               <Text fw={600}>القوالب الأكثر عرضًا منذ بدء العدّ</Text>
               {report.templates.length > 0 ? (
-                <Table.ScrollContainer minWidth={320}>
-                  <Table>
-                    <Table.Thead>
-                      <Table.Tr><Table.Th>القالب</Table.Th><Table.Th>مرات العرض</Table.Th><Table.Th>آخر عرض</Table.Th></Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {report.templates.map((item, index) => (
-                        <Table.Tr key={index}>
-                          <Table.Td style={{ overflowWrap: 'anywhere' }}>{item.name || 'اسم القالب محجوب'}</Table.Td>
-                          <Table.Td>{number.format(item.uses)}</Table.Td>
-                          <Table.Td>{item.lastUsedAt != null ? time.format(item.lastUsedAt) : 'غير مسجّل'}</Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </Table.ScrollContainer>
+                <AdjustableTable layoutKey="usage-summary" label="جدول استخدام القوالب" columns={[
+                  { id: 'template', label: 'القالب', width: 142 },
+                  { id: 'count', label: 'مرات العرض', width: 125 },
+                  { id: 'last', label: 'آخر عرض', width: 162 },
+                ]}>
+                  <Table.Tbody>
+                    {report.templates.map((item, index) => (
+                      <AdjustableRow key={index}>
+                        <Table.Td style={{ overflowWrap: 'anywhere' }}>{item.name || 'اسم القالب محجوب'}</Table.Td>
+                        <Table.Td>{number.format(item.uses)}</Table.Td>
+                        <Table.Td>{item.lastUsedAt != null ? time.format(item.lastUsedAt) : 'غير مسجّل'}</Table.Td>
+                      </AdjustableRow>
+                    ))}
+                  </Table.Tbody>
+                </AdjustableTable>
               ) : <Text size="sm" c="dimmed">لم يُسجّل استخدام لأي قالب.</Text>}
             </Stack>
           </>

@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import {
   ActionIcon, Alert, Button, Group, Menu, NativeSelect, Pagination, Paper, Select, Skeleton, Stack,
   Table, Text, Textarea, TextInput, Title, Tooltip,
@@ -208,10 +209,10 @@ export function BulletinEditor({ id, onBack, onSaved }: {
 
   function editRow(active: EditRow, rank: number) {
     return (
-      <Table.Tr key={active.row.id} className={classes.editRow}>
+      <AdjustableRow key={active.row.id} className={classes.editRow}>
         <Table.Td>{number.format(rank)}</Table.Td>
         {fields.map((field) => (
-          <Table.Td key={field.name} className={field.kind === 'text' ? classes.urgentCell : undefined}>
+          <Table.Td key={field.name}>
             {field.kind === 'text' ? (
               <Textarea aria-label={field.label} dir="rtl" autosize minRows={2} maxRows={6} maxLength={4096}
                 autoFocus={field === textFields[0]} disabled={busy} value={active.values[field.name] ?? ''}
@@ -223,8 +224,9 @@ export function BulletinEditor({ id, onBack, onSaved }: {
             ) : cell(active.row, field)}
           </Table.Td>
         ))}
-        <Table.Td colSpan={2}><Text size="sm" c="dimmed">قيد التحرير</Text></Table.Td>
-      </Table.Tr>
+        <Table.Td><Text size="sm" c="dimmed">قيد التحرير</Text></Table.Td>
+        <Table.Td />
+      </AdjustableRow>
     )
   }
 
@@ -374,68 +376,61 @@ export function BulletinEditor({ id, onBack, onSaved }: {
                 edit.mutate({ action: 'update', id, revision: rowEdit.revision, page: bulletin.page,
                   rowId: rowEdit.row.id, values: rowEdit.values, imageMode: imageMode || null, imageSourceRowId })
               }}>
-                <Table.ScrollContainer minWidth={Math.max(520, textFields.length * 165 + 265)} type="native" tabIndex={0} aria-label="جدول إدخال الموجز">
-                  <Table verticalSpacing="sm" horizontalSpacing="sm">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th scope="col">الترتيب</Table.Th>
-                        {fields.map((field) => (
-                          <Table.Th scope="col" key={field.name} className={field.kind === 'text' ? classes.urgentCell : undefined}>{field.label}</Table.Th>
-                        ))}
-                        <Table.Th scope="col">الحالة</Table.Th>
-                        <Table.Th scope="col">الإجراءات</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {bulletin.rows.map((row, index) => {
-                        const rank = bulletin.page * 20 + index + 1
-                        return rowEdit?.row.id === row.id ? editRow(rowEdit, rank) : (
-                          <Table.Tr key={row.id}>
-                            <Table.Td>{number.format(rank)}</Table.Td>
-                            {fields.map((field) => {
-                              const canonical = field.name === bulletin.imageField
-                              const canUpload = photoFields.includes(field)
-                              const title = canonical ? `رفع صورة للصف ${number.format(rank)}`
-                                : `رفع صورة إلى ${field.label} للصف ${number.format(rank)}`
-                              return (
-                                <Table.Td key={field.name}>
-                                  {canUpload || canonical ? <Group gap={6} wrap="nowrap">
-                                    {cell(row, field)}
-                                    {canonical && <Tooltip label="اختيار صورة من مجلد المشهد">
-                                      <ActionIcon variant="subtle" aria-label={`اختيار صورة من مجلد المشهد للصف ${number.format(rank)}`} disabled={busy || editing}
-                                        onClick={() => { setSavedNote(''); setSceneImageRow({ rowId: row.id, revision: bulletin.revision }) }}>
-                                        <IconPhoto size={16} />
-                                      </ActionIcon>
-                                    </Tooltip>}
-                                    {canUpload && <Tooltip label={title}>
-                                      <ActionIcon variant="subtle" aria-label={title} disabled={busy || editing}
-                                        onClick={() => { setSavedNote(''); setPhotoRow({ rowId: row.id, field: field.name, title, revision: bulletin.revision }) }}>
-                                        <IconFileUpload size={16} />
-                                      </ActionIcon>
-                                    </Tooltip>}
-                                  </Group> : cell(row, field)}
-                                </Table.Td>
-                              )
-                            })}
-                            <Table.Td>
-                              <Button size="compact-xs" variant="subtle" color={row.skipped ? 'gray' : 'teal'} disabled={busy || editing}
-                                aria-label={row.skipped ? `تضمين الصف ${rank}` : `تجاوز الصف ${rank}`}
-                                onClick={() => rowAction('skip', row, bulletin)}>{row.skipped ? 'مستبعد' : 'مضمّن'}</Button>
-                            </Table.Td>
-                            <Table.Td>
-                              <Group gap={4} wrap="nowrap">
-                                <Tooltip label="تعديل"><ActionIcon variant="subtle" aria-label={`تعديل الصف ${rank}`} disabled={(!textFields.length && !bulletin.imageField) || busy || editing} onClick={() => startRow(row, bulletin.revision)}><IconEdit size={16} /></ActionIcon></Tooltip>
-                                <Tooltip label="رفع"><ActionIcon variant="subtle" aria-label={`رفع الصف ${rank}`} disabled={rank === 1 || busy || editing} onClick={() => rowAction('up', row, bulletin)}><IconArrowUp size={16} /></ActionIcon></Tooltip>
-                                <Tooltip label="خفض"><ActionIcon variant="subtle" aria-label={`خفض الصف ${rank}`} disabled={rank === bulletin.total || busy || editing} onClick={() => rowAction('down', row, bulletin)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
-                                <Tooltip label="حذف"><ActionIcon variant="subtle" color="red" aria-label={`حذف الصف ${rank}`} disabled={busy || editing} onClick={() => rowAction('remove', row, bulletin)}><IconTrash size={16} /></ActionIcon></Tooltip>
-                              </Group>
-                            </Table.Td>
-                          </Table.Tr>
-                        )
-                      })}
-                    </Table.Tbody>
-                  </Table>
-                </Table.ScrollContainer>
+                <AdjustableTable key={bulletin.design} layoutKey={'bulletin:' + bulletin.design} label="جدول إدخال الموجز" verticalSpacing="sm" horizontalSpacing="sm" columns={[
+                  { id: 'rank', label: 'الترتيب', width: 100, minWidth: 82 },
+                  ...fields.map((field) => ({ id: `field:${field.name}`, label: field.label, width: field.kind === 'text' ? 228 : 195, minWidth: field.kind === 'text' ? 130 : 185 })),
+                  { id: 'state', label: 'الحالة', width: 126, minWidth: 100 },
+                  { id: 'actions', label: 'الإجراءات', width: 204, minWidth: 168 },
+                ]}>
+                  <Table.Tbody>
+                    {bulletin.rows.map((row, index) => {
+                      const rank = bulletin.page * 20 + index + 1
+                      return rowEdit?.row.id === row.id ? editRow(rowEdit, rank) : (
+                        <AdjustableRow key={row.id}>
+                          <Table.Td>{number.format(rank)}</Table.Td>
+                          {fields.map((field) => {
+                            const canonical = field.name === bulletin.imageField
+                            const canUpload = photoFields.includes(field)
+                            const title = canonical ? `رفع صورة للصف ${number.format(rank)}`
+                              : `رفع صورة إلى ${field.label} للصف ${number.format(rank)}`
+                            return (
+                              <Table.Td key={field.name}>
+                                {canUpload || canonical ? <Group gap={6} wrap="nowrap">
+                                  {cell(row, field)}
+                                  {canonical && <Tooltip label="اختيار صورة من مجلد المشهد">
+                                    <ActionIcon variant="subtle" aria-label={`اختيار صورة من مجلد المشهد للصف ${number.format(rank)}`} disabled={busy || editing}
+                                      onClick={() => { setSavedNote(''); setSceneImageRow({ rowId: row.id, revision: bulletin.revision }) }}>
+                                      <IconPhoto size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>}
+                                  {canUpload && <Tooltip label={title}>
+                                    <ActionIcon variant="subtle" aria-label={title} disabled={busy || editing}
+                                      onClick={() => { setSavedNote(''); setPhotoRow({ rowId: row.id, field: field.name, title, revision: bulletin.revision }) }}>
+                                      <IconFileUpload size={16} />
+                                    </ActionIcon>
+                                  </Tooltip>}
+                                </Group> : cell(row, field)}
+                              </Table.Td>
+                            )
+                          })}
+                          <Table.Td>
+                            <Button size="compact-xs" variant="subtle" color={row.skipped ? 'gray' : 'teal'} disabled={busy || editing}
+                              aria-label={row.skipped ? `تضمين الصف ${rank}` : `تجاوز الصف ${rank}`}
+                              onClick={() => rowAction('skip', row, bulletin)}>{row.skipped ? 'مستبعد' : 'مضمّن'}</Button>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={4} wrap="nowrap">
+                              <Tooltip label="تعديل"><ActionIcon variant="subtle" aria-label={`تعديل الصف ${rank}`} disabled={(!textFields.length && !bulletin.imageField) || busy || editing} onClick={() => startRow(row, bulletin.revision)}><IconEdit size={16} /></ActionIcon></Tooltip>
+                              <Tooltip label="رفع"><ActionIcon variant="subtle" aria-label={`رفع الصف ${rank}`} disabled={rank === 1 || busy || editing} onClick={() => rowAction('up', row, bulletin)}><IconArrowUp size={16} /></ActionIcon></Tooltip>
+                              <Tooltip label="خفض"><ActionIcon variant="subtle" aria-label={`خفض الصف ${rank}`} disabled={rank === bulletin.total || busy || editing} onClick={() => rowAction('down', row, bulletin)}><IconArrowDown size={16} /></ActionIcon></Tooltip>
+                              <Tooltip label="حذف"><ActionIcon variant="subtle" color="red" aria-label={`حذف الصف ${rank}`} disabled={busy || editing} onClick={() => rowAction('remove', row, bulletin)}><IconTrash size={16} /></ActionIcon></Tooltip>
+                            </Group>
+                          </Table.Td>
+                        </AdjustableRow>
+                      )
+                    })}
+                  </Table.Tbody>
+                </AdjustableTable>
                 {rowEdit && (
                   <Group justify="flex-end" gap="xs" className={classes.bulletinSave}>
                     <Button variant="subtle" disabled={busy} onClick={() => { setRowEdit(null); edit.reset() }}>إلغاء</Button>

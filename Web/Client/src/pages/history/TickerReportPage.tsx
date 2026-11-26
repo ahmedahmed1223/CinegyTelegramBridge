@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Button, Group, Paper, SegmentedControl, Select, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -81,30 +82,30 @@ export function TickerReportPage() {
             <Paper p="md" withBorder><Text c="dimmed" size="sm">أيام بلا نشر</Text><Text fw={600} size="xl">{number.format(data.silentDays)}</Text></Paper>
             <Paper p="md" withBorder><Text c="dimmed" size="sm">آخر نشر بتوقيت المحطة</Text><Text fw={600}><bdi dir="ltr">{data.lastPublishedAt || '—'}</bdi></Text></Paper>
           </SimpleGrid>
-          <Table.ScrollContainer minWidth={890}>
-            <Table striped>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>التاريخ</Table.Th><Table.Th>مرات النشر</Table.Th><Table.Th>الأخبار عند آخر نشر</Table.Th>
-                  <Table.Th>نطاق العدد</Table.Th><Table.Th>تغيّر العدد</Table.Th>
-                  <Table.Th>أول نشر</Table.Th><Table.Th>آخر نشر</Table.Th><Table.Th>المشغّلون</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {data.days.map((day) => (
-                  <Table.Tr key={day.date}>
-                    <Table.Td><bdi dir="ltr">{day.date}</bdi></Table.Td>
-                    <Table.Td>{number.format(day.publishes)}</Table.Td>
-                    <Table.Td>{day.publishes ? number.format(day.items) : '—'}</Table.Td>
-                    <Table.Td><bdi>{day.range}</bdi></Table.Td><Table.Td><bdi>{day.edits}</bdi></Table.Td>
-                    <Table.Td><bdi dir="ltr">{day.first || '—'}</bdi></Table.Td>
-                    <Table.Td><bdi dir="ltr">{day.last || '—'}</bdi></Table.Td>
-                    <Table.Td><bdi>{day.operators || '—'}</bdi></Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+          <AdjustableTable layoutKey="ticker-report" label="تقرير الشريط" striped columns={[
+            { id: 'date', label: 'التاريخ', width: 145 },
+            { id: 'publications', label: 'مرات النشر', width: 118 },
+            { id: 'latest', label: 'الأخبار عند آخر نشر', width: 148 },
+            { id: 'range', label: 'نطاق العدد', width: 118 },
+            { id: 'change', label: 'تغيّر العدد', width: 118 },
+            { id: 'first', label: 'أول نشر', width: 138 },
+            { id: 'last', label: 'آخر نشر', width: 138 },
+            { id: 'operators', label: 'المشغّلون', width: 130 },
+          ]}>
+            <Table.Tbody>
+              {data.days.map((day) => (
+                <AdjustableRow key={day.date}>
+                  <Table.Td><bdi dir="ltr">{day.date}</bdi></Table.Td>
+                  <Table.Td>{number.format(day.publishes)}</Table.Td>
+                  <Table.Td>{day.publishes ? number.format(day.items) : '—'}</Table.Td>
+                  <Table.Td><bdi>{day.range}</bdi></Table.Td><Table.Td><bdi>{day.edits}</bdi></Table.Td>
+                  <Table.Td><bdi dir="ltr">{day.first || '—'}</bdi></Table.Td>
+                  <Table.Td><bdi dir="ltr">{day.last || '—'}</bdi></Table.Td>
+                  <Table.Td><bdi>{day.operators || '—'}</bdi></Table.Td>
+                </AdjustableRow>
+              ))}
+            </Table.Tbody>
+          </AdjustableTable>
         </>
       )}
     </Stack>

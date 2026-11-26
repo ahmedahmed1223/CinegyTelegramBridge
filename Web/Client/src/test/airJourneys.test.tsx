@@ -55,10 +55,11 @@ it('loads the on-air playlist and the station rundown when the air dashboard ope
     },
     response: new Response(),
   }))
+  const dashboard = <LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: emptySnapshot(now + 60_000) }}>
+    <StatusPage />
+  </LiveStatusContext.Provider>
   try {
-    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: emptySnapshot(now + 60_000) }}>
-      <StatusPage />
-    </LiveStatusContext.Provider>)
+    const { unmount } = renderPage(dashboard)
     expect(await screen.findByText('المادة الحالية')).toBeVisible()
     expect(screen.getByText('المادة المجهزة')).toBeVisible()
     const rundown = await screen.findByRole('table', { name: 'جدول البث' })
@@ -66,7 +67,26 @@ it('loads the on-air playlist and the station rundown when the air dashboard ope
     expect(within(rundown).getByText('على الهواء')).toBeVisible()
     expect(screen.getByRole('button', { name: 'التقاط صورة من البث' })).toBeEnabled()
     expect(get.mock.calls.map(([path]) => path)).toEqual(expect.arrayContaining(['/api/status/programme', '/api/schedule/materials']))
-  } finally { get.mockRestore() }
+
+    const move = within(rundown).getByRole('button', { name: 'ترتيب عمود المادة' })
+    const resize = within(rundown).getByRole('button', { name: 'تغيير عرض عمود المادة' })
+    const forward = getComputedStyle(move).direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight'
+    fireEvent.keyDown(resize, { key: forward })
+    fireEvent.keyDown(move, { key: forward })
+    unmount()
+
+    renderPage(dashboard)
+    const reopened = await screen.findByRole('table', { name: 'جدول البث' })
+    expect(within(reopened).getAllByRole('columnheader')[1]).toHaveTextContent('المادة')
+    expect(within(reopened).getAllByRole('cell')[1]).toHaveTextContent('برنامج مدرج في الجدول')
+    expect(reopened.querySelectorAll('col')[1]).toHaveStyle({ width: '256px' })
+    fireEvent.click(screen.getByRole('button', { name: 'إعادة ضبط الأعمدة' }))
+    expect(within(reopened).getAllByRole('columnheader')[0]).toHaveTextContent('المادة')
+    expect(reopened.querySelectorAll('col')[0]).toHaveStyle({ width: '240px' })
+  } finally {
+    localStorage.removeItem('cgb-table-layout:broadcast-schedule')
+    get.mockRestore()
+  }
 })
 
 it('shows shared template text without overwriting the operator until they choose to reuse it', async () => {

@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import {
   Alert, Button, Group, Modal, NumberInput, Pagination, Paper, SegmentedControl,
   Select, SimpleGrid, Skeleton, Stack, Table, Text, Textarea, TextInput, Title,
@@ -55,43 +56,38 @@ function ScheduleTable({ items, label, onManage, clockValid }: {
   clockValid?: boolean
 }) {
   return (
-    <Table.ScrollContainer minWidth={onManage ? 730 : 560} type="native" tabIndex={0} aria-label={label}>
-      <Table verticalSpacing="sm" aria-label={label}>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th scope="col">القالب</Table.Th>
-            <Table.Th scope="col">الطبقة</Table.Th>
-            <Table.Th scope="col">موعد المحطة</Table.Th>
-            <Table.Th scope="col">التكرار</Table.Th>
-            {onManage && <Table.Th scope="col">الإجراءات</Table.Th>}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {items.map((item) => (
-            <Table.Tr key={item.id}>
-              <Table.Td><bdi dir="auto">{item.key}</bdi></Table.Td>
-              <Table.Td className="cgb-mono">{item.layer || '—'}</Table.Td>
-              <Table.Td>
-                <Text size="sm" component="div"><bdi dir="ltr">{item.stationTime}</bdi></Text>
-                <Text size="xs" c="dimmed" component="div"><bdi dir="ltr">{item.stationTimeZone}</bdi></Text>
-                {item.anchorMaterialId && <Text size="xs" c="dimmed">مرتبط بمادة</Text>}
-              </Table.Td>
-              {onManage && <Table.Td>
-                {item.canManage && <Group gap="xs" wrap="nowrap">
-                  <Button size="compact-xs" variant="subtle" disabled={!clockValid} onClick={() => onManage(item, 'edit')}>تعديل الموعد</Button>
-                  <Button size="compact-xs" variant="subtle" disabled={!clockValid} onClick={() => onManage(item, 'copy')}>نسخ</Button>
-                  <Button size="compact-xs" variant="subtle" color="red" onClick={() => onManage(item, 'cancel')}>إلغاء</Button>
-                </Group>}
-              </Table.Td>}
-              <Table.Td>
-                {recurrenceOptions.find((option) => option.value === item.recurrence)?.label ?? item.recurrence}
-                {item.recurrenceUntil && <Text size="xs" c="dimmed">حتى <bdi dir="ltr">{item.recurrenceUntil}</bdi></Text>}
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-    </Table.ScrollContainer>
+    <AdjustableTable layoutKey={onManage ? 'template-schedule:manage' : 'template-schedule:read'} label={label} verticalSpacing="sm" columns={[
+      { id: 'template', label: 'القالب', width: 166 },
+      { id: 'layer', label: 'الطبقة', width: 96 },
+      { id: 'stationTime', label: 'موعد المحطة', width: 183, minWidth: 135 },
+      { id: 'recurrence', label: 'التكرار', width: 145, minWidth: 110 },
+      ...(onManage ? [{ id: 'actions', label: 'الإجراءات', width: 221, minWidth: 195 }] : []),
+    ]}>
+      <Table.Tbody>
+        {items.map((item) => (
+          <AdjustableRow key={item.id}>
+            <Table.Td><bdi dir="auto">{item.key}</bdi></Table.Td>
+            <Table.Td className="cgb-mono">{item.layer || '—'}</Table.Td>
+            <Table.Td>
+              <Text size="sm" component="div"><bdi dir="ltr">{item.stationTime}</bdi></Text>
+              <Text size="xs" c="dimmed" component="div"><bdi dir="ltr">{item.stationTimeZone}</bdi></Text>
+              {item.anchorMaterialId && <Text size="xs" c="dimmed">مرتبط بمادة</Text>}
+            </Table.Td>
+            <Table.Td>
+              {recurrenceOptions.find((option) => option.value === item.recurrence)?.label ?? item.recurrence}
+              {item.recurrenceUntil && <Text size="xs" c="dimmed">حتى <bdi dir="ltr">{item.recurrenceUntil}</bdi></Text>}
+            </Table.Td>
+            {onManage && <Table.Td>
+              {item.canManage && <Group gap="xs" wrap="nowrap">
+                <Button size="compact-xs" variant="subtle" disabled={!clockValid} onClick={() => onManage(item, 'edit')}>تعديل الموعد</Button>
+                <Button size="compact-xs" variant="subtle" disabled={!clockValid} onClick={() => onManage(item, 'copy')}>نسخ</Button>
+                <Button size="compact-xs" variant="subtle" color="red" onClick={() => onManage(item, 'cancel')}>إلغاء</Button>
+              </Group>}
+            </Table.Td>}
+          </AdjustableRow>
+        ))}
+      </Table.Tbody>
+    </AdjustableTable>
   )
 }
 

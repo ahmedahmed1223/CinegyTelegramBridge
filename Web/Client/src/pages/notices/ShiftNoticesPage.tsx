@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Button, Group, Pagination, Paper, Select, Skeleton, Stack, Switch, Table, Text, Title } from '@mantine/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -124,28 +125,28 @@ function TemplateNoticeRules() {
         {error && <Alert color="orange" role="alert">{noticeMessage(error)}</Alert>}
         {data?.items.length === 0 && <Text size="sm" c="dimmed">لا توجد قوالب مسجّلة.</Text>}
         {data && data.items.length > 0 && (
-          <Table.ScrollContainer minWidth={450} type="native" tabIndex={0} aria-label="قواعد تنبيه القوالب">
-            <Table verticalSpacing="xs" aria-label="قواعد تنبيه القوالب">
-              <Table.Thead><Table.Tr><Table.Th scope="col">القالب</Table.Th><Table.Th scope="col">مَن يستقبل التنبيه</Table.Th></Table.Tr></Table.Thead>
-              <Table.Tbody>
-                {data.items.map((item) => (
-                  <Table.Tr key={item.key}>
-                    <Table.Td><bdi dir="auto">{item.key}</bdi></Table.Td>
-                    <Table.Td>
-                      <Select aria-label={`تنبيه قالب ${item.key}`} size="sm" data={scopes} value={item.scope} allowDeselect={false}
-                        disabled={!item.canChange || update.isPending || rules.isFetching}
-                        onChange={(scope) => {
-                          if (!scope || scope === item.scope) return
-                          setSaved(false)
-                          update.mutate({ key: item.key, body: { scope, expectedScope: item.scope, page: data.page } })
-                        }} />
-                      {!item.canChange && <Text size="xs" c="dimmed">اسم القالب غير صالح في قواعد التنبيه.</Text>}
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+          <AdjustableTable layoutKey="shift-notices" label="قواعد تنبيه القوالب" verticalSpacing="xs" columns={[
+            { id: 'template', label: 'القالب', width: 185 },
+            { id: 'recipients', label: 'مَن يستقبل التنبيه', width: 270, minWidth: 240 },
+          ]}>
+            <Table.Tbody>
+              {data.items.map((item) => (
+                <AdjustableRow key={item.key}>
+                  <Table.Td><bdi dir="auto">{item.key}</bdi></Table.Td>
+                  <Table.Td>
+                    <Select aria-label={`تنبيه قالب ${item.key}`} size="sm" data={scopes} value={item.scope} allowDeselect={false}
+                      disabled={!item.canChange || update.isPending || rules.isFetching}
+                      onChange={(scope) => {
+                        if (!scope || scope === item.scope) return
+                        setSaved(false)
+                        update.mutate({ key: item.key, body: { scope, expectedScope: item.scope, page: data.page } })
+                      }} />
+                    {!item.canChange && <Text size="xs" c="dimmed">اسم القالب غير صالح في قواعد التنبيه.</Text>}
+                  </Table.Td>
+                </AdjustableRow>
+              ))}
+            </Table.Tbody>
+          </AdjustableTable>
         )}
         {data && data.pageCount > 1 && <Pagination total={data.pageCount} value={data.page + 1} disabled={update.isPending}
           onChange={(next) => { setSaved(false); update.reset(); setPage(next - 1) }} />}

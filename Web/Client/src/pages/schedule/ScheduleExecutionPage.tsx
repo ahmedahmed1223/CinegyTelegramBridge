@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Button, Group, Pagination, Paper, Select, SimpleGrid, Skeleton, Stack, Table, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router'
@@ -78,33 +79,33 @@ export function ScheduleExecutionPage() {
         <Paper p="md" withBorder>
           <Stack gap="sm">
             {data.items.length === 0 ? <Text size="sm" c="dimmed">لا توجد محاولات تنفيذ مطابقة.</Text> : (
-              <Table.ScrollContainer minWidth={770} type="native" tabIndex={0} aria-label="سجل تنفيذ المواعيد">
-                <Table verticalSpacing="sm" aria-label="سجل تنفيذ المواعيد">
-                  <Table.Thead><Table.Tr>
-                    <Table.Th scope="col">النوع والعنوان</Table.Th><Table.Th scope="col">الموعد</Table.Th>
-                    <Table.Th scope="col">وقت التنفيذ</Table.Th><Table.Th scope="col">التأخير</Table.Th>
-                    <Table.Th scope="col">المحاولة</Table.Th><Table.Th scope="col">النتيجة</Table.Th>
-                  </Table.Tr></Table.Thead>
-                  <Table.Tbody>
-                    {data.items.map((entry, index) => (
-                      <Table.Tr key={`${entry.kind}:${entry.ranAtMs}:${index}`}>
-                        <Table.Td>
-                          <Text fw={600}><bdi dir="auto">{entry.label || kindLabels[entry.kind]}</bdi></Text>
-                          <Text size="xs" c="dimmed">{kindLabels[entry.kind]}{entry.layer > 0 && ` · الطبقة ${entry.layer}`}</Text>
-                        </Table.Td>
-                        <Table.Td><bdi dir="ltr">{entry.dueAtStation || '—'}</bdi></Table.Td>
-                        <Table.Td><bdi dir="ltr">{entry.ranAtStation || '—'}</bdi></Table.Td>
-                        <Table.Td>{entry.delaySeconds === null ? '—' : entry.delaySeconds <= 2 ? 'في الموعد' : `${entry.delaySeconds} ثانية`}</Table.Td>
-                        <Table.Td>{entry.attempt || '—'}</Table.Td>
-                        <Table.Td>
-                          <Text size="sm" fw={600} c={entry.result === 'failed' ? 'red' : undefined}>{resultLabels[entry.result]}</Text>
-                          {entry.reason && <Text size="xs" c="dimmed">{reasonLabels[entry.reason]}</Text>}
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </Table.ScrollContainer>
+              <AdjustableTable layoutKey="schedule-execution" label="سجل تنفيذ المواعيد" verticalSpacing="sm" columns={[
+                { id: 'event', label: 'النوع والعنوان', width: 195 },
+                { id: 'planned', label: 'الموعد', width: 146 },
+                { id: 'executed', label: 'وقت التنفيذ', width: 146 },
+                { id: 'delay', label: 'التأخير', width: 108 },
+                { id: 'attempt', label: 'المحاولة', width: 108 },
+                { id: 'result', label: 'النتيجة', width: 154 },
+              ]}>
+                <Table.Tbody>
+                  {data.items.map((entry, index) => (
+                    <AdjustableRow key={`${entry.kind}:${entry.ranAtMs}:${index}`}>
+                      <Table.Td>
+                        <Text fw={600}><bdi dir="auto">{entry.label || kindLabels[entry.kind]}</bdi></Text>
+                        <Text size="xs" c="dimmed">{kindLabels[entry.kind]}{entry.layer > 0 && ` · الطبقة ${entry.layer}`}</Text>
+                      </Table.Td>
+                      <Table.Td><bdi dir="ltr">{entry.dueAtStation || '—'}</bdi></Table.Td>
+                      <Table.Td><bdi dir="ltr">{entry.ranAtStation || '—'}</bdi></Table.Td>
+                      <Table.Td>{entry.delaySeconds === null ? '—' : entry.delaySeconds <= 2 ? 'في الموعد' : `${entry.delaySeconds} ثانية`}</Table.Td>
+                      <Table.Td>{entry.attempt || '—'}</Table.Td>
+                      <Table.Td>
+                        <Text size="sm" fw={600} c={entry.result === 'failed' ? 'red' : undefined}>{resultLabels[entry.result]}</Text>
+                        {entry.reason && <Text size="xs" c="dimmed">{reasonLabels[entry.reason]}</Text>}
+                      </Table.Td>
+                    </AdjustableRow>
+                  ))}
+                </Table.Tbody>
+              </AdjustableTable>
             )}
             {data.pageCount > 1 && <Pagination total={data.pageCount} value={data.page + 1}
               onChange={(value) => change('page', String(value - 1))}

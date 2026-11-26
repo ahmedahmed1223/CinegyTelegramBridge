@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { ActionIcon, Alert, Badge, Button, Group, Menu, NativeSelect, Paper, SimpleGrid, Skeleton, Stack, Table, Text, TextInput } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { modals } from '@mantine/modals'
@@ -137,76 +138,71 @@ export function AccountsPage() {
             <Button variant="subtle" onClick={() => { setSearch(''); setRole('') }}>مسح البحث والتصفية</Button>
           </Stack>
         ) : (
-          <Table.ScrollContainer minWidth={720} aria-label="جدول حسابات الويب" tabIndex={0}>
-            <Table verticalSpacing="sm" horizontalSpacing="lg" highlightOnHover style={{ whiteSpace: 'nowrap' }}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>الاسم</Table.Th>
-                  <Table.Th>اسم المستخدم</Table.Th>
-                  <Table.Th>النوع</Table.Th>
-                  <Table.Th>الدور</Table.Th>
-                  <Table.Th>آخر دخول</Table.Th>
-                  <Table.Th w={48} />
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {visibleAccounts.map((account) => {
-                  const protectedAccount = (account.role === 'admin' || account.role === 'owner') && !isOwner
-                  const locked = account.lockedUntil && Date.parse(account.lockedUntil) > now
-                  return (
-                    <Table.Tr key={account.username}>
-                      <Table.Td>
-                        <Group gap={6}>
-                          <Text fw={600}>{account.displayName}</Text>
-                          {locked && (
-                            <Badge color="orange" variant="light" leftSection={<IconLock size={12} />}>
-                              مقفل
-                            </Badge>
-                          )}
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" className="cgb-mono" span dir="ltr">
-                          {account.username}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge variant="light" color={account.webOnly ? 'grape' : 'signal'}>
-                          {account.webOnly ? 'ويب فقط' : 'مرتبط بـ Telegram'}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge variant="default">{roleLabel[account.role] ?? account.role}</Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" c="dimmed">
-                          {formatDateTime(account.lastLoginAt)}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Menu position="bottom-end" withinPortal>
-                          <Menu.Target>
-                            <ActionIcon variant="subtle" color="gray" size={36} disabled={deleting} aria-label={`إجراءات ${account.displayName}`}>
-                              <IconDots size={18} />
-                            </ActionIcon>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            {protectedAccount && <Menu.Label>حسابات المشرفين يديرها المالك</Menu.Label>}
-                            <Menu.Item leftSection={<IconKey size={16} />} disabled={protectedAccount} onClick={() => setResetting(account)}>
-                              كلمة مرور جديدة
-                            </Menu.Item>
-                            <Menu.Item color="red" leftSection={<IconTrash size={16} />} disabled={protectedAccount} onClick={() => confirmDelete(account)}>
-                              حذف
-                            </Menu.Item>
-                          </Menu.Dropdown>
-                        </Menu>
-                      </Table.Td>
-                    </Table.Tr>
-                  )
-                })}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+          <AdjustableTable layoutKey="accounts" label="جدول حسابات الويب" verticalSpacing="sm" horizontalSpacing="lg" highlightOnHover columns={[
+            { id: 'name', label: 'الاسم', width: 150 },
+            { id: 'username', label: 'اسم المستخدم', width: 158 },
+            { id: 'kind', label: 'النوع', width: 120 },
+            { id: 'role', label: 'الدور', width: 116 },
+            { id: 'lastLogin', label: 'آخر دخول', width: 160 },
+            { id: 'actions', label: 'الإجراءات', width: 112 },
+          ]}>
+            <Table.Tbody>
+              {visibleAccounts.map((account) => {
+                const protectedAccount = (account.role === 'admin' || account.role === 'owner') && !isOwner
+                const locked = account.lockedUntil && Date.parse(account.lockedUntil) > now
+                return (
+                  <AdjustableRow key={account.username}>
+                    <Table.Td>
+                      <Group gap={6}>
+                        <Text fw={600}>{account.displayName}</Text>
+                        {locked && (
+                          <Badge color="orange" variant="light" leftSection={<IconLock size={12} />}>
+                            مقفل
+                          </Badge>
+                        )}
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" className="cgb-mono" span dir="ltr">
+                        {account.username}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge variant="light" color={account.webOnly ? 'grape' : 'signal'}>
+                        {account.webOnly ? 'ويب فقط' : 'مرتبط بـ Telegram'}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge variant="default">{roleLabel[account.role] ?? account.role}</Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">
+                        {formatDateTime(account.lastLoginAt)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Menu position="bottom-end" withinPortal>
+                        <Menu.Target>
+                          <ActionIcon variant="subtle" color="gray" size={36} disabled={deleting} aria-label={`إجراءات ${account.displayName}`}>
+                            <IconDots size={18} />
+                          </ActionIcon>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          {protectedAccount && <Menu.Label>حسابات المشرفين يديرها المالك</Menu.Label>}
+                          <Menu.Item leftSection={<IconKey size={16} />} disabled={protectedAccount} onClick={() => setResetting(account)}>
+                            كلمة مرور جديدة
+                          </Menu.Item>
+                          <Menu.Item color="red" leftSection={<IconTrash size={16} />} disabled={protectedAccount} onClick={() => confirmDelete(account)}>
+                            حذف
+                          </Menu.Item>
+                        </Menu.Dropdown>
+                      </Menu>
+                    </Table.Td>
+                  </AdjustableRow>
+                )
+              })}
+            </Table.Tbody>
+          </AdjustableTable>
         )}
       </Paper>}
 

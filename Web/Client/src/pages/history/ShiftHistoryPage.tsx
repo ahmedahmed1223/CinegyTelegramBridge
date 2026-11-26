@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import {
   Alert, Button, Group, Menu, Pagination, Paper, SegmentedControl, Select, SimpleGrid, Skeleton, Stack,
   Table, Text, TextInput, Title,
@@ -190,36 +191,35 @@ export function ShiftHistoryPage() {
           {ready && records.isPending && <Skeleton h={110} aria-label="جارٍ تحميل العمليات" />}
           {data?.items.length === 0 && <Text size="sm" c="dimmed">لا توجد سجلات مطابقة.</Text>}
           {data && data.items.length > 0 && (
-            <Table.ScrollContainer minWidth={showOperator ? 800 : 640} type="native" tabIndex={0} aria-label="سجل العمليات">
-              <Table verticalSpacing="sm" aria-label="سجل العمليات">
-                <Table.Thead><Table.Tr>
-                  <Table.Th scope="col">وقت المحطة</Table.Th>
-                  {audit && <Table.Th scope="col">النوع</Table.Th>}
-                  <Table.Th scope="col">العملية</Table.Th><Table.Th scope="col">الهدف</Table.Th>
-                  <Table.Th scope="col">الطبقة</Table.Th><Table.Th scope="col">النتيجة</Table.Th>
-                  {showOperator && <Table.Th scope="col">المشغّل</Table.Th>}
-                  <Table.Th scope="col">المرجع</Table.Th>
-                </Table.Tr></Table.Thead>
-                <Table.Tbody>
-                  {data.items.map((item, index) => (
-                    <Table.Tr key={`${item.reference}:${item.atMs}:${index}`}>
-                      <Table.Td><bdi dir="ltr">{item.stationTime}</bdi></Table.Td>
-                      {audit && <Table.Td>{eventLabels[item.event] ?? item.event}</Table.Td>}
-                      <Table.Td><bdi dir="auto">{item.action || '—'}</bdi></Table.Td>
-                      <Table.Td><bdi dir="auto">{item.target || '—'}</bdi></Table.Td>
-                      <Table.Td>{item.layer || '—'}</Table.Td>
-                      <Table.Td><Text size="sm" c={item.result === 'failed' ? 'red' : item.result === 'blocked' ? 'orange' : undefined}>
-                        {resultLabels[item.result] ?? (item.result || '—')}
-                      </Text></Table.Td>
-                      {showOperator && <Table.Td><bdi dir="auto">{item.operatorName || item.operatorId || '—'}</bdi></Table.Td>}
-                      <Table.Td>{admin && /^[0-9a-f]{8}$/.test(item.reference)
-                        ? <Button variant="subtle" size="compact-xs" onClick={() => setLookupReference(item.reference)}><bdi dir="ltr">{item.reference}</bdi></Button>
-                        : <bdi dir="ltr" className="cgb-mono">{item.reference || '—'}</bdi>}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Table.ScrollContainer>
+            <AdjustableTable layoutKey="shift-history" label="سجل العمليات" verticalSpacing="sm" columns={[
+              { id: 'stationTime', label: 'وقت المحطة', width: 158 },
+              ...(audit ? [{ id: 'kind', label: 'النوع', width: 110 }] : []),
+              { id: 'operation', label: 'العملية', width: 145 },
+              { id: 'target', label: 'الهدف', width: 160 },
+              { id: 'layer', label: 'الطبقة', width: 90 },
+              { id: 'result', label: 'النتيجة', width: 120 },
+              ...(showOperator ? [{ id: 'operator', label: 'المشغّل', width: 145 }] : []),
+              { id: 'reference', label: 'المرجع', width: 125 },
+            ]}>
+              <Table.Tbody>
+                {data.items.map((item, index) => (
+                  <AdjustableRow key={`${item.reference}:${item.atMs}:${index}`}>
+                    <Table.Td><bdi dir="ltr">{item.stationTime}</bdi></Table.Td>
+                    {audit && <Table.Td>{eventLabels[item.event] ?? item.event}</Table.Td>}
+                    <Table.Td><bdi dir="auto">{item.action || '—'}</bdi></Table.Td>
+                    <Table.Td><bdi dir="auto">{item.target || '—'}</bdi></Table.Td>
+                    <Table.Td>{item.layer || '—'}</Table.Td>
+                    <Table.Td><Text size="sm" c={item.result === 'failed' ? 'red' : item.result === 'blocked' ? 'orange' : undefined}>
+                      {resultLabels[item.result] ?? (item.result || '—')}
+                    </Text></Table.Td>
+                    {showOperator && <Table.Td><bdi dir="auto">{item.operatorName || item.operatorId || '—'}</bdi></Table.Td>}
+                    <Table.Td>{admin && /^[0-9a-f]{8}$/.test(item.reference)
+                      ? <Button variant="subtle" size="compact-xs" onClick={() => setLookupReference(item.reference)}><bdi dir="ltr">{item.reference}</bdi></Button>
+                      : <bdi dir="ltr" className="cgb-mono">{item.reference || '—'}</bdi>}</Table.Td>
+                  </AdjustableRow>
+                ))}
+              </Table.Tbody>
+            </AdjustableTable>
           )}
           {data && data.pageCount > 1 && <Pagination total={data.pageCount} value={data.page + 1} onChange={(next) => setPage(next - 1)}
             getControlProps={(control) => ({ 'aria-label': control === 'next' ? 'الصفحة التالية' : 'الصفحة السابقة' })} />}

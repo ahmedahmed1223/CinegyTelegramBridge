@@ -1,3 +1,4 @@
+import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
 import { Alert, Badge, Button, Group, Paper, Skeleton, Stack, Table, Text, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
@@ -64,66 +65,61 @@ export function SessionsPage() {
             <Skeleton h={20} />
           </Stack>
         ) : (
-          <Table.ScrollContainer minWidth={760}>
-            <Table verticalSpacing="sm" horizontalSpacing="lg" highlightOnHover style={{ whiteSpace: 'nowrap' }}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>المستخدم</Table.Th>
-                  <Table.Th>الدخول</Table.Th>
-                  <Table.Th>المتصفح</Table.Th>
-                  <Table.Th>العنوان</Table.Th>
-                  <Table.Th>بدأت</Table.Th>
-                  <Table.Th>آخر نشاط</Table.Th>
-                  <Table.Th />
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {sessions.data?.map((session) => (
-                  <Table.Tr key={session.id}>
-                    <Table.Td>
-                      <Group gap={6}>
-                        <Text fw={600}>{session.name}</Text>
-                        {session.current && (
-                          <Badge size="sm" variant="light">
-                            هذه الجلسة
-                          </Badge>
-                        )}
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={6} wrap="nowrap">
-                        {session.method === 'telegram' ? <IconBrandTelegram size={16} color="var(--mantine-color-signal-6)" /> : <IconKey size={16} />}
-                        <Text size="sm">{session.method === 'telegram' ? 'Telegram' : 'كلمة مرور'}</Text>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Tooltip label={session.agent || '—'} multiline w={320}>
-                        <Text size="sm">{describeAgent(session.agent)}</Text>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" className="cgb-mono" span>
-                        {session.address || '—'}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" c="dimmed">
-                        {formatDateTime(session.createdAt)}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">{formatAgo(now - Date.parse(session.lastSeenAt))}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Button size="compact-sm" variant="subtle" color="red" onClick={() => confirmEnd(session)}>
-                        إنهاء
-                      </Button>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+          <AdjustableTable layoutKey="sessions" label="جدول الجلسات" verticalSpacing="sm" horizontalSpacing="lg" highlightOnHover columns={[
+            { id: 'username', label: 'المستخدم', width: 148 },
+            { id: 'login', label: 'الدخول', width: 117 },
+            { id: 'agent', label: 'المتصفح', width: 166 },
+            { id: 'address', label: 'العنوان', width: 132 },
+            { id: 'started', label: 'بدأت', width: 137 },
+            { id: 'lastActive', label: 'آخر نشاط', width: 137 },
+            { id: 'actions', label: 'الإجراءات', width: 121 },
+          ]}>
+            <Table.Tbody>
+              {sessions.data?.map((session) => (
+                <AdjustableRow key={session.id}>
+                  <Table.Td>
+                    <Group gap={6}>
+                      <Text fw={600}>{session.name}</Text>
+                      {session.current && (
+                        <Badge size="sm" variant="light">
+                          هذه الجلسة
+                        </Badge>
+                      )}
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap={6} wrap="nowrap">
+                      {session.method === 'telegram' ? <IconBrandTelegram size={16} color="var(--mantine-color-signal-6)" /> : <IconKey size={16} />}
+                      <Text size="sm">{session.method === 'telegram' ? 'Telegram' : 'كلمة مرور'}</Text>
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    <Tooltip label={session.agent || '—'} multiline w={320}>
+                      <Text size="sm">{describeAgent(session.agent)}</Text>
+                    </Tooltip>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" className="cgb-mono" span>
+                      {session.address || '—'}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" c="dimmed">
+                      {formatDateTime(session.createdAt)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm">{formatAgo(now - Date.parse(session.lastSeenAt))}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Button size="compact-sm" variant="subtle" color="red" onClick={() => confirmEnd(session)}>
+                      إنهاء
+                    </Button>
+                  </Table.Td>
+                </AdjustableRow>
+              ))}
+            </Table.Tbody>
+          </AdjustableTable>
         )}
       </Paper>
     </Stack>

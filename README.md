@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.19
+
+Resize and reorder columns in the web broadcast schedule and the main newsroom, scheduling, reporting, and administration tables. The browser remembers each layout, and the reset button restores its original column widths and order.
+
 ## Version 9.1.18
 
 Template playout returns the verified Cinegy scene identity so bulletin playback can persist it and prove ownership during restart recovery.

@@ -1,4 +1,4 @@
-function Invoke-WebOperatorHelp {
+﻿function Invoke-WebOperatorHelp {
     param([System.Collections.IDictionary]$Arguments)
 
     $actor = 0L
@@ -37,6 +37,7 @@ function Invoke-WebOperatorHelp {
     # The shared release ledger owns versions and order. A release may mix
     # several audiences in one Bot line, so expose only reviewed Web summaries.
     $publicUpdates = @{
+        '9.1.15' = 'صار اسم التطبيق «إدارة الجرافيك» في الويب ونافذة المدير. يحمل كل تبويب اسم صفحته، ويظهر شريط أحمر عند انقطاع الجسر أو المحرك، وتبقى لمبات الحالة ظاهرة على الجوال، ويتبع المظهر إعداد النظام افتراضيًا.'
         '9.1.14' = 'تابع الخبر الحالي والتالي من لوحة تشغيل الموجز. زر «التقاط صورة من البث» متاح في مكتبة الموجز ومحرره وقسم العواجل سواء كان هناك عرض نشط أم لا.'
         '9.1.13' = 'تابع العاجل الحالي والتالي من لوحة التشغيل أعلى إدارة العواجل، واستخدم «التقاط صورة من البث» لمعاينة خرج القناة وتنزيل الصورة.'
         '9.1.12' = 'تظهر عناوين العواجل المختارة مرة واحدة في المعاينة. افتح «التوقيت والتكرار» إذا أردت مراجعة عدد مرات العرض وترتيبها.'

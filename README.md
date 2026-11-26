@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.16
+
+Bulletin recovery retries unavailable layer reads and checks the confirmed scene identity before resuming or requesting exit. An unconfirmed exit keeps the run available for operator follow-up.
+
 ## Version 9.1.15
 
 The web app and the Manager window are now named Graphics Management (إدارة الجرافيك). Browser tabs carry the page name, a red banner appears when the bridge or the engine stops answering, the three status lamps stay in the header on phones, and the appearance follows the system light or dark setting by default.

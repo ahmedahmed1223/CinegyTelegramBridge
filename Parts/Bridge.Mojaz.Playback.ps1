@@ -905,26 +905,30 @@ function Restore-MojazPlayback {
     # A template key can be reused by a newer run. Both postbox writes and exit
     # must belong to the engine identity confirmed for this saved run, never
     # the unconfirmed client EventId retained when SHOW verification failed.
-    $expectedId = ([string](Get-JsonProp $state 'ActiveId')).Trim().Trim('{', '}')
-    $live = Get-TitlerLayerStatus -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
-        -Layer $layer -TimeoutSec (Get-AirTimeout)
-    $liveId = ([string](Get-JsonProp $live 'ActiveId')).Trim().Trim('{', '}')
-    if (-not [bool](Get-JsonProp $state 'ActiveIdConfirmed') -or
-        -not [bool](Get-JsonProp $live 'Success') -or -not $expectedId -or -not $liveId -or
-        -not $liveId.Equals($expectedId, [StringComparison]::OrdinalIgnoreCase) -or
-        ($reviewedLayer -and (Get-MojazRunSceneStamp -Playback $state) -cne (Get-CinegyLayerReviewStamp -Status $live))) {
-        Write-BridgeLog "Refused to restore bulletin '$name': live scene identity could not be matched." 'WARN'
+    $expectedStamp = Get-MojazRunSceneStamp -Playback $state
+    $observedStamp = ''
+    $probeClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $attempt = 0
+    if ($expectedStamp) {
+        # A missing read at startup used to discard the run before the engine
+        # could answer a second time. A positively identified replacement is final.
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -gt 1) { Start-Sleep -Milliseconds 500 }
+            $observedStamp = Read-MojazLayerStamp -Layer $layer
+            if ($observedStamp) { break }
+            Write-BridgeLog "Bulletin recovery: layer $layer identity unavailable on read $attempt of 3." 'WARN'
+        }
+    }
+    if (-not $expectedStamp -or $observedStamp -cne $expectedStamp) {
+        $reason = if (-not $expectedStamp) { 'saved identity was unconfirmed' }
+            elseif (-not $observedStamp) { 'live identity was unavailable after three reads' }
+            elseif ($observedStamp -eq 'empty') { 'layer is empty' }
+            else { 'layer contains a different scene' }
+        Write-BridgeLog "Refused to restore bulletin '$name' on layer $layer. Reason: $reason." 'WARN'
         Send-AdminBroadcast -Text (T 'mjp.notResumed' $name) | Out-Null
         return $false
     }
-    if (-not $reviewedLayer -and $elapsed -ge $exitAt) {
-        Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; taking it off." 'WARN'
-        # -System: restart recovery, with no operator in the loop at all.
-        Invoke-ExitLayer -Layer $layer -ChatId $chat -UserId $user -System | Out-Null
-        Request-MojazTickerReturn | Out-Null
-        Send-AdminBroadcast -Text (T 'mjp.pastItsTime' $name) | Out-Null
-        return $true
-    }
+    if ($attempt -gt 1) { $elapsed += $probeClock.Elapsed.TotalSeconds }
     $rows = @(Get-JsonProp $state 'Plan')
     $index = @($rows | Where-Object { [double](Get-JsonProp $_ 'AtSeconds') -le $elapsed }).Count - 1
     if ($index -lt 0) { $index = 0 }
@@ -947,7 +951,9 @@ function Restore-MojazPlayback {
         TemplateImage = [string](Get-JsonProp $state 'TemplateImage')
         ActiveId = [string](Get-JsonProp $state 'ActiveId')
         ActiveIdConfirmed = [bool](Get-JsonProp $state 'ActiveIdConfirmed')
-        ReviewedLayer = $reviewedLayer
+        # Recovery established scene ownership on this layer, including for a
+        # scheduled bulletin. Later ticks must recheck it before writing or exiting.
+        ReviewedLayer = $layer
         DesignKey = $designKey
         DesignFields = $designFields
         VariableTypes = Get-JsonProp $state 'VariableTypes'
@@ -958,13 +964,16 @@ function Restore-MojazPlayback {
         StopFailed = [bool](Get-JsonProp $state 'StopFailed')
         FieldsBlocked = [bool](Get-JsonProp $state 'FieldsBlocked')
     }
-    if ($reviewedLayer) {
-        if ($script:MojazPlayback.StopFailed) {
-            $script:MojazPlayback.Clock.Stop()
-            Save-MojazPlaybackState | Out-Null
-            return $true
-        }
-        if ($elapsed -ge $exitAt) { return (Stop-MojazPlayback -Quiet) }
+    if ($script:MojazPlayback.StopFailed) {
+        $script:MojazPlayback.Clock.Stop()
+        Save-MojazPlaybackState | Out-Null
+        return $true
+    }
+    if ($elapsed -ge $exitAt) {
+        Write-BridgeLog "A bulletin ('$name') was still on air after a restart and past its end; requesting exit on layer $layer." 'WARN'
+        $ended = Stop-MojazPlayback -Quiet -ExpectedLayerStamp $expectedStamp
+        if ($ended) { Send-AdminBroadcast -Text (T 'mjp.pastItsTime' $name) | Out-Null }
+        return $ended
     }
     if ($designFields.Count -and -not (Test-MojazAlternateFieldIsolation -Layer $layer -Fields $designFields)) {
         Set-MojazPlaybackStopFailed -Playback $script:MojazPlayback -FieldsBlocked | Out-Null
@@ -976,7 +985,7 @@ function Restore-MojazPlayback {
         -Values $currentValues -Types ($types ?? @{}) -TimeoutSec (Get-AirTimeout)
     if (-not $resumeResult.Success) {
         Write-BridgeLog "Could not restore bulletin '$name' row $($index + 1): $($resumeResult.Error)" 'WARN'
-        $script:MojazPlayback = $null
+        Stop-MojazPlayback -Quiet -ExpectedLayerStamp $expectedStamp | Out-Null
         return $false
     }
     Save-MojazPlaybackState | Out-Null

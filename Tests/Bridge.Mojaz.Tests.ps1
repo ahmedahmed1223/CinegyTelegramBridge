@@ -1818,6 +1818,7 @@ Describe 'Reading the bulletin back before it goes out' {
 
 Describe 'A bulletin that was on air when the bridge restarted' {
     BeforeEach {
+        Mock Start-Sleep {}
         Mock Write-BridgeLog { }
         Mock Send-AdminBroadcast { $true }
         Mock Invoke-ExitLayer { $true }
@@ -1875,6 +1876,56 @@ Describe 'A bulletin that was on air when the bridge restarted' {
         $script:MojazPlayback.ClockOffset | Should -Be 50
         Should -Invoke Send-PostboxValues -Times 1 -Exactly
         Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+    }
+
+    It 'retries an unreadable startup layer then resumes the same bulletin or ends it when overdue' -ForEach @(
+        @{ Elapsed = 50; Ended = $false }
+        @{ Elapsed = 500; Ended = $true }
+    ) {
+        $now = [datetime]'2026-01-02T12:00:00Z'
+        Write-TestPlaybackState -StartedAt $now.AddSeconds(-$Elapsed)
+        $script:MojazRecoveryReads = 0
+        Mock Get-TitlerLayerStatus {
+            $script:MojazRecoveryReads++
+            if ($script:MojazRecoveryReads -eq 1) { return @{ Success = $false } }
+            if ($script:MojazRecoveryReads -eq 2) { return @{ Success = $true; IsOnAir = $true; ActiveId = '' } }
+            return @{ Success = $true; IsOnAir = $true; ActiveId = '{RESTORED}' }
+        }
+
+        Restore-MojazPlayback -Now $now | Should -BeTrue
+        Should -Invoke Get-TitlerLayerStatus -Times 3 -Exactly
+        if ($Ended) {
+            Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:restored' }
+            Should -Invoke Send-PostboxValues -Times 0 -Exactly
+            $script:MojazPlayback | Should -BeNullOrEmpty
+        } else {
+            Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+            Should -Invoke Send-PostboxValues -Times 1 -Exactly -ParameterFilter { $Values['title.Text'] -eq 'عنوان 3' }
+            $script:MojazPlayback.ReviewedLayer | Should -Be 5
+        }
+    }
+
+    It 'retains the overdue run for manual control if its guarded exit fails' {
+        $now = [datetime]'2026-01-02T12:00:00Z'
+        Write-TestPlaybackState -StartedAt $now.AddSeconds(-500)
+        Mock Invoke-ExitLayer { $false }
+        Mock Send-TelegramMessage {}
+
+        Restore-MojazPlayback -Now $now | Should -BeFalse
+        $script:MojazPlayback.StopFailed | Should -BeTrue
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:restored' }
+        Should -Invoke Request-MojazTickerReturn -Times 0 -Exactly
+        Test-Path -LiteralPath (Get-MojazPlaybackFile) | Should -BeTrue
+    }
+
+    It 'ends the confirmed scene if its current row cannot be recovered' {
+        $now = [datetime]'2026-01-02T12:00:00Z'
+        Write-TestPlaybackState -StartedAt $now.AddSeconds(-50)
+        Mock Send-PostboxValues { @{ Success = $false; Error = 'simulated write failure' } }
+
+        Restore-MojazPlayback -Now $now | Should -BeFalse
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly -ParameterFilter { $ExpectedLayerStamp -eq 'active:restored' }
+        $script:MojazPlayback | Should -BeNullOrEmpty
     }
 
     It 'picks the run up at the row the clock says, not at the first' {

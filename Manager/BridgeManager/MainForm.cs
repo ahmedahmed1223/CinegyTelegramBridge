@@ -266,7 +266,7 @@ public sealed class MainForm : Form
         // Stamped from TelegramBridge.ps1's $script:BridgeVersion at publish
         // time by scripts/Build-BridgeManager.ps1 (-p:Version=...); a plain
         // `dotnet build` without that script falls back to .NET's default "1.0.0.0".
-        Text = $"مدير جسر تيليجرام - Cinegy Air Pro (v{Application.ProductVersion})";
+        Text = $"إدارة الجرافيك - Cinegy Air Pro (v{Application.ProductVersion})";
         AutoScaleDimensions = new SizeF(96f, 96f);
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(1000, 650);
@@ -675,7 +675,7 @@ public sealed class MainForm : Form
         _trayIcon = new NotifyIcon
         {
             Icon = _appIcon,
-            Text = "مدير جسر تيليجرام - متوقف",
+            Text = "إدارة الجرافيك - متوقف",
             Visible = true
         };
         var trayMenu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes };
@@ -1579,7 +1579,7 @@ public sealed class MainForm : Form
 
         if (ShouldNotifyUnexpectedExit(_stoppingIntentionally, localRestart, _autoRestartCheck.Checked, _exiting))
         {
-            _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+            _trayIcon.ShowBalloonTip(10000, "إدارة الجرافيك",
                 "توقف الجسر وإعادة التشغيل التلقائي معطّلة - لن يعود وحده. افتح النافذة وشغّله يدويًا.",
                 ToolTipIcon.Warning);
         }
@@ -1622,7 +1622,7 @@ public sealed class MainForm : Form
             AppendLine($"--- توقف {_consecutiveQuickFailures} مرات متتالية خلال ثوانٍ من كل تشغيل - تم إيقاف إعادة التشغيل التلقائي. راجع الإعدادات ثم اضغط تشغيل يدويًا. ---");
             LogEvent($"توقف متكرر ({_consecutiveQuickFailures} مرات) - تم إيقاف إعادة التشغيل التلقائي.");
             SetHeader("فشل متكرر", Theme.Stopped, "توقف الجسر مرارًا خلال ثوانٍ من كل تشغيل - إعادة التشغيل التلقائي متوقفة.");
-            _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+            _trayIcon.ShowBalloonTip(10000, "إدارة الجرافيك",
                 "الجسر يتوقف بشكل متكرر بعد كل تشغيل. تم إيقاف إعادة التشغيل التلقائي - راجع الإعدادات ثم شغّله يدويًا.",
                 ToolTipIcon.Error);
             return;
@@ -1761,7 +1761,7 @@ public sealed class MainForm : Form
 
         var silentFor = (int)(now - _lastLivenessSeen!.Value).TotalMinutes;
         AppendLine($"--- الجسر يعمل لكنه توقف عن النبض منذ {silentFor} دقيقة - يُعاد تشغيله. ---");
-        _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+        _trayIcon.ShowBalloonTip(10000, "إدارة الجرافيك",
             $"الجسر معلّق (لا استجابة منذ {silentFor} دقيقة). تتم إعادة تشغيله الآن.", ToolTipIcon.Warning);
         _lastLivenessSeen = null;
         RestartBridge($"كشف تعليق: لا نبضة منذ {silentFor} دقيقة - إعادة تشغيل تلقائية.");
@@ -1976,7 +1976,7 @@ public sealed class MainForm : Form
         _stopButton.Visible = running;
         _restartButton.Enabled = running && _managedRestartLedger?.IsStalled != true;
         _restartButton.Visible = running;
-        _trayIcon.Text = running ? "مدير جسر تيليجرام - يعمل" : "مدير جسر تيليجرام - متوقف";
+        _trayIcon.Text = running ? "إدارة الجرافيك - يعمل" : "إدارة الجرافيك - متوقف";
         UpdateStatusBar();
     }
 
@@ -2049,7 +2049,7 @@ public sealed class MainForm : Form
         SetStatus(running);
         LogEvent(message);
         if (!_exiting)
-            _trayIcon.ShowBalloonTip(10000, "مدير جسر تيليجرام",
+            _trayIcon.ShowBalloonTip(10000, "إدارة الجرافيك",
                 "تحقّق من حالة الجسر وأوقفه أو شغّله محليًا من المدير عند الحاجة.", ToolTipIcon.Warning);
     }
 

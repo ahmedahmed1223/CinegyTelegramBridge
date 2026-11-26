@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.15
+
+The web app and the Manager window are now named Graphics Management (إدارة الجرافيك). Browser tabs carry the page name, a red banner appears when the bridge or the engine stops answering, the three status lamps stay in the header on phones, and the appearance follows the system light or dark setting by default.
+
 ## Version 9.1.14
 
 The bulletin desk shows the current and next headlines from the running plan. The bulletin library and editor offer broadcast photo capture even when no bulletin is on air.

@@ -1,8 +1,8 @@
-import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
+import { Affix, Alert, AppShell, Badge, Burger, Group, NavLink, ScrollArea, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBell, IconBroadcast, IconHelpCircle, IconSpeakerphone, IconCalendarTime, IconDevices, IconDeviceTv, IconHistory, IconLayoutGrid, IconNews, IconSettings, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
+import { IconAlertTriangle, IconBell, IconBroadcast, IconHelpCircle, IconSpeakerphone, IconCalendarTime, IconDevices, IconDeviceTv, IconHistory, IconLayoutGrid, IconNews, IconSettings, IconUserCheck, IconUsersGroup } from '@tabler/icons-react'
 import { NavLink as RouterLink, Outlet, useLocation } from 'react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { isAdmin, useSession } from '../api/session'
 import { useNow } from '../hooks/useNow'
 import { useStatusStream } from '../hooks/useStatusStream'
@@ -47,6 +47,15 @@ export function Shell() {
   const livePage = currentPath === '/live'
   const admin = isAdmin(session.data)
   const status = live.status
+  const bridge = bridgeLamp(live)
+  const engine = cinegyLamp(status, now)
+  // The two failures that make the page untrustworthy get a banner, not just a dot.
+  const outage = bridge.state === 'down' ? bridge.detail : engine.state === 'down' ? `المحرك: ${engine.detail}` : null
+
+  useEffect(() => {
+    const here = navigation.find((item) => item.to === currentPath) ?? sections[2].links.find((item) => item.to === currentPath)
+    document.title = here ? `${here.label} — إدارة الجرافيك` : 'إدارة الجرافيك'
+  }, [currentPath])
 
   return (
     <LiveStatusContext.Provider value={live}>
@@ -63,7 +72,7 @@ export function Shell() {
               <div className={classes.mark} aria-hidden><IconBroadcast size={20} stroke={1.8} /></div>
               <Stack gap={0}>
                 <Text fw={700} lh={1.2}>
-                  غرفة تحكّم Cinegy
+                  إدارة الجرافيك
                 </Text>
                 {status && (
                   <Text size="xs" c="dimmed" className="cgb-mono">
@@ -73,7 +82,7 @@ export function Shell() {
               </Stack>
             </Group>
             <Group gap="xs" wrap="nowrap">
-              <Group gap="xs" visibleFrom="md" wrap="nowrap">
+              <Group gap={6} wrap="nowrap" role="group" aria-label="حالة النظام">
                 <SignalLamp label="الجسر" {...bridgeLamp(live)} />
                 <SignalLamp label="المحرك" {...cinegyLamp(status, now)} />
                 <SignalLamp label="Telegram" {...telegramLamp(status)} />
@@ -109,11 +118,6 @@ export function Shell() {
             </Stack>
           </AppShell.Section>
           <AppShell.Section className={classes.navFooter}>
-            <Group gap="xs" hiddenFrom="md" mb="sm" wrap="wrap">
-              <SignalLamp label="الجسر" {...bridgeLamp(live)} />
-              <SignalLamp label="المحرك" {...cinegyLamp(status, now)} />
-              <SignalLamp label="Telegram" {...telegramLamp(status)} />
-            </Group>
             {status && (
               <Badge variant="default" radius="sm" fw={500} className="cgb-mono">
                 v{status.version}
@@ -123,6 +127,13 @@ export function Shell() {
         </AppShell.Navbar>
 
         <AppShell.Main id="bridge-main" tabIndex={-1} className={classes.main} data-watch-workspace={!livePage && watching || undefined}>
+          {outage && (
+            <Affix position={{ top: 76, left: 16, right: 16 }} zIndex={150}>
+              <Alert color="red" variant="filled" icon={<IconAlertTriangle size={18} />} role="alert" title="لا تعتمد على هذه الشاشة للهواء">
+                {outage}
+              </Alert>
+            </Affix>
+          )}
           {(livePage || watching) && <LivePage active={livePage} watching={watching} onWatchingChange={setWatching} />}
           {!livePage && <div className={classes.route}><Outlet /></div>}
         </AppShell.Main>

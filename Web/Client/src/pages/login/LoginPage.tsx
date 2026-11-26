@@ -22,7 +22,7 @@ export function LoginPage() {
       <aside className={classes.brand}>
         <div className={classes.brandMark}><IconBroadcast size={25} stroke={1.7} aria-hidden /> Cinegy</div>
         <div className={classes.brandText}>
-          <Text className={classes.brandTitle}>غرفة التحكّم</Text>
+          <Text className={classes.brandTitle}>إدارة الجرافيك</Text>
           <Text className={classes.brandLead}>الرسوم على الهواء، تحرير الأخبار، ومراقبة البث.</Text>
         </div>
       </aside>
@@ -31,7 +31,7 @@ export function LoginPage() {
         <Paper className={classes.card} p={{ base: 'lg', sm: 32 }} radius="xl">
           <Stack gap="lg">
             <div>
-              <Text size="sm" fw={700} color="signal" hiddenFrom="md">غرفة تحكّم Cinegy</Text>
+              <Text size="sm" fw={700} color="signal" hiddenFrom="md">إدارة الجرافيك</Text>
               <Title order={1} size="h2">تسجيل الدخول</Title>
               <Text c="dimmed" size="sm" mt={4}>
                 بحسابك في البوت، أو بكلمة مرور أعطاك إياها المشرف.

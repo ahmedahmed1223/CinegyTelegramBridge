@@ -1001,6 +1001,10 @@ function Invoke-ShowTemplateResult {
             -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity `
             -CaptureUrgentEvent:($ManualUrgent -or $script:UrgentBoardStarting) -AllowAnonymousActiveId
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
+        # Playback saves the engine identity from this result so it can prove
+        # scene ownership even after the bridge process has restarted.
+        Set-JsonProp $result 'ActiveId' $activeId
+        Set-JsonProp $result 'ActiveIdConfirmed' $activeIdConfirmed
         Set-JsonProp $result 'EngineStartedAtUtc' (Get-JsonProp $identity 'StartedAt')
         # Callers that later remove a specific job need exact event proof.
         # Leave the general engine correlation intact for timers and monitoring.

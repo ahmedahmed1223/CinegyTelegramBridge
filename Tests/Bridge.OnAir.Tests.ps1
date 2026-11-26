@@ -417,7 +417,9 @@ Describe 'SHOW identity tracking' {
             }
         }
 
-        Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+        $show = Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+        (Get-JsonProp $show 'ActiveId') | Should -Be '{ENGINE-GUID}'
+        (Get-JsonProp $show 'ActiveIdConfirmed') | Should -BeTrue
 
         $script:AutoHideQueue.Count | Should -Be 1
         $script:AutoHideQueue[0].Layer | Should -Be 4

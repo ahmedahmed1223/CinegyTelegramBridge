@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.18'; Items = @('Bulletin playback records the verified scene identity at start so the bridge can recover it after restarting.') },
                 @{ Version = '9.1.17'; Items = @('Air Control automatically loads the current and cued programmes and the broadcast schedule. Capture a photo of the broadcast from the same page.') },
                 @{ Version = '9.1.16'; Items = @('After a restart, the bridge retries an unavailable bulletin scene reading. It resumes the confirmed scene or requests exit if the run is overdue.') },
                 @{ Version = '9.1.15'; Items = @('The app is now named Graphics Management. Each browser tab shows its page name, a red alert appears when the bridge or the engine stops answering, and the status lamps stay visible on phones. Appearance follows the system light or dark setting by default.') },
@@ -415,6 +416,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.18'; Items = @('يحفظ الجسر هوية مشهد الموجز المؤكدة عند بدء العرض، لتتاح استعادة الدورة بعد إعادة التشغيل.') },
                 @{ Version = '9.1.17'; Items = @('تُحمّل لوحة الهواء المادة الحالية والتالية وجدول البث تلقائيًا. يمكنك التقاط صورة من البث من الصفحة نفسها.') },
                 @{ Version = '9.1.16'; Items = @('يعيد الجسر التحقق من مشهد الموجز إذا تعذّرت قراءته بعد إعادة التشغيل. عند تأكيد الهوية يستأنف الموجز أو يطلب إخراجه إذا تجاوز موعد النهاية.') },
                 @{ Version = '9.1.15'; Items = @('صار اسم التطبيق «إدارة الجرافيك» في الويب ونافذة المدير. يحمل كل تبويب اسم صفحته، ويظهر شريط أحمر عند انقطاع الجسر أو المحرك، وتبقى لمبات الحالة ظاهرة على الجوال. يتبع المظهر إعداد النظام الفاتح أو الداكن افتراضيًا.') },

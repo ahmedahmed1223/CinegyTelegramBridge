@@ -21112,6 +21112,11 @@
             "type": "string",
             "default": null,
             "nullable": true
+          },
+          "noticeHeadline": {
+            "type": "string",
+            "default": null,
+            "nullable": true
           }
         }
       },

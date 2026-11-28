@@ -33,7 +33,7 @@ it('shows successive air operations once across reloads', async () => {
 
 it('notifies once for an actor-approved confirmed event and ignores a marker without their notice', async () => {
   vi.mocked(api.GET)
-    .mockResolvedValueOnce({ data: { noticeId: 'first' }, response: new Response() })
+    .mockResolvedValueOnce({ data: { noticeId: 'first', noticeHeadline: 'عنوان العاجل المؤكد' }, response: new Response() })
     .mockResolvedValueOnce({ data: { noticeId: '' }, response: new Response() })
   const client = new QueryClient()
   const view = (noticeId: string | null) => <MantineProvider><QueryClientProvider client={client}><MemoryRouter>
@@ -42,6 +42,9 @@ it('notifies once for an actor-approved confirmed event and ignores a marker wit
   const component = render(view('first'))
   await waitFor(() => expect(notifications.show).toHaveBeenCalledTimes(1))
   expect(vi.mocked(notifications.show)).toHaveBeenCalledWith(expect.objectContaining({ id: 'urgent-123:first' }))
+  const shown = vi.mocked(notifications.show).mock.calls[0][0]
+  const message = render(<MantineProvider>{shown.message}</MantineProvider>)
+  expect(message.getByText('عنوان العاجل المؤكد')).toBeVisible()
   component.rerender(view(null))
   component.rerender(view('first'))
   component.rerender(view('second'))

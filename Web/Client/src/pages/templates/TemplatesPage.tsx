@@ -20,6 +20,8 @@ import { getTemplates, type TemplateDto } from '../../api/air'
 import { messageFor } from '../../api/messages'
 import { isAdmin, useSession } from '../../api/session'
 import { PageHeader } from '../../components/PageHeader'
+import { useLiveStatus } from '../../layout/LiveStatusContext'
+import { LiveLayerActions } from '../status/LiveLayerActions'
 import { ShowModal } from './ShowModal'
 import { TemplateIssues } from './TemplateIssues'
 import { TemplateBackups } from './TemplateBackups'
@@ -33,6 +35,7 @@ import { TemplateMaxAirEditor } from './TemplateMaxAirEditor'
 import { TemplateRerun, type TemplateRerunKind } from './TemplateRerun'
 
 export function TemplatesPage() {
+  const live = useLiveStatus()
   const [search, setSearch] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDto | null>(null)
   const [trialTemplate, setTrialTemplate] = useState<TemplateDto | null>(null)
@@ -200,7 +203,13 @@ export function TemplatesPage() {
                   </Group>
                 </Stack>
 
-                <Group gap="xs" grow>
+                  {live.status?.layers.some(layer => layer.layer === template.layer && layer.key === template.key) && (
+                    <Stack gap={4}>
+                      <Text size="xs" fw={600}>التحكم بالعرض الحالي</Text>
+                      <LiveLayerActions layer={template.layer} templateKey={template.key} urgent={template.key.toLowerCase() === 'urgent'} />
+                    </Stack>
+                  )}
+                  <Group gap="xs" grow>
                   <Button variant="light" leftSection={<IconPlayerPlay size={16} />} disabled={template.disabled}
                     onClick={() => setSelectedTemplate(template)}>تجهيز للعرض</Button>
                   {canRehearse && <Button variant="default" leftSection={<IconFlask size={16} />}

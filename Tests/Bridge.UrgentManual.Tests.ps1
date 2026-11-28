@@ -28,6 +28,87 @@ Describe 'Full urgent reader and manual single story' {
         }
         Mock Get-TemplateNoticeAudience { @() }
     }
+    It 'copies only a confirmed template-list urgent into the shared board and keeps it out of Play All' {
+        $key = $script:MojazUrgentKey
+        $script:UrgentBoard = New-UrgentBoard
+        $script:TemplateUrgentFixture = @{ Key = $key; Layer = 7; Fields = @('Text', 'Kicker', 'Detail') }
+        Mock Get-TemplateStore { @{ Map = @{ $script:MojazUrgentKey = $script:TemplateUrgentFixture } } }
+        Mock Get-UrgentTemplate { $script:TemplateUrgentFixture }
+        Mock Test-Authorized { $true }
+        Mock Test-UrgentBoardAvailable { $true }
+        Mock Get-TemplateAccessLevel { 'all' }
+        Mock Get-TemplateNotifyScope { 'all' }
+        Mock Get-WebTemplateFields {
+            @{ name = 'Text'; required = $true; sensitive = $false; maxLength = 200 }
+            @{ name = 'Kicker'; required = $false; sensitive = $false; maxLength = 200 }
+            @{ name = 'Detail'; required = $false; sensitive = $false; maxLength = 200 }
+        }
+        Mock Invoke-ShowTemplateResult { @{ Success = $true; ActiveIdConfirmed = $false } }
+        $request = @{ actor = 101L; key = $key; variables = @{ Text = 'خبر اليوم'; Kicker = 'عنوان ثانٍ'; Detail = 'تفاصيل' } }
+        (Invoke-WebAirShow -Arguments $request).ok | Should -BeTrue
+        @($script:UrgentBoard.Items).Count | Should -Be 0
+        Get-UrgentWebNoticeId | Should -BeNullOrEmpty
+
+        Mock Invoke-ShowTemplateResult {
+            $script:OnAir[7] = @{ Key = $Key; At = Get-Date; ActiveId = 'fixture' }
+            $script:LastWebTemplateText[$Key] = @{ Values = $Variables }
+            @{ Success = $true; ActiveIdConfirmed = $true }
+        }
+        try {
+            (Invoke-WebAirShow -Arguments $request).ok | Should -BeTrue
+            @($script:UrgentBoard.Items).Count | Should -Be 1
+            $row = $script:UrgentBoard.Items[0]
+            $row.Enabled | Should -BeFalse
+            (Get-UrgentItemVariables -Item $row).Detail | Should -Be 'تفاصيل'
+            Get-UrgentCurrentItemId -ReadOnly | Should -BeExactly $row.Id
+            (Invoke-WebUrgentManual -Arguments @{ actor = 102L; action = 'status' }).data.noticeHeadline | Should -Be 'خبر اليوم'
+            (Invoke-WebUrgentManual -Arguments @{ actor = 101L; action = 'status' }).data.noticeHeadline | Should -BeNullOrEmpty
+        }
+        finally { $script:LastWebTemplateText.Remove($key) }
+    }
+    It 'reviews and corrects a standalone urgent, while a sequence retains control of its own layer' {
+        $key = $script:MojazUrgentKey
+        $script:LiveCorrectionFixture = @{ Key = $key; Layer = 7; Path = 'C:\test\urgent.cin'; PresetRevision = 'registry' }
+        $script:OnAir[7] = @{ Key = $key; Source = 'bridge' }
+        $script:LastSuccessfulLayerShows[7] = @{
+            Key = $key; ActiveId = 'fixture'; EngineStartedAtTicks = 777L; TemplateRevision = 'registry'
+            EventIdentityConfirmed = $true; DevicePath = 'gfx_7'; Variables = @{ Text = 'قبل' }
+        }
+        $script:LastWebTemplateText[$key] = @{ Values = @{ Text = 'قبل' }; Path = $script:LiveCorrectionFixture.Path; Layer = 7 }
+        Mock Get-TemplateStore { @{ Map = @{ $script:MojazUrgentKey = $script:LiveCorrectionFixture } } }
+        Mock Test-Authorized { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = 'gfx_7' } }
+        Mock Get-TemplatePresetRegistryRevision { 'registry' }
+        Mock Test-WebRollbackLocalScene { $true }
+        Mock Get-WebAirTextField { @{ name = 'Text'; label = 'الخبر'; required = $true; maxLength = 200; type = 'Text' } }
+        Mock Get-WebLayerStatus { @{ Success = $true } }
+        Mock Get-CinegyLayerReviewStamp { 'active:fixture' }
+        Mock Get-CinegyStatusStartTicks { 777L }
+        Mock Test-ProgrammeBoardPostboxScope { $true }
+        Mock Invoke-SetValues { $true }
+        try {
+            (Invoke-WebAirText -Arguments @{ actor = 101L; layer = 7; action = 'inspect' }).ok | Should -BeTrue
+            $update = @{ actor = 101L; layer = 7; action = 'preview'; values = @{ Text = 'بعد التصحيح' } }
+            $review = (Invoke-WebAirText -Arguments $update).data.plan.review
+            $review | Should -Not -BeNullOrEmpty
+            Should -Invoke Invoke-SetValues -Times 0 -Exactly
+            $update.action = 'apply'
+            $update.review = $review
+            (Invoke-WebAirText -Arguments $update).ok | Should -BeTrue
+            Should -Invoke Invoke-SetValues -Times 1 -Exactly -ParameterFilter { $Values.Text -eq 'بعد التصحيح' }
+            $script:LastWebTemplateText[$key].Values.Text | Should -Be 'بعد التصحيح'
+            $script:UrgentBoardRun = @{ Layer = 7 }
+            (Invoke-WebAirText -Arguments @{ actor = 101L; layer = 7; action = 'inspect' }).error | Should -Be 'live_text_managed'
+        }
+        finally {
+            $script:UrgentBoardRun = $null
+            $script:LastSuccessfulLayerShows.Remove(7)
+            $script:LastWebTemplateText.Remove($key)
+        }
+    }
     It 'opens a paged full reader with navigation and no air commands' {
         $item = $script:UrgentBoard.Items[0]
         $item.Text = ('< & تفاصيل ' * 600)

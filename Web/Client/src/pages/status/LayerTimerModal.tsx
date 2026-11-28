@@ -31,12 +31,17 @@ function timerError(error: Error) {
   return timerErrors[error.message] ?? messageFor(error.message)
 }
 
-export function LayerTimerModal({ layer, onClose }: { layer: number; onClose: () => void }) {
+export function LayerTimerModal({ layer, expectedTemplateKey, onClose }: {
+  layer: number
+  expectedTemplateKey?: string
+  onClose: () => void
+}) {
   const result = useQuery({
-    queryKey: ['air-layer-timer', layer],
+    queryKey: ['air-layer-timer', layer, expectedTemplateKey],
     queryFn: async ({ signal }) => {
       const result = await timerRequest(layer, { action: 'inspect' }, signal)
       if (!result.plan) throw new Error('live_timer_unverified')
+      if (expectedTemplateKey && result.plan.templateKey !== expectedTemplateKey) throw new Error('live_timer_stale')
       return result.plan
     },
     gcTime: 0, retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
@@ -64,7 +69,7 @@ function TimerEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => v
   const preview = useMutation({
     mutationFn: async (change: Change) => {
       const result = (await timerRequest(plan.layer, { action: 'preview', ...change })).plan
-      if (!result?.review || !result.proposedHideAt) throw new Error('live_timer_stale')
+      if (!result?.review || !result.proposedHideAt || result.templateKey !== plan.templateKey) throw new Error('live_timer_stale')
       return { plan: result, token: result.review, change }
     },
     onSuccess: setReview,

@@ -1,6 +1,6 @@
 import { Alert, Button, Checkbox, Group, Modal, Skeleton, Stack, Table, Text, Textarea } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { api, errorCode, type Schemas } from '../../api/client'
 import { messageFor } from '../../api/messages'
@@ -32,12 +32,17 @@ async function requestText(layer: number, command: Pick<Command, 'action'> & Par
   return data
 }
 
-export function LayerTextModal({ layer, onClose }: { layer: number; onClose: () => void }) {
+export function LayerTextModal({ layer, expectedTemplateKey, onClose }: {
+  layer: number
+  expectedTemplateKey?: string
+  onClose: () => void
+}) {
   const inspection = useQuery({
-    queryKey: ['air-live-text', layer],
+    queryKey: ['air-live-text', layer, expectedTemplateKey],
     queryFn: async ({ signal }) => {
       const result = await requestText(layer, { action: 'inspect' }, signal)
       if (!result.plan) throw new Error('live_text_unverified')
+      if (expectedTemplateKey && result.plan.templateKey !== expectedTemplateKey) throw new Error('live_text_stale')
       return result.plan
     },
     gcTime: 0,
@@ -66,13 +71,14 @@ export function LayerTextModal({ layer, onClose }: { layer: number; onClose: () 
 }
 
 function LayerTextEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => void; onReload: () => void }) {
+  const client = useQueryClient()
   const [selected, setSelected] = useState<string[]>([])
   const [values, setValues] = useState<Record<string, string>>({})
   const [review, setReview] = useState<Review | null>(null)
   const preview = useMutation({
     mutationFn: async (patch: Record<string, string>) => {
       const result = (await requestText(plan.layer, { action: 'preview', values: patch })).plan
-      if (!result?.review) throw new Error('live_text_stale')
+      if (!result?.review || result.templateKey !== plan.templateKey) throw new Error('live_text_stale')
       return { plan: result, token: result.review, values: patch }
     },
     onSuccess: setReview,
@@ -83,6 +89,7 @@ function LayerTextEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () 
       if (!result.accepted) throw new Error('live_text_refused')
     },
     onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['shared-template-text'] })
       notifications.show({ color: 'teal', message: 'قُبل تصحيح النص. تحقّق من ظهوره على الهواء.' })
       onClose()
     },
@@ -146,6 +153,12 @@ function LayerTextEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () 
                     onChange={event => {
                       const checked = event.currentTarget.checked
                       setSelected(fields => checked ? [...fields, field.name] : fields.filter(name => name !== field.name))
+                      // The bridge appends an ellipsis when the current value
+                      // is too long to return in full. Keep that as a hint.
+                      if (checked && field.lastKnownValue.length <= 160) {
+                        setValues(previous => Object.hasOwn(previous, field.name)
+                          ? previous : { ...previous, [field.name]: field.lastKnownValue })
+                      }
                     }} />
                   {selected.includes(field.name) && <>
                     {field.lastKnownValue && <Text size="xs" c="dimmed">آخر قيمة لدى الجسر <bdi>{field.lastKnownValue}</bdi></Text>}

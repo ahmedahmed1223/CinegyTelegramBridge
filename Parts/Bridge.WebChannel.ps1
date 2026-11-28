@@ -1331,6 +1331,37 @@ function Invoke-WebTemplatePresetChange {
     return @{ ok = $true; data = Get-WebPresetPage -Template $updated -Page ([int](Get-JsonProp $Arguments 'page')) -CanManage $true }
 }
 
+function Register-WebShownUrgent {
+    param([hashtable]$Template, [hashtable]$Variables, [long]$Actor)
+
+    $key = [string]$Template.Key
+    $layer = [int]$Template.Layer
+    # The board is shared with Telegram. A restricted graphic keeps its
+    # copy inside the existing template-access boundary.
+    if ((Test-UrgentBoardAvailable) -and (Get-TemplateAccessLevel -Key $key -Layer $layer) -eq 'all') {
+        $fields = @(Get-WebUrgentFields)
+        if ($fields.Count -gt 0 -and -not @($fields | Where-Object { $_.sensitive }).Count) {
+            $captured = @{}
+            foreach ($field in $fields) { $captured[$field.name] = [string](Get-JsonProp $Variables $field.name) }
+            # A copy of a finished broadcast starts excluded from Play All.
+            $saved = Invoke-WebUrgentWrite -Arguments @{
+                actor = $Actor; action = 'add'; revision = [int](Get-JsonProp $script:UrgentBoard 'Revision')
+                row = @{ values = $captured; enabled = $false }
+            }
+            if ($saved.ok) {
+                $items = @(Get-UrgentProperty $script:UrgentBoard 'Items' @())
+                if ($items.Count -and $script:OnAir.ContainsKey($layer)) {
+                    Set-JsonProp $script:OnAir[$layer] 'DirectUrgentItemId' ([string](Get-JsonProp $items[-1] 'Id'))
+                }
+            }
+            else {
+                Write-BridgeLog "Web urgent was shown, but its board copy was not saved: $($saved.error)." -Level WARN
+            }
+        }
+    }
+    Publish-UrgentWebNotice -Key $key -Layer $layer -UserId $Actor -FromWeb
+}
+
 function Invoke-WebAirShow {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Arguments)
     $actor = [long](Get-JsonProp $Arguments 'actor')
@@ -1393,7 +1424,16 @@ function Invoke-WebAirShow {
         return @{ ok = $false; error = 'refused'; data = [string](Get-JsonProp $result 'Error') }
     }
 
-    Publish-WebChannelState -Force
+    if ($template.Key -eq $script:MojazUrgentKey -and (Get-JsonProp $result 'ActiveIdConfirmed')) {
+        try { Register-WebShownUrgent -Template $template -Variables $variables -Actor $actor }
+        catch {
+            # Cinegy has already accepted the SHOW. A follow-up failure must
+            # not turn that success into a response that invites a duplicate.
+            Write-BridgeLog 'The urgent was shown, but its follow-up board or notice update failed.' -Level WARN
+            Publish-WebChannelState -Force
+        }
+    }
+    else { Publish-WebChannelState -Force }
     return @{ ok = $true }
 }
 
@@ -3917,7 +3957,11 @@ function Invoke-WebUrgentManual {
     if (-not (Test-Authorized -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     $action = [string](Get-JsonProp $Arguments 'action')
     if ($action -eq 'status') {
-        return @{ ok = $true; data = @{ live = Get-WebUrgentManualLive -Actor $actor; noticeId = Get-UrgentWebNoticeForActor -Actor $actor } }
+        $noticeId = Get-UrgentWebNoticeForActor -Actor $actor
+        return @{ ok = $true; data = @{
+                live = Get-WebUrgentManualLive -Actor $actor; noticeId = $noticeId
+                noticeHeadline = $(if ($noticeId) { [string](Get-JsonProp $script:UrgentWebNotice 'Headline') })
+            } }
     }
     if (-not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     if ($action -in 'rehearse-preview', 'rehearse') { return Invoke-WebUrgentRehearsal -Actor $actor -Arguments $Arguments }

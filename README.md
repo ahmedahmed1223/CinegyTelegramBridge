@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.20
+
+Review live text corrections, hiding, and exit from the urgent desk and the active web template card. A confirmed urgent from the template list is copied to the shared urgent board when its fields can be shared. The copy starts disabled so Play All does not replay it automatically. Authorized urgent notifications include the headline.
+
 ## Version 9.1.19
 
 Resize and reorder columns in the web broadcast schedule and the main newsroom, scheduling, reporting, and administration tables. The browser remembers each layout, and the reset button restores its original column widths and order.

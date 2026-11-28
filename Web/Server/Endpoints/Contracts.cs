@@ -131,7 +131,8 @@ public sealed record UrgentManualPreview(string Review, int Layer, Dictionary<st
     bool ReplacesGraphic, bool StopsRun, bool StopsBulletin, string GraphicName, bool Rehearsal = false);
 public sealed record UrgentManualLive(string ItemId, int Layer, string Review);
 public sealed record UrgentManualResponse(UrgentManualPreview? Preview = null, UrgentManualLive? Live = null, int[]? Durations = null,
-    bool AutoHideFailed = false, bool CanRehearse = false, bool RehearsalStarted = false, bool? SceneConfirmed = null, string? NoticeId = null);
+    bool AutoHideFailed = false, bool CanRehearse = false, bool RehearsalStarted = false, bool? SceneConfirmed = null, string? NoticeId = null,
+    string? NoticeHeadline = null);
 public sealed record UrgentTimingRequest(string Action, string? Revision = null, string? Field = null, int? Number = null, string? Option = null);
 public sealed record UrgentTimingBounds(int Minimum, int Maximum);
 public sealed record UrgentTimingState(string Revision, int IntervalSeconds, int Repeats, int TotalSeconds, int ExitGapSeconds,

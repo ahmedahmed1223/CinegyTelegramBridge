@@ -15338,6 +15338,8 @@ export interface components {
             sceneConfirmed: boolean | null;
             /** @default null */
             noticeId: string | null;
+            /** @default null */
+            noticeHeadline: string | null;
         };
         UrgentPlaybackRequest: {
             action: string;

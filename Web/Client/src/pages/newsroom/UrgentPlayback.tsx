@@ -18,7 +18,13 @@ const sessionModes = [
   { value: 'auto_hide', label: 'إخفاء بعد الخبر' },
 ]
 
-export function UrgentPlayback({ items, selected, hasRows = true, onStarted }: { items: Schemas['ContentItem'][]; selected: string[]; hasRows?: boolean; onStarted: (ids: string[]) => void }) {
+export function UrgentPlayback({ items, fields, selected, hasRows = true, onStarted }: {
+  items: Schemas['ContentItem'][]
+  fields?: readonly { name: string }[] | null
+  selected: string[]
+  hasRows?: boolean
+  onStarted: (ids: string[]) => void
+}) {
   const [review, setReview] = useState<{ plan: Preview; selected: string[]; mode: string | null } | null>(null)
   const [mode, setMode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -100,7 +106,7 @@ export function UrgentPlayback({ items, selected, hasRows = true, onStarted }: {
             </Badge>
           )}
         </Group>
-        <UrgentAirBanner items={items} run={run} />
+        <UrgentAirBanner items={items} fields={fields} run={run} />
         {status.isError && <Alert color="orange" role="alert">
           <Group justify="space-between">
             <Text size="sm">{status.error.message}</Text>

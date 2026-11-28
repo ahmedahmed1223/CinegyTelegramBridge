@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.20'; Items = @('Review a live text correction from the web urgent desk or template cards. A confirmed urgent shown from the web template list is copied to the shared urgent board, and authorized Web alerts include the headline.') },
                 @{ Version = '9.1.19'; Items = @('Drag the edge of a column header to resize it or use the grip to move it in the web broadcast schedule and other main tables. Your browser saves the layout.') },
                 @{ Version = '9.1.18'; Items = @('Bulletin playback records the verified scene identity at start so the bridge can recover it after restarting.') },
                 @{ Version = '9.1.17'; Items = @('Air Control automatically loads the current and cued programmes and the broadcast schedule. Capture a photo of the broadcast from the same page.') },
@@ -417,6 +418,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.20'; Items = @('راجع تصحيح النص على الهواء من قسم العواجل أو بطاقات القوالب في الويب. تُحفظ نسخة من العاجل المؤكّد من قائمة قوالب الويب في جدول العواجل، ويظهر العنوان في التنبيه للمستلمين المصرّح لهم.') },
                 @{ Version = '9.1.19'; Items = @('في جدول البث والجداول الرئيسية في الويب، اسحب حافة عنوان العمود لتغيير عرضه أو اسحب المقبض لنقله. يحفظ المتصفح التخطيط.') },
                 @{ Version = '9.1.18'; Items = @('يحفظ الجسر هوية مشهد الموجز المؤكدة عند بدء العرض، لتتاح استعادة الدورة بعد إعادة التشغيل.') },
                 @{ Version = '9.1.17'; Items = @('تُحمّل لوحة الهواء المادة الحالية والتالية وجدول البث تلقائيًا. يمكنك التقاط صورة من البث من الصفحة نفسها.') },

@@ -140,7 +140,7 @@ function NewsroomContent({ view }: { view: Exclude<View, 'boards'> }) {
     </Group>
 
     {view === 'urgent' &&
-      <UrgentPlayback items={result?.items ?? []} selected={selected} hasRows={(result?.collectionTotal ?? result?.total ?? 0) > 0}
+      <UrgentPlayback items={result?.items ?? []} fields={result?.fields} selected={selected} hasRows={(result?.collectionTotal ?? result?.total ?? 0) > 0}
         onStarted={ids => setSelected(previous => previous.filter(id => !ids.includes(id)))} />
     }
     {view === 'bulletins' && <Paper withBorder p="md"><CapturePanel photoOnly /></Paper>}

@@ -61,7 +61,7 @@ function Invoke-WebAirText {
             $_ -gt 0 -and (Resolve-AirGfxDevice -Layer ([int]$_)).StatusPath -eq $device
         }).Count -gt 0
     if ([string](Get-Setting 'SceneMode') -eq 'Multi' -or $usesManagedDevice -or
-        (Get-JsonProp $current 'Source') -in 'cinegy', 'BotTest' -or $key -in $script:MojazTemplateKey, $script:MojazUrgentKey -or
+        (Get-JsonProp $current 'Source') -in 'cinegy', 'BotTest' -or $key -eq $script:MojazTemplateKey -or
         (Get-JsonProp $template 'Bulletin') -or (Test-PermanentGraphicAutoHideProtected -Key $key -Layer $layer) -or
         (Test-PermanentGraphicAutoHideProtected -Layer $layer)) { return @{ ok = $false; error = 'live_text_managed' } }
     if ($script:LayerLocks.ContainsKey($layer)) { return @{ ok = $false; error = 'live_text_busy' } }
@@ -138,6 +138,13 @@ function Invoke-WebAirText {
     foreach ($name in $patch.Keys) { $newSnapshot.Variables[$name] = $patch[$name] }
     $newSnapshot.TextRevision = $generation + 1
     $script:LastSuccessfulLayerShows[$layer] = $newSnapshot
+    $shared = $script:LastWebTemplateText[$key]
+    if ($shared -and (Get-JsonProp $shared 'Path') -ceq $template.Path -and (Get-JsonProp $shared 'Layer') -eq $layer) {
+        $sharedValues = Copy-ShowVariables -Variables (Get-JsonProp $shared 'Values')
+        foreach ($name in $patch.Keys) { $sharedValues[$name] = $patch[$name] }
+        Set-JsonProp $shared 'Values' $sharedValues
+        Set-JsonProp $current 'ScreenCopy' (Format-OnAirScreenCopy -Key $key -Variables $sharedValues)
+    }
     Publish-WebChannelState -Force
     return @{ ok = $true; data = @{ accepted = $true } }
 }

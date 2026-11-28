@@ -492,6 +492,10 @@ function Get-UrgentCurrentItemId {
         }
         return [string](Get-JsonProp $entry 'ItemId')
     }
+    $direct = $script:OnAir[$layer]
+    if ($stamp -and (Get-JsonProp $direct 'Key') -eq (Get-JsonProp $template 'Key')) {
+        return [string](Get-JsonProp $direct 'DirectUrgentItemId')
+    }
     return ''
 }
 
@@ -1182,9 +1186,16 @@ function Get-ConfirmedUrgentEventId {
 
 function Publish-UrgentWebNotice {
     param([string]$Key, [int]$Layer, [long]$UserId, [switch]$FromWeb)
+    $text = Get-JsonProp $script:LastWebTemplateText[$Key] 'Values'
+    $headline = ''
+    $template = Get-UrgentTemplate
+    foreach ($field in @(Get-JsonProp $template 'Fields')) {
+        $headline = Get-NewsScreenLine ([string](Get-JsonProp $text ([string]$field))) 160
+        if ($headline) { break }
+    }
     $script:UrgentWebNotice = @{
         Id = [guid]::NewGuid().ToString('N'); Key = $Key; Layer = $Layer
-        UserId = $UserId; FromWeb = $FromWeb.IsPresent; ExpiresAt = [datetimeoffset]::UtcNow.AddMinutes(1) }
+        Headline = $headline; UserId = $UserId; FromWeb = $FromWeb.IsPresent; ExpiresAt = [datetimeoffset]::UtcNow.AddMinutes(1) }
     Publish-WebChannelState -Force
 }
 

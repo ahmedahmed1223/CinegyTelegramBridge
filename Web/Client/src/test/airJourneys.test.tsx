@@ -207,6 +207,26 @@ it.each([true, false])('opens tracked layer actions with a stale reading and bri
   expect(screen.getByRole('button', { name: 'إخفاء' })).toBeEnabled()
 })
 
+it('opens the on-air correction from the urgent desk for the same active template', async () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: null }, response: new Response() })
+  const post = vi.spyOn(api, 'POST').mockResolvedValue({ data: { plan: {
+    layer: 7, templateKey: 'Urgent', fields: [{ name: 'Text', label: 'الخبر', lastKnownValue: 'عنوان الآن' }],
+  } }, response: new Response() })
+  try {
+    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+      <UrgentAirBanner items={[]} />
+    </LiveStatusContext.Provider>)
+    fireEvent.click(screen.getByRole('button', { name: 'تحديث النص على الهواء' }))
+    expect(await screen.findByRole('checkbox', { name: 'الخبر' })).toBeVisible()
+    expect(post).toHaveBeenCalledWith('/api/air/layers/{layer}/text', expect.objectContaining({
+      params: { path: { layer: 7 } }, body: expect.objectContaining({ action: 'inspect' }),
+    }))
+  } finally {
+    get.mockRestore()
+    post.mockRestore()
+  }
+})
+
 it.each([['Urgent', true], ['Bulletin', false]])('reviews urgent removal without a manual token when Cinegy reports %s', async (templateKey, matches) => {
   const post = vi.spyOn(api, 'POST').mockResolvedValue({ data: { preview: {
     layer: 7, templateKey, operation: 'hide', review: 'test', expiresAt: Date.now() + 60_000,

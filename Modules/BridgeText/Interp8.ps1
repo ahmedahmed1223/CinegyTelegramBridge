@@ -25,6 +25,8 @@ function Add-BridgeTextInterp8 {
     $catalogue['tick.chosenDuration'] = @{ ar = "`nالمدة المختارة: {0} ثانية. تعديلها لا يمدّد مهلة الرد."; en = "`nThe duration chosen: {0} seconds. Changing it does not lengthen the time you have to answer." }
     $catalogue['tick.seconds'] = @{ ar = '{0} ثانية'; en = '{0} seconds' }
     $catalogue['tick.autoHidden'] = @{ ar = '⏱ تم الإخفاء التلقائي للطبقة {0}.'; en = '⏱ Layer {0} was hidden by itself.' }
+    $catalogue['tick.autoExited'] = @{ ar = '⏱ بدأ الخروج التلقائي من الطبقة {0}.'; en = '⏱ The scheduled exit started on layer {0}.' }
+    $catalogue['tick.exitUnconfirmed'] = @{ ar = '⚠️ تعذّر تأكيد الخروج من الطبقة {0}. ستتكرر المحاولة، فتحقّق من الهواء.'; en = '⚠️ The exit on layer {0} is unconfirmed. It will be retried. Check the live output.' }
     $catalogue['tick.hideUnconfirmed'] = @{ ar = '⚠️ تعذّر تأكيد الإخفاء للطبقة {0}. ستتكرر المحاولة؛ تحقّق من الهواء.'; en = '⚠️ The hide on layer {0} could not be confirmed. It will be tried again; look at the air.' }
     $catalogue['tick.followUp'] = @{ ar = '🔔 متابعة: لم يتم تأكيد معالجة تنبيه ''{0}'' على الطبقة {1}، وما زال ظاهرًا.'; en = '🔔 A follow-up: nobody confirmed dealing with the alert on ''{0}'', layer {1}, and it is still showing.' }
     $catalogue['tick.remaining'] = @{ ar = "`n⏱ يتبقى {0}"; en = "`n⏱ {0} left" }

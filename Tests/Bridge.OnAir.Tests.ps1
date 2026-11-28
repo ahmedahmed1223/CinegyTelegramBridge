@@ -564,6 +564,39 @@ Describe 'Persistent timed-show auto-hide timers' {
         $script:autoHideFile = $script:OriginalAutoHideFileForTest
     }
 
+    It 'exits only the scheduled urgent scene after restart and skips its replacement' -TestCases @(
+        @{ LiveId = 'engine-original'; ExpectedExit = 1 }
+        @{ LiveId = 'engine-replacement'; ExpectedExit = 0 }
+    ) {
+        param($LiveId, $ExpectedExit)
+        $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
+        $startTicks = $now.UtcDateTime.Ticks
+        $script:ExitTimerLive = @{ Success = $true; IsOnAir = $true; ActiveId = $LiveId }
+        Mock Get-TitlerLayerStatus { $script:ExitTimerLive }
+        Mock Get-CinegyStatusStartTicks { $startTicks }
+        Mock Get-Setting { 'Single' } -ParameterFilter { $Name -eq 'SceneMode' }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Get-EffectiveAutoHideSeconds { 0 }
+        Mock Invoke-ExitLayer { $true }
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-command'; At = $now.DateTime; UserId = 2L }
+        Set-AutoHideTimer -Layer 7 -Seconds 15 -ChatId 2 -TemplateKey Urgent -Deadline $now.AddSeconds(15) `
+            -ActiveId engine-original -ActiveIdConfirmed $true -ExpectedDevicePath gfx_7 `
+            -ExpectedLayerStartedAtTicks $startTicks -SingleSceneOnly -ExitScene | Should -BeTrue
+        $saved = Get-Content -LiteralPath $script:autoHideFile -Raw | ConvertFrom-Json
+        $saved.Layer | Should -BeNullOrEmpty
+        $saved.ExitLayer | Should -Be 7
+        $script:AutoHideQueue.Clear()
+        Import-AutoHideQueue
+        Update-AutoHideQueue -Now $now.AddSeconds(14)
+        Should -Invoke Invoke-ExitLayer -Times 0 -Exactly
+        Update-AutoHideQueue -Now $now.AddSeconds(15)
+        Should -Invoke Invoke-ExitLayer -Times $ExpectedExit -Exactly -ParameterFilter {
+            $Layer -eq 7 -and $ExpectedDevicePath -eq 'gfx_7' -and $ExpectedLayerStamp -eq 'active:engine-original'
+        }
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        $script:AutoHideQueue.Count | Should -Be 0
+    }
+
     It 'restores a timer after restart and hides the same scene after the remaining duration' {
         $now = [datetimeoffset]'2099-08-21T10:00:00+03:00'
         $timer = @{

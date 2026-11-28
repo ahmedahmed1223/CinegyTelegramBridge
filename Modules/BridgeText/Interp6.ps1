@@ -96,6 +96,7 @@ function Add-BridgeTextInterp6 {
     $catalogue['flow.sendNewValueFor'] = @{ ar = 'أرسل القيمة الجديدة لـ ''{0}''{1}:'; en = 'Send the new value for ''{0}''{1}:' }
     $catalogue['flow.noSceneOnLayer'] = @{ ar = '⚠️ لا يوجد مشهد مسجّل على الطبقة {0}؛ لم يُضبط المؤقت.'; en = '⚠️ No scene is recorded on layer {0}; the timer was not set.' }
     $catalogue['flow.timerAudit'] = @{ ar = '⏱ مؤقت {0} ث على طبقة {1} - بواسطة {2}'; en = '⏱ A {0} s timer on layer {1} - by {2}' }
+    $catalogue['flow.exitTimerAudit'] = @{ ar = '⏱ مؤقت خروج بعد {0} ث على طبقة {1} - بواسطة {2}'; en = '⏱ Exit in {0} s on layer {1} - by {2}' }
     $catalogue['flow.willHideWithin'] = @{ ar = '⏱ سيتم إخفاء الطبقة {0} خلال {1}؛ لا يتجاوز حدّ القالب إن كان مضبوطًا.'; en = '⏱ Layer {0} will be hidden within {1}; it never passes the template''s ceiling where one is set.' }
     $catalogue['flow.timerNotPersisted'] = @{ ar = '⚠️ ضُبط مؤقت الطبقة {0} داخل الجسر، لكن تعذّر حفظه ليستمر بعد إعادة التشغيل.'; en = '⚠️ The timer on layer {0} is set inside the bridge, but could not be saved to survive a restart.' }
     $catalogue['flow.copyReference'] = @{ ar = 'نسخ مرجع {0}'; en = 'Copy reference {0}' }

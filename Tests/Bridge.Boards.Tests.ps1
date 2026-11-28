@@ -10,6 +10,16 @@
 
 . (Join-Path $PSScriptRoot 'Bridge.TestContext.ps1')
 
+Describe 'Local scene proof paths' {
+    It 'accepts a registry in the current directory and rejects traversing its parent' -Skip:(-not $IsWindows) {
+        $directory = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+        $file = Get-WebPlainLocalFile -Path "$directory\.\README.md"
+        $file | Should -Not -BeNullOrEmpty
+        $file.FullName | Should -BeExactly (Join-Path $directory 'README.md')
+        Get-WebPlainLocalFile -Path "$directory\..\$(Split-Path -Leaf $directory)\README.md" | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Which templates a programme board may be bound to' {
     BeforeEach {
         # Two text fields and one picture, which is the shape a programme banner

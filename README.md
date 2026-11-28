@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.24
+
+Live text review recognizes local template registries configured with a dot path such as `./templates.json`. The urgent desk can schedule the scene's normal exit 15, 30, 60, or a custom number of seconds after confirmation. The urgent card shows elapsed time and the countdown when a timer is armed. The timer follows the reviewed urgent scene and skips a replacement.
+
 ## Version 9.1.23
 
 Live text review can identify a completed bulletin that Cinegy continues reporting by matching its current item, completed schedule, show log and unchanged scene files. It checks the bulletin's fields before offering confirmation for a text-only correction.

@@ -16,7 +16,8 @@ const timerErrors: Record<string, string> = {
   live_timer_invalid: 'أدخل مدة صحيحة بين ثانية واحدة و٢٤ ساعة.',
   live_timer_stale: 'تغيّر المشهد أو المؤقّت منذ المراجعة. حمّل الحالة الحالية.',
   live_timer_managed: 'يدير الجسر توقيت هذا المشهد ضمن تشغيل آخر.',
-  live_timer_unverified: 'تعذّر التأكد من المشهد الذي سيُخفى. راجع لوحة الهواء.',
+  live_timer_unverified: 'تعذّر التأكد من المشهد الحالي. راجع لوحة الهواء.',
+  live_timer_exit_capped: 'لهذا العاجل موعد إخفاء إلزامي. يمكنك التحكم فيه من لوحة الهواء.',
   live_timer_save_failed: 'تعذّر حفظ المؤقّت. بقيت الحالة السابقة سارية.',
 }
 
@@ -31,15 +32,16 @@ function timerError(error: Error) {
   return timerErrors[error.message] ?? messageFor(error.message)
 }
 
-export function LayerTimerModal({ layer, expectedTemplateKey, onClose }: {
+export function LayerTimerModal({ layer, expectedTemplateKey, exit = false, onClose }: {
   layer: number
   expectedTemplateKey?: string
+  exit?: boolean
   onClose: () => void
 }) {
   const result = useQuery({
-    queryKey: ['air-layer-timer', layer, expectedTemplateKey],
+    queryKey: ['air-layer-timer', layer, expectedTemplateKey, exit],
     queryFn: async ({ signal }) => {
-      const result = await timerRequest(layer, { action: 'inspect' }, signal)
+      const result = await timerRequest(layer, { action: exit ? 'inspectExit' : 'inspect' }, signal)
       if (!result.plan) throw new Error('live_timer_unverified')
       if (expectedTemplateKey && result.plan.templateKey !== expectedTemplateKey) throw new Error('live_timer_stale')
       return result.plan
@@ -47,10 +49,10 @@ export function LayerTimerModal({ layer, expectedTemplateKey, onClose }: {
     gcTime: 0, retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
   })
   if (result.data && !result.isFetching && !result.error) {
-    return <TimerEditor key={result.dataUpdatedAt} plan={result.data} onClose={onClose}
+    return <TimerEditor key={result.dataUpdatedAt} plan={result.data} exit={exit} onClose={onClose}
       onReload={() => void result.refetch()} />
   }
-  return <Modal opened title="مؤقّت إخفاء الطبقة" onClose={onClose}>
+  return <Modal opened title={exit ? 'مؤقّت خروج العاجل' : 'مؤقّت إخفاء الطبقة'} onClose={onClose}>
     <Stack gap="md" dir="rtl">
       {result.isFetching ? <Skeleton h={72} aria-label="جارٍ التحقق من مؤقّت المشهد" /> : result.error && (
         <Alert color="orange" role="alert">{timerError(result.error)}</Alert>
@@ -63,12 +65,12 @@ export function LayerTimerModal({ layer, expectedTemplateKey, onClose }: {
   </Modal>
 }
 
-function TimerEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => void; onReload: () => void }) {
+function TimerEditor({ plan, exit, onClose, onReload }: { plan: Plan; exit: boolean; onClose: () => void; onReload: () => void }) {
   const [seconds, setSeconds] = useState<number | string>('')
   const [review, setReview] = useState<Review | null>(null)
   const preview = useMutation({
     mutationFn: async (change: Change) => {
-      const result = (await timerRequest(plan.layer, { action: 'preview', ...change })).plan
+      const result = (await timerRequest(plan.layer, { action: exit ? 'previewExit' : 'preview', ...change })).plan
       if (!result?.review || !result.proposedHideAt || result.templateKey !== plan.templateKey) throw new Error('live_timer_stale')
       return { plan: result, token: result.review, change }
     },
@@ -76,12 +78,12 @@ function TimerEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => v
   })
   const apply = useMutation({
     mutationFn: async (decision: Review) => {
-      const result = await timerRequest(plan.layer, { action: 'apply', ...decision.change, review: decision.token })
+      const result = await timerRequest(plan.layer, { action: exit ? 'applyExit' : 'apply', ...decision.change, review: decision.token })
       if (!result.hideAt) throw new Error('live_timer_save_failed')
       return result.hideAt
     },
     onSuccess: hideAt => {
-      notifications.show({ color: 'teal', message: `حُفظ مؤقّت الإخفاء عند ${localTime.format(hideAt)}.` })
+      notifications.show({ color: 'teal', message: `حُفظ مؤقّت ${exit ? 'خروج العاجل' : 'الإخفاء'} عند ${localTime.format(hideAt)}.` })
       onClose()
     },
   })
@@ -100,7 +102,7 @@ function TimerEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => v
     apply.reset()
   }
 
-  return <Modal opened title={review ? 'مراجعة مؤقّت الإخفاء' : 'مؤقّت إخفاء الطبقة'}
+  return <Modal opened title={exit ? 'مؤقّت خروج العاجل' : review ? 'مراجعة مؤقّت الإخفاء' : 'مؤقّت إخفاء الطبقة'}
     onClose={() => { if (!pending) onClose() }} withCloseButton={!pending} closeOnEscape={!pending} closeOnClickOutside={!pending}>
     <Stack gap="md" dir="rtl">
       <Group justify="space-between" gap="sm">
@@ -117,7 +119,9 @@ function TimerEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => v
       </Alert>}
       {review ? <>
         <Alert color="orange">
-          موعد الإخفاء بعد التأكيد <bdi>{localTime.format(review.plan.proposedHideAt ?? 0)}</bdi>.
+          {exit ? `يبدأ العد بعد التأكيد. يخرج هذا العاجل بعد ${number.format(review.change.seconds ?? 0)} ثانية.` :
+            <>موعد الإخفاء بعد التأكيد <bdi>{localTime.format(review.plan.proposedHideAt ?? 0)}</bdi>.</>}
+          {exit && plan.currentHideAt && <Text size="sm" mt={4}>سيحل هذا المؤقّت محل المؤقّت الحالي.</Text>}
         </Alert>
         <Group justify="flex-end">
           <Button variant="default" disabled={pending} onClick={back}>رجوع</Button>
@@ -125,13 +129,13 @@ function TimerEditor({ plan, onClose, onReload }: { plan: Plan; onClose: () => v
         </Group>
       </> : <form onSubmit={submit}>
         <Stack gap="md">
-          <NumberInput label="مدة الإخفاء بالثواني" min={1} max={86400} allowDecimal={false} value={seconds} disabled={pending}
+          <NumberInput label={exit ? 'المدة قبل الخروج بالثواني' : 'مدة الإخفاء بالثواني'} min={1} max={86400} allowDecimal={false} value={seconds} disabled={pending}
             onChange={value => setSeconds(typeof value === 'bigint' ? Number(value) : value)} />
-          {!!plan.choices.length && <Group gap="xs" aria-label="مدد الإخفاء السريعة">
+          {!!plan.choices.length && <Group gap="xs" aria-label="مدد سريعة">
             {plan.choices.map(choice => <Button type="button" key={choice} size="xs" variant="light" disabled={pending}
               onClick={() => setSeconds(choice)}>{number.format(choice)} ثانية</Button>)}
           </Group>}
-          {plan.currentHideAt && <Group gap="xs" aria-label="تعديل الوقت المتبقي">
+          {!exit && plan.currentHideAt && <Group gap="xs" aria-label="تعديل الوقت المتبقي">
             {[-30, -10, 10, 30].map(change => <Button type="button" size="xs" key={change} variant="default" disabled={pending}
               onClick={() => preview.mutate({ adjustSeconds: change })}>
               {change < 0 ? 'اطرح' : 'أضف'} {number.format(Math.abs(change))} ثانية

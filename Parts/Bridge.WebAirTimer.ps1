@@ -6,6 +6,9 @@ function Test-WebAirTimerTarget {
 
     $device = [string](Get-JsonProp $Timer 'ExpectedDevicePath')
     $startTicks = [long](Get-JsonProp $Timer 'ExpectedLayerStartedAtTicks')
+    if ((Get-JsonProp $Timer 'ExitScene') -and
+        (-not $device -or $startTicks -le 0 -or -not (Get-JsonProp $Timer 'ActiveIdConfirmed') -or
+            -not (Get-JsonProp $Timer 'ActiveId') -or (Get-Setting 'SceneMode') -ne 'Single')) { return $false }
     if (-not $device -and $startTicks -eq 0) { return $true }
     if (-not $device -or $startTicks -le 0 -or
         (Resolve-AirGfxDevice -Layer ([int](Get-JsonProp $Timer 'Layer'))).StatusPath -cne $device) { return $false }
@@ -19,6 +22,8 @@ function Invoke-WebAirTimer {
     if ($actor -le 0 -or -not (Test-Authorized -ChatId $actor -UserId $actor) -or
         -not (Get-Setting 'EnableTimedShow') -or -not (Test-MaintenanceControl -ChatId $actor -UserId $actor)) { return @{ ok = $false; error = 'forbidden' } }
     $action = [string](Get-JsonProp $Arguments 'action')
+    $exitScene = $action -cin 'inspectExit', 'previewExit', 'applyExit'
+    if ($exitScene) { $action = $action.Substring(0, $action.Length - 4) }
     $layer = 0
     $invalid = @{ ok = $false; error = 'live_timer_invalid' }
     $stale = @{ ok = $false; error = 'live_timer_stale' }
@@ -45,18 +50,29 @@ function Invoke-WebAirTimer {
     $managed = @($managedLayers | Where-Object {
             $_ -gt 0 -and (Resolve-AirGfxDevice -Layer ([int]$_)).StatusPath -eq $device
         }).Count -gt 0
-    if ([string](Get-Setting 'SceneMode') -ne 'Single' -or $managed -or $key -in $script:MojazTemplateKey, $script:MojazUrgentKey -or
+    if ([string](Get-Setting 'SceneMode') -ne 'Single' -or $managed -or $key -eq $script:MojazTemplateKey -or
+        ($exitScene -ne ($key -eq $script:MojazUrgentKey)) -or
         (Get-JsonProp $template 'Bulletin') -or (Test-PermanentGraphicAutoHideProtected -Key $key -Layer $layer) -or
         (Test-PermanentGraphicAutoHideProtected -Layer $layer)) { return @{ ok = $false; error = 'live_timer_managed' } }
 
     $snapshotId = ([string](Get-JsonProp $snapshot 'ActiveId')).Trim().Trim('{', '}').ToLowerInvariant()
     $currentId = ([string](Get-JsonProp $current 'ActiveId')).Trim().Trim('{', '}').ToLowerInvariant()
+    if ($snapshotId -cne $currentId) { return $stale }
     $snapshotStart = [long](Get-JsonProp $snapshot 'EngineStartedAtTicks')
-    if (-not (Get-JsonProp $snapshot 'EventIdentityConfirmed') -or -not $snapshotId -or $snapshotId -cne $currentId -or
+    $confirmed = (Get-JsonProp $snapshot 'EventIdentityConfirmed') -eq $true
+    if ($exitScene -and -not $confirmed) {
+        # A SHOW with a distinct engine identity can still be tied to this
+        # urgent item by the adjacent before/after status reads.
+        $correlation = Get-JsonProp $snapshot 'WebTextIdentity'
+        $snapshotId = ([string](Get-JsonProp $correlation 'ActiveId')).Trim().Trim('{', '}').ToLowerInvariant()
+        $snapshotStart = [long](Get-JsonProp $correlation 'StartedAtTicks')
+        $confirmed = [bool]$snapshotId
+    }
+    if (-not $confirmed -or -not $snapshotId -or
         $snapshotStart -le 0 -or $device -cne [string](Get-JsonProp $snapshot 'DevicePath')) {
         return @{ ok = $false; error = 'live_timer_unverified' }
     }
-    $status = Get-WebLayerStatus -Layer $layer
+    $status = if ($exitScene) { Get-WebLayerStatus -Layer $layer -RequireConsistentIdentity } else { Get-WebLayerStatus -Layer $layer }
     $stamp = Get-CinegyLayerReviewStamp -Status $status
     if (-not $stamp) { return @{ ok = $false; error = 'live_timer_unverified' } }
     if ($stamp -cne "active:$snapshotId" -or (Get-CinegyStatusStartTicks -Status $status) -ne $snapshotStart) { return $stale }
@@ -69,6 +85,7 @@ function Invoke-WebAirTimer {
     $timerId = if ($timer) { ([string]((Get-JsonProp $timer 'ActiveId') ?? '')).Trim().Trim('{', '}').ToLowerInvariant() } else { '' }
     $currentDeadline = if ($timerId -ceq $snapshotId) { $timerDeadline }
     $maxSeconds = Get-EffectiveAutoHideSeconds -Key $key
+    if ($exitScene -and $maxSeconds -gt 0) { return @{ ok = $false; error = 'live_timer_exit_capped' } }
     $capAt = $null
     if ($maxSeconds -gt 0) {
         $shownAt = [datetimeoffset]::MinValue
@@ -82,10 +99,12 @@ function Invoke-WebAirTimer {
         currentHideAt = if ($currentDeadline) { $currentDeadline.ToUnixTimeMilliseconds() }
         maximumHideAt = if ($capAt) { $capAt.ToUnixTimeMilliseconds() }
     }
+    if ($exitScene) { $plan.choices = @(15, 30, 60) }
     if ($action -ceq 'inspect') { return @{ ok = $true; data = @{ plan = $plan } } }
 
     $seconds = Get-JsonProp $Arguments 'seconds'
     $adjustment = Get-JsonProp $Arguments 'adjustSeconds'
+    if ($exitScene -and $null -ne $adjustment) { return $invalid }
     $now = [datetimeoffset]::Now
     $proposed = $null
     if ($null -ne $seconds -and $null -eq $adjustment) {
@@ -106,25 +125,27 @@ function Invoke-WebAirTimer {
     $timerSignature = if ($timer) {
         @($timerDeadline.ToString('o'), $timerId, (Get-JsonProp $timer 'TemplateKey'), (Get-JsonProp $timer 'UserId'),
             (Get-JsonProp $timer 'Stage'), (Get-JsonProp $timer 'Token'), (Get-JsonProp $timer 'RetryAt'),
-            (Get-JsonProp $timer 'ExpectedDevicePath'), (Get-JsonProp $timer 'ExpectedLayerStartedAtTicks'))
+            (Get-JsonProp $timer 'ExpectedDevicePath'), (Get-JsonProp $timer 'ExpectedLayerStartedAtTicks'), (Get-JsonProp $timer 'ExitScene'))
     }
     $fingerprint = ConvertTo-Json -Compress -Depth 8 -InputObject @($key, $layer, $device, $stamp, $snapshotStart,
-        $seconds, $adjustment, $plan.maximumHideAt, $timerSignature)
+        $seconds, $adjustment, $plan.maximumHideAt, $timerSignature, $exitScene)
     if ($action -ceq 'preview') {
         $plan.review = New-WebAirReview -Actor $actor -Fingerprint $fingerprint -Reviews $script:WebAirTimerReviews
         $script:WebAirTimerReviews[$actor].DeadlineAt = $proposed
         $plan.proposedHideAt = $proposed.ToUnixTimeMilliseconds()
         return @{ ok = $true; data = @{ plan = $plan } }
     }
-    if ($approved.Fingerprint -cne $fingerprint -or $approved.DeadlineAt -le $now) { return $stale }
+    if ($approved.Fingerprint -cne $fingerprint -or (-not $exitScene -and $approved.DeadlineAt -le $now)) { return $stale }
     if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
-    $remaining = [int][math]::Ceiling(($approved.DeadlineAt - $now).TotalSeconds)
+    $finalAt = if ($exitScene) { $proposed } else { $approved.DeadlineAt }
+    $remaining = [int][math]::Ceiling(($finalAt - $now).TotalSeconds)
     if (-not (Set-AutoHideTimer -Layer $layer -Seconds $remaining -ChatId $actor -UserId $actor -TemplateKey $key `
-                -ActiveId ([string](Get-JsonProp $status 'ActiveId')) -ActiveIdConfirmed $true -Deadline $approved.DeadlineAt `
-                -SingleSceneOnly -ExpectedDevicePath $device -ExpectedLayerStartedAtTicks $snapshotStart)) {
+                -ActiveId ([string](Get-JsonProp $status 'ActiveId')) -ActiveIdConfirmed $true -Deadline $finalAt `
+                -SingleSceneOnly -ExpectedDevicePath $device -ExpectedLayerStartedAtTicks $snapshotStart -ExitScene:$exitScene)) {
         return @{ ok = $false; error = 'live_timer_save_failed' }
     }
-    Add-AuditEntry (T 'flow.timerAudit' $remaining $layer $(Format-UserAuditActor -UserId $actor))
+    $auditKey = if ($exitScene) { 'flow.exitTimerAudit' } else { 'flow.timerAudit' }
+    Add-AuditEntry (T $auditKey $remaining $layer $(Format-UserAuditActor -UserId $actor))
     Publish-WebChannelState -Force
-    return @{ ok = $true; data = @{ hideAt = $approved.DeadlineAt.ToUnixTimeMilliseconds() } }
+    return @{ ok = $true; data = @{ hideAt = $finalAt.ToUnixTimeMilliseconds() } }
 }

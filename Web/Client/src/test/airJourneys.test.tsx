@@ -207,6 +207,52 @@ it.each([true, false])('opens tracked layer actions with a stale reading and bri
   expect(screen.getByRole('button', { name: 'إخفاء' })).toBeEnabled()
 })
 
+it('reviews a 15-second urgent exit and starts it only after confirmation', async () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: null }, response: new Response() })
+  const post = vi.spyOn(api, 'POST')
+    .mockResolvedValueOnce({ data: { plan: { layer: 7, templateKey: 'Urgent', choices: [15, 30, 60] } }, response: new Response() })
+    .mockResolvedValueOnce({ data: { plan: {
+      layer: 7, templateKey: 'Urgent', choices: [15, 30, 60], proposedHideAt: 1_800_000_000_000, review: 'review-exit',
+    } }, response: new Response() })
+    .mockResolvedValueOnce({ data: { hideAt: 1_800_000_000_000 }, response: new Response() })
+  try {
+    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status: urgentSnapshot() }}>
+      <UrgentAirBanner items={[]} />
+    </LiveStatusContext.Provider>)
+    fireEvent.click(screen.getByRole('button', { name: 'مؤقّت خروج العاجل' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^(15|١٥) ثانية$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'مراجعة المؤقّت' }))
+    const confirm = await screen.findByRole('button', { name: 'تأكيد المؤقّت' })
+    expect(post).toHaveBeenCalledTimes(2)
+    expect(post).toHaveBeenNthCalledWith(2, '/api/air/layers/{layer}/timer', expect.objectContaining({
+      params: { path: { layer: 7 } }, body: expect.objectContaining({ action: 'previewExit', seconds: 15 }),
+    }))
+    fireEvent.click(confirm)
+    await waitFor(() => expect(post).toHaveBeenNthCalledWith(3, '/api/air/layers/{layer}/timer', expect.objectContaining({
+      params: { path: { layer: 7 } }, body: expect.objectContaining({ action: 'applyExit', seconds: 15, review: 'review-exit' }),
+    })))
+  } finally { get.mockRestore(); post.mockRestore() }
+})
+
+it('shows the elapsed and remaining time on the urgent card', () => {
+  const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: null }, response: new Response() })
+  const snapshot = urgentSnapshot()
+  const now = Date.now()
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+  const status = {
+    ...snapshot,
+    cinegy: { ...snapshot.cinegy, freshUntil: now + 30_000 },
+    layers: snapshot.layers.map(layer => ({ ...layer, at: now - 42_000, hideAt: now + 15_000 })),
+  }
+  try {
+    renderPage(<LiveStatusContext.Provider value={{ stream: 'live', bridgeOnline: true, status }}>
+      <UrgentAirBanner items={[]} />
+    </LiveStatusContext.Provider>)
+    expect(screen.getByRole('timer', { name: 'مدة عرض العاجل' })).toHaveTextContent('0:42')
+    expect(screen.getByRole('timer', { name: 'الوقت المتبقي للعاجل' })).toHaveTextContent('0:15')
+  } finally { clock.mockRestore(); get.mockRestore() }
+})
+
 it('opens the on-air correction from the urgent desk for the same active template', async () => {
   const get = vi.spyOn(api, 'GET').mockResolvedValue({ data: { live: null }, response: new Response() })
   const post = vi.spyOn(api, 'POST').mockResolvedValue({ data: { plan: {

@@ -1,5 +1,5 @@
 import { ActionIcon, Group, Tooltip } from '@mantine/core'
-import { IconClock, IconEdit, IconEyeOff, IconLogout } from '@tabler/icons-react'
+import { IconClock, IconClockHour4, IconEdit, IconEyeOff, IconLogout } from '@tabler/icons-react'
 import { useState } from 'react'
 import { LayerRemovalModal, type RemovalOperation } from './LayerRemovalModal'
 import { LayerTextModal } from './LayerTextModal'
@@ -11,7 +11,7 @@ export function LiveLayerActions({ layer, templateKey, urgent = false, canEdit =
   urgent?: boolean
   canEdit?: boolean
 }) {
-  const [action, setAction] = useState<'text' | 'timer' | RemovalOperation | null>(null)
+  const [action, setAction] = useState<'text' | 'timer' | 'exit-timer' | RemovalOperation | null>(null)
   const close = () => setAction(null)
   return <>
     <Group gap={4} role="group" aria-label="التحكم بالطبقة">
@@ -21,10 +21,13 @@ export function LiveLayerActions({ layer, templateKey, urgent = false, canEdit =
           <IconEdit size={18} />
         </ActionIcon>
       </Tooltip>
-      <Tooltip label="مؤقّت إخفاء العرض">
+      {urgent ? <Tooltip label="مؤقّت خروج العاجل">
+        <ActionIcon size={44} variant="light" color="orange" aria-label="مؤقّت خروج العاجل"
+          disabled={!canEdit} onClick={() => setAction('exit-timer')}><IconClockHour4 size={18} /></ActionIcon>
+      </Tooltip> : <Tooltip label="مؤقّت إخفاء العرض">
         <ActionIcon size={44} variant="light" color="gray" aria-label="مؤقّت إخفاء العرض"
           disabled={!canEdit} onClick={() => setAction('timer')}><IconClock size={18} /></ActionIcon>
-      </Tooltip>
+      </Tooltip>}
       {(['hide', 'exit'] as const).map(operation => {
         const label = operation === 'hide' ? (urgent ? 'إخفاء العاجل المعروض' : 'إخفاء القالب المعروض') : 'خروج المعروض (EXIT)'
         return <Tooltip key={operation} label={label}>
@@ -36,7 +39,8 @@ export function LiveLayerActions({ layer, templateKey, urgent = false, canEdit =
       })}
     </Group>
     {action === 'text' && <LayerTextModal layer={layer} expectedTemplateKey={templateKey} onClose={close} />}
-    {action === 'timer' && <LayerTimerModal layer={layer} expectedTemplateKey={templateKey} onClose={close} />}
+    {(action === 'timer' || action === 'exit-timer') && <LayerTimerModal
+      layer={layer} expectedTemplateKey={templateKey} exit={action === 'exit-timer'} onClose={close} />}
     {(action === 'hide' || action === 'exit') && <LayerRemovalModal
       layer={layer} operation={action} expectedTemplateKey={templateKey} onClose={close} />}
   </>

@@ -24,7 +24,7 @@ public static class AirTimerEndpoints
         {
             "forbidden" => 403,
             "live_timer_invalid" => 400,
-            "live_timer_stale" or "live_timer_managed" or "live_timer_unverified" => 409,
+            "live_timer_stale" or "live_timer_managed" or "live_timer_unverified" or "live_timer_exit_capped" => 409,
             _ => 503
         };
         return ApiErrors.Of(status, reply.Error);

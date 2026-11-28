@@ -37,7 +37,8 @@ function Get-WebPlainLocalFile {
         $cursor = $root
         $file = $null
         foreach ($part in $path.Substring($root.Length).Split([char[]]@('\', '/'), [StringSplitOptions]::RemoveEmptyEntries)) {
-            if ($part -in '.', '..') { return }
+            if ($part -eq '.') { continue }
+            if ($part -eq '..') { return }
             $file = Get-Item -LiteralPath (Join-Path $cursor $part) -ErrorAction Stop
             if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
             $cursor = $file.FullName

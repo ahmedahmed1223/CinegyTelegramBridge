@@ -163,8 +163,13 @@ function Save-AutoHideQueue {
     try {
         $payload = @($script:AutoHideQueue | ForEach-Object {
                 $at = [datetimeoffset]$_.At
+                $timerLayer = [int](Get-JsonProp $_ 'Layer')
+                $exitScene = [bool](Get-JsonProp $_ 'ExitScene')
                 [ordered]@{
-                    Layer       = [int](Get-JsonProp $_ 'Layer')
+                    # Older releases skip records without a positive Layer.
+                    # Rolling back must never turn a scheduled EXIT into HIDE.
+                    Layer       = if (-not $exitScene) { $timerLayer }
+                    ExitLayer   = if ($exitScene) { $timerLayer }
                     At          = $at.ToString('o')
                     ChatId      = [long](Get-JsonProp $_ 'ChatId')
                     UserId      = [long](Get-JsonProp $_ 'UserId')
@@ -201,8 +206,10 @@ function Import-AutoHideQueue {
         $restored = [System.Collections.Generic.List[hashtable]]::new()
         foreach ($raw in @($read.Data)) {
             if (-not $raw) { continue }
+            $exitScene = $null -ne (Get-JsonProp $raw 'ExitLayer')
+            $layerField = if ($exitScene) { 'ExitLayer' } else { 'Layer' }
             $layer = 0
-            if (-not [int]::TryParse([string](Get-JsonProp $raw 'Layer'), [ref]$layer) -or $layer -le 0) { continue }
+            if (-not [int]::TryParse([string](Get-JsonProp $raw $layerField), [ref]$layer) -or $layer -le 0) { continue }
             $at = [datetimeoffset]::MinValue
             if (-not [datetimeoffset]::TryParse([string](Get-JsonProp $raw 'At'), [ref]$at)) { continue }
             $restored.Add(@{
@@ -216,6 +223,7 @@ function Import-AutoHideQueue {
                     SingleSceneOnly = [bool](Get-JsonProp $raw 'SingleSceneOnly')
                     ExpectedDevicePath = [string](Get-JsonProp $raw 'ExpectedDevicePath')
                     ExpectedLayerStartedAtTicks = [long](Get-JsonProp $raw 'ExpectedLayerStartedAtTicks')
+                    ExitScene = $exitScene
                     Stage = [string](Get-JsonProp $raw 'Stage')
                     Token = [string](Get-JsonProp $raw 'Token')
                     ShowAt = [string](Get-JsonProp $raw 'ShowAt')
@@ -258,7 +266,8 @@ function Set-AutoHideTimer {
         [datetimeoffset]$Deadline = [datetimeoffset]::MinValue,
         [switch]$SingleSceneOnly,
         [string]$ExpectedDevicePath = '',
-        [long]$ExpectedLayerStartedAtTicks = 0
+        [long]$ExpectedLayerStartedAtTicks = 0,
+        [switch]$ExitScene
     )
     if ($UserId -eq 0) { $UserId = $ChatId }
     if ($Seconds -le 0 -or [bool]$ExpectedDevicePath -ne ($ExpectedLayerStartedAtTicks -gt 0) -or
@@ -267,6 +276,7 @@ function Set-AutoHideTimer {
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $key = if ($current) { [string](Get-JsonProp $current 'Key') } else { $TemplateKey }
     $maximum = if ($key) { Get-EffectiveAutoHideSeconds -Key $key } else { 0 }
+    if ($ExitScene -and (-not $ExpectedDevicePath -or $maximum -gt 0)) { return $false }
     if ((Test-PermanentGraphicAutoHideProtected -Layer $Layer -Key $key) -and $maximum -le 0) { return $false }
     if ($maximum -gt 0) {
         $shownAt = [datetimeoffset]::MinValue
@@ -292,6 +302,7 @@ function Set-AutoHideTimer {
             SingleSceneOnly = [bool]$SingleSceneOnly
             ExpectedDevicePath = $ExpectedDevicePath
             ExpectedLayerStartedAtTicks = $ExpectedLayerStartedAtTicks
+            ExitScene = [bool]$ExitScene
         }
     $script:AutoHideQueue.Add($timer)
     if (Save-AutoHideQueue) { return $true }
@@ -324,7 +335,7 @@ function Get-AutoHideTargetDecision {
     }
     $timerId = [string](Get-JsonProp $Timer 'ActiveId')
     $currentId = [string](Get-JsonProp $current 'ActiveId')
-    if ($timerId -and $currentId -and
+    if (-not (Get-JsonProp $Timer 'ExitScene') -and $timerId -and $currentId -and
         -not $timerId.Trim().Trim('{', '}').Equals($currentId.Trim().Trim('{', '}'), [StringComparison]::OrdinalIgnoreCase)) {
         return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.layerChanged' $layer) }
     }
@@ -467,6 +478,7 @@ function Update-AutoHideQueue {
         (-not (Get-JsonProp $_ 'RetryAt') -or [datetimeoffset]$_.RetryAt -le $Now)
     })
     foreach ($item in $due) {
+        $exitScene = [bool](Get-JsonProp $item 'ExitScene')
         try {
             $decision = Get-AutoHideTargetDecision -Timer $item
             if ($decision.ShouldHide -and [bool](Get-JsonProp $item 'ActiveIdConfirmed')) {
@@ -476,7 +488,7 @@ function Update-AutoHideQueue {
                 if (-not $liveStatus -or -not [bool](Get-JsonProp $liveStatus 'Success')) { throw 'Cinegy status unavailable' }
                 $decision = Get-AutoHideTargetDecision -Timer $item -LiveStatus $liveStatus
             }
-            if ($decision.ShouldHide -and (Get-Setting 'TemplateAirExtensionEnabled') -and
+            if ($decision.ShouldHide -and -not $exitScene -and (Get-Setting 'TemplateAirExtensionEnabled') -and
                 -not [bool](Get-JsonProp $item 'ExtensionUsed') -and -not (Get-JsonProp $item 'Stage')) {
                 $key = [string](Get-JsonProp $item 'TemplateKey')
                 $cap = 0
@@ -515,10 +527,15 @@ function Update-AutoHideQueue {
                     $reviewedTarget.ExpectedDevicePath = [string]$item.ExpectedDevicePath
                     $reviewedTarget.ExpectedLayerStartedAtTicks = [long]$item.ExpectedLayerStartedAtTicks
                     $reviewedTarget.ExpectedLayerStamp = "active:$(([string]$item.ActiveId).Trim().Trim('{', '}').ToLowerInvariant())"
-                    $reviewedTarget.ReviewedTimer = $true
                 }
-                if (-not (Invoke-HideLayer @reviewedTarget -Layer ([int]$item.Layer) -ChatId ([long]$item.ChatId) -UserId ([long]$item.UserId) -Quiet -System)) {
-                    throw 'Hide not confirmed'
+                $timerActor = @{ Layer = [int]$item.Layer; ChatId = [long]$item.ChatId; UserId = [long]$item.UserId; Quiet = $true; System = $true }
+                if ($exitScene) {
+                    $reviewedTarget.Deadline = [Diagnostics.Stopwatch]::GetTimestamp() + 10 * [Diagnostics.Stopwatch]::Frequency
+                    if (-not (Invoke-ExitLayer @reviewedTarget @timerActor)) { throw 'Exit not confirmed' }
+                }
+                else {
+                    if ($reviewedTarget.Count) { $reviewedTarget.ReviewedTimer = $true }
+                    if (-not (Invoke-HideLayer @reviewedTarget @timerActor)) { throw 'Hide not confirmed' }
                 }
             }
             $script:AutoHideQueue.Remove($item) | Out-Null
@@ -526,7 +543,10 @@ function Update-AutoHideQueue {
                 if (-not $script:AutoHideQueue.Contains($item)) { $script:AutoHideQueue.Add($item) }
                 throw 'Could not persist timer settlement'
             }
-            if ($decision.ShouldHide) { Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text (T 'tick.autoHidden' $($item.Layer)) }
+            if ($decision.ShouldHide) {
+                $noticeKey = if ($exitScene) { 'tick.autoExited' } else { 'tick.autoHidden' }
+                Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text (T $noticeKey $($item.Layer))
+            }
         }
         catch {
             $item.RetryCount = [math]::Min(6, (1 + [int](Get-JsonProp $item 'RetryCount')))
@@ -535,7 +555,8 @@ function Update-AutoHideQueue {
             if (-not $noticeAt -or $Now -ge ([datetimeoffset]$noticeAt).AddMinutes(1)) {
                 $item.NoticeAt = $Now
                 Write-BridgeLog "Auto-hide retained for retry on layer $($item.Layer): $($_.Exception.Message)" 'WARN'
-                try { Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text (T 'tick.hideUnconfirmed' $($item.Layer)) }
+                $noticeKey = if ($exitScene) { 'tick.exitUnconfirmed' } else { 'tick.hideUnconfirmed' }
+                try { Send-TelegramMessage -ChatId ([long]$item.ChatId) -Text (T $noticeKey $($item.Layer)) }
                 catch { Write-BridgeLog "Could not deliver the auto-hide retry notice for layer $($item.Layer): $($_.Exception.Message)" 'WARN' }
             }
             Save-AutoHideQueue | Out-Null

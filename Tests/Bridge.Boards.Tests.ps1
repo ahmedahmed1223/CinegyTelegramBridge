@@ -455,6 +455,45 @@ Describe 'A board as a table' {
 }
 
 Describe 'Web peer checks for channel-wide live text' {
+    It 'identifies a completed bulletin only when its schedule, show log and current item agree' {
+        $key = $script:MojazTemplateKey
+        $started = [datetime]::new(2026, 11, 28, 8, 5, 0, [DateTimeKind]::Utc)
+        $engineId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        $script:CompletedPeerLog = "$($started.ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')) [INFO] Cinegy accepted '$key' on layer 5 as item {$engineId}; engine duration ""86400s"", manual end True"
+        $script:CompletedPeerFileTime = $started.AddDays(-1)
+        Mock Get-TemplateRegistryFilePath { 'C:\fixture\templates.json' }
+        Mock Get-WebPlainLocalFile { @{ LastWriteTimeUtc = $script:CompletedPeerFileTime } }
+        Mock Get-Content { $script:CompletedPeerLog }
+        $priorRecords = $script:OnAir
+        $priorShows = $script:LastSuccessfulLayerShows
+        $priorSchedules = $script:MojazSchedules
+        $priorPlayback = $script:MojazPlayback
+        $script:OnAir = @{}
+        $script:LastSuccessfulLayerShows = @{}
+        $script:MojazPlayback = $null
+        $schedule = @{ Status = 'completed'; StartedAt = $started; CompletedAt = $started.AddMinutes(4) }
+        $script:MojazSchedules = @($schedule)
+        $store = @{ Map = @{ $key = @{ Path = 'C:\fixture\bulletin.cintitle'; Layer = 5 } } }
+        $reply = @{ Success = $true; IsOnAir = $true; ActiveId = $engineId
+            ActiveXml = "<Item Id='$engineId' ScheduledAt=""$($started.ToString('o'))""/>" }
+        $stamp = Get-CinegyLayerReviewStamp -Status $reply
+        try {
+            Get-ProgrammeLoadedSceneKey -Layer 5 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $reply | Should -Be $key
+            $schedule.Status = 'running'
+            Get-ProgrammeLoadedSceneKey -Layer 5 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $reply | Should -Be ''
+            $schedule.Status = 'completed'
+            $script:CompletedPeerLog = $script:CompletedPeerLog.Replace($engineId, 'cccccccc-cccc-cccc-cccc-cccccccccccc')
+            Get-ProgrammeLoadedSceneKey -Layer 5 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $reply | Should -Be ''
+            $script:OnAir.ContainsKey(5) | Should -BeFalse
+        } finally {
+            $script:OnAir = $priorRecords
+            $script:LastSuccessfulLayerShows = $priorShows
+            $script:MojazSchedules = $priorSchedules
+            $script:MojazPlayback = $priorPlayback
+            Remove-Variable CompletedPeerLog, CompletedPeerFileTime -Scope Script
+        }
+    }
+
     It 'recognizes a retained bridge peer only while the live item and both files still match its show' {
         $started = [datetime]::new(2026, 11, 28, 10, 45, 0, [DateTimeKind]::Utc)
         $script:RetainedPeerWrite = $started.AddDays(-1)

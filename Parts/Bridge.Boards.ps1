@@ -977,8 +977,7 @@ function Get-WebProgrammeBoardEditor {
 function Get-ProgrammeRetainedSceneKey {
     # Only the persisted bridge-owned peer can stand in for a missing memory
     # snapshot. The registry and scene must both predate its recorded SHOW.
-    param([int]$Layer, [string]$Stamp, $Store, $VerifiedStatus)
-    $record = $script:OnAir[$Layer]
+    param([int]$Layer, [string]$Stamp, $Store, $VerifiedStatus, $Record)
     $key = [string](Get-JsonProp $record 'Key')
     $scheduledAt = Get-CinegyStatusStartedAtUtc -Status $VerifiedStatus
     if (-not $key -or -not $scheduledAt -or (Get-JsonProp $record 'Source') -ne 'bridge' -or
@@ -1006,11 +1005,61 @@ function Get-ProgrammeRetainedSceneKey {
     return $key
 }
 
+function Get-ProgrammeCompletedBulletinPeerKey {
+    param([int]$Layer, [string]$Stamp, $Store, $VerifiedStatus)
+    $key = $script:MojazTemplateKey
+    $template = Get-JsonProp $Store.Map $key
+    if ($Layer -le 0 -or [int](Get-JsonProp $template 'Layer') -ne $Layer -or $script:MojazPlayback) { return '' }
+    $engineStart = Get-CinegyStatusStartedAtUtc -Status $VerifiedStatus
+    $activeId = [guid]::Empty
+    if (-not $engineStart -or -not [guid]::TryParse([string](Get-JsonProp $VerifiedStatus 'ActiveId'), [ref]$activeId) -or
+        $activeId -eq [guid]::Empty) { return '' }
+
+    # An exited bulletin may still be reported by older Cinegy engines.
+    # Corroborate its exact active ID with both a completed schedule and the
+    # bridge's show log before using its local fields for the peer check.
+    $completed = @(foreach ($entry in $script:MojazSchedules) {
+            if ((Get-JsonProp $entry 'Status') -ne 'completed') { continue }
+            $designKey = [string](Get-JsonProp $entry 'DesignKey')
+            $designLayer = [int](Get-JsonProp $entry 'DesignLayer')
+            $designPath = [string](Get-JsonProp $entry 'DesignPath')
+            if (($designKey -and $designKey -cne $key) -or ($designLayer -and $designLayer -ne $Layer) -or
+                ($designPath -and $designPath -cne [string](Get-JsonProp $template 'Path'))) { continue }
+            try {
+                $stateStart = ([datetimeoffset](Get-JsonProp $entry 'StartedAt')).UtcDateTime
+                $stateEnd = ([datetimeoffset](Get-JsonProp $entry 'CompletedAt')).UtcDateTime
+                if ([math]::Abs(($stateStart - $engineStart).TotalSeconds) -le 2 -and
+                    $stateEnd -gt $stateStart -and $stateEnd -le [datetime]::UtcNow) { $stateStart }
+            } catch { continue }
+        })
+    if ($completed.Count -ne 1) { return '' }
+
+    $record = @{ Key = $key; Source = 'bridge'; ActiveIdConfirmed = $true; ActiveId = $activeId.ToString('D'); At = $completed[0] }
+    if (-not (Get-ProgrammeRetainedSceneKey -Layer $Layer -Stamp $Stamp -Store $Store -VerifiedStatus $VerifiedStatus -Record $record)) { return '' }
+    $escapedKey = [regex]::Escape($key)
+    $eventPattern = "^(?<at>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[INFO\] Cinegy accepted '$escapedKey' on layer $Layer as item \{?$($activeId.ToString('D'))\}?;"
+    try {
+        foreach ($line in (Get-Content -LiteralPath $logPath -Tail 2500 -ErrorAction Stop)) {
+            if ($line -notmatch $eventPattern) { continue }
+            $loggedAt = [datetimeoffset]::MinValue
+            if ([datetimeoffset]::TryParseExact($Matches.at, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::AssumeLocal, [ref]$loggedAt) -and
+                [math]::Abs(($loggedAt.UtcDateTime - $engineStart).TotalSeconds) -le 2) { return $key }
+        }
+    }
+    catch { return '' }
+    return ''
+}
+
 function Get-ProgrammeLoadedSceneKey {
     param([int]$Layer, [string]$Stamp, $Store, [switch]$LocalScenesOnly, $VerifiedStatus)
     $shown = $script:LastSuccessfulLayerShows[$Layer]
     if (-not $shown -and $LocalScenesOnly) {
-        return Get-ProgrammeRetainedSceneKey -Layer $Layer -Stamp $Stamp -Store $Store -VerifiedStatus $VerifiedStatus
+        $record = $script:OnAir[$Layer]
+        if ($record) {
+            return Get-ProgrammeRetainedSceneKey -Layer $Layer -Stamp $Stamp -Store $Store -VerifiedStatus $VerifiedStatus -Record $record
+        }
+        return Get-ProgrammeCompletedBulletinPeerKey -Layer $Layer -Stamp $Stamp -Store $Store -VerifiedStatus $VerifiedStatus
     }
     if (-not $Stamp -or $Stamp -cne (Get-MojazRunSceneStamp -Playback $shown)) { return '' }
     $key = [string](Get-JsonProp $shown 'Key')

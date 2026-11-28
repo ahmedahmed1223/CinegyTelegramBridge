@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.23
+
+Live text review can identify a completed bulletin that Cinegy continues reporting by matching its current item, completed schedule, show log and unchanged scene files. It checks the bulletin's fields before offering confirmation for a text-only correction.
+
 ## Version 9.1.22
 
 Live text review can follow a new engine-assigned ID when matching Cinegy responses confirm the scene started during the show. Urgent rows open in a separate editor with all template fields and the save action in view.

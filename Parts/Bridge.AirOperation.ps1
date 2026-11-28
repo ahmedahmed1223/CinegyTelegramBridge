@@ -998,7 +998,7 @@ function Invoke-ShowTemplateResult {
         # its engine id changed from the pre-SHOW item.
         $identity = Get-VerifiedCinegyShowIdentity @rollbackDeviceArguments -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
             -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
-            -ExpectedActiveId $(if ($RequireEventIdentity) { $activeId } else { '' }) -RequireEventIdentity:$RequireEventIdentity `
+            -ExpectedActiveId $eventId -RequireEventIdentity:$RequireEventIdentity `
             -CaptureUrgentEvent:($ManualUrgent -or $script:UrgentBoardStarting) -AllowAnonymousActiveId
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
         # Playback saves the engine identity from this result so it can prove

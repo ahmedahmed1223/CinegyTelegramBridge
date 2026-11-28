@@ -355,6 +355,31 @@ Describe 'SHOW identity tracking' {
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
     }
 
+    It 'verifies a show on an empty layer when Cinegy returns the matching id without a scene name' {
+        $script:AnonymousShowFixture = $false
+        Mock Get-Setting {
+            if ($Name -eq 'WebAccessEnabled') { return $true }
+            return Get-BridgeSetting -Config $config -Defaults $script:DefaultSettings -Name $Name
+        }
+        Mock Show-TitlerTemplate {
+            $script:AnonymousShowFixture = $true
+            @{ Success = $true; EventId = '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'; Xml = '<Request/>' }
+        }
+        Mock Get-TitlerLayerStatus {
+            if (-not $script:AnonymousShowFixture) { return @{ Success = $true; IsOnAir = $false; ActiveId = '' } }
+            return @{
+                Success = $true; IsOnAir = $true; ActiveId = '{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}'
+                ActiveXml = '<Item Id="{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}" ScheduledAt="2026-11-28T10:17:03.125Z" Duration="24:00:00.000" ManualEnd="y"/>'
+            }
+        }
+        try {
+            $result = Invoke-ShowTemplateResult -Key 'urgent' -ChatId 10 -UserId 20
+            $result.EventIdentityConfirmed | Should -BeTrue
+            $LastSuccessfulLayerShows[4].EventIdentityConfirmed | Should -BeTrue
+            $LastSuccessfulLayerShows[4].EngineStartedAtTicks | Should -BeGreaterThan 0
+        } finally { Remove-Variable AnonymousShowFixture -Scope Script }
+    }
+
     It 'does not record an on-air scene when Cinegy disconnects during SHOW' {
         Mock Show-TitlerTemplate {
             [pscustomobject]@{ Success = $false; EventId = ''; Xml = ''; Error = 'connection refused' }

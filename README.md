@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.21
+
+Ordinary shows use the submitted event identifier to verify Cinegy responses that omit the template name, including on previously empty layers. The live text editor checks that both Cinegy status reads identify the same event before any correction.
+
 ## Version 9.1.20
 
 Review live text corrections, hiding, and exit from the urgent desk and the active web template card. A confirmed urgent from the template list is copied to the shared urgent board when its fields can be shared. The copy starts disabled so Play All does not replay it automatically. Authorized urgent notifications include the headline.

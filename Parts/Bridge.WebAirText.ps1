@@ -69,11 +69,15 @@ function Invoke-WebAirText {
     $eventId = ([string](Get-JsonProp $snapshot 'ActiveId')).Trim().Trim('{', '}').ToLowerInvariant()
     $shownAt = [long](Get-JsonProp $snapshot 'EngineStartedAtTicks')
     $revision = [string](Get-JsonProp $snapshot 'TemplateRevision')
-    if (-not (Get-JsonProp $snapshot 'EventIdentityConfirmed') -or -not $eventId -or $shownAt -le 0 -or
-        $device -cne [string](Get-JsonProp $snapshot 'DevicePath') -or -not $revision -or
-        $revision -cne [string](Get-JsonProp $template 'PresetRevision') -or
-        $revision -cne (Get-TemplatePresetRegistryRevision -TemplateKey $key) -or
-        -not (Test-WebRollbackLocalScene -Template $template -Restore $snapshot)) { return @{ ok = $false; error = 'live_text_unverified' } }
+    $proofFailure = if (-not (Get-JsonProp $snapshot 'EventIdentityConfirmed') -or -not $eventId -or $shownAt -le 0) { 'show identity or start time' }
+    elseif ($device -cne [string](Get-JsonProp $snapshot 'DevicePath')) { 'device mapping' }
+    elseif (-not $revision -or $revision -cne [string](Get-JsonProp $template 'PresetRevision') -or
+        $revision -cne (Get-TemplatePresetRegistryRevision -TemplateKey $key)) { 'template registry revision' }
+    elseif (-not (Test-WebRollbackLocalScene -Template $template -Restore $snapshot)) { 'local scene file' }
+    if ($proofFailure) {
+        Write-BridgeLog "Live text could not verify layer ${layer}: $proofFailure." -Level WARN
+        return @{ ok = $false; error = 'live_text_unverified' }
+    }
 
     $fields = @(Get-WebAirTextField -Template $template -Snapshot $snapshot)
     if (-not $fields.Count -or $fields.Count -gt 40) { return @{ ok = $false; error = 'live_text_no_fields' } }
@@ -107,9 +111,12 @@ function Invoke-WebAirText {
 
     # Read the target after the peer sweep so a replacement during those checks
     # is never mistaken for the scene from the beginning of the review.
-    $status = Get-WebLayerStatus -Layer $layer
+    $status = Get-WebLayerStatus -Layer $layer -RequireConsistentIdentity
     $stamp = Get-CinegyLayerReviewStamp -Status $status
-    if (-not $stamp) { return @{ ok = $false; error = 'live_text_unverified' } }
+    if (-not $stamp) {
+        Write-BridgeLog "Live text could not verify layer ${layer}: Cinegy status and active item." -Level WARN
+        return @{ ok = $false; error = 'live_text_unverified' }
+    }
     if ($stamp -cne "active:$eventId" -or (Get-CinegyStatusStartTicks -Status $status) -ne $shownAt) { return $stale }
     if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
 

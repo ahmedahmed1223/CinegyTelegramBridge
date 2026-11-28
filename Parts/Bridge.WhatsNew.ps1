@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.25'; Items = @('Schedule urgent exit before the configured hide deadline even when the template has a display limit. The urgent card shows the next deadline.') },
                 @{ Version = '9.1.24'; Items = @('Live text review recognizes the configured local template registry path. The live urgent panel shows elapsed and remaining time and offers exit after 15, 30, 60, or a custom number of seconds.') },
                 @{ Version = '9.1.23'; Items = @('Live text review checks completed bulletin records when Cinegy still reports the old item. You can review and confirm a text-only change when the other scene has no matching fields.') },
                 @{ Version = '9.1.22'; Items = @('Live text review also handles a different engine-assigned ID when Cinegy confirms the new scene in both reads. Edit and save an urgent row in a separate form with all its fields.') },
@@ -422,6 +423,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.25'; Items = @('اضبط مؤقّت خروج العاجل قبل موعد الإخفاء حتى عند وجود حد أقصى لمدة العرض. تعرض البطاقة الوقت حتى أقرب موعد.') },
                 @{ Version = '9.1.24'; Items = @('تستخدم معاينة تصحيح النص مسار سجل القوالب المحلي المضبوط في المحطة. اضبط مؤقّت خروج العاجل بعد ١٥ أو ٣٠ أو ٦٠ ثانية أو مدة أخرى وتابع مدة العرض والوقت المتبقي في بطاقته.') },
                 @{ Version = '9.1.23'; Items = @('تتحقق معاينة النص من سجل الموجز المكتمل إذا استمر Cinegy في الإبلاغ عن مشهده. يظهر زر تأكيد تحديث النص عند التحقق من عدم تداخل حقوله مع العاجل.') },
                 @{ Version = '9.1.22'; Items = @('يقبل محرّر النص اختلاف المعرّف الذي تعيّنه Cinegy إذا أكّدت القراءتان المشهد الجديد. يفتح زر تعديل صف العاجل نموذجًا بجميع الحقول وزر الحفظ.') },

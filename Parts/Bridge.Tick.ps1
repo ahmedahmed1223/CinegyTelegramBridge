@@ -276,8 +276,9 @@ function Set-AutoHideTimer {
     $current = if ($script:OnAir.ContainsKey($Layer)) { $script:OnAir[$Layer] } else { $null }
     $key = if ($current) { [string](Get-JsonProp $current 'Key') } else { $TemplateKey }
     $maximum = if ($key) { Get-EffectiveAutoHideSeconds -Key $key } else { 0 }
-    if ($ExitScene -and (-not $ExpectedDevicePath -or $maximum -gt 0)) { return $false }
+    if ($ExitScene -and -not $ExpectedDevicePath) { return $false }
     if ((Test-PermanentGraphicAutoHideProtected -Layer $Layer -Key $key) -and $maximum -le 0) { return $false }
+    $maximumAt = $null
     if ($maximum -gt 0) {
         $shownAt = [datetimeoffset]::MinValue
         if (-not $current -or -not [datetimeoffset]::TryParse([string](Get-JsonProp $current 'At'), [ref]$shownAt)) {
@@ -285,11 +286,17 @@ function Set-AutoHideTimer {
             return $false
         }
         $maximumAt = $shownAt.AddSeconds($maximum)
+        if ($ExitScene -and $Deadline -ge $maximumAt) { return $false }
         if ($maximumAt -lt $deadline) { $deadline = $maximumAt }
     }
-    $previous = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })
-    for ($i = $script:AutoHideQueue.Count - 1; $i -ge 0; $i--) {
-        if ([int](Get-JsonProp $script:AutoHideQueue[$i] 'Layer') -eq $Layer) { $script:AutoHideQueue.RemoveAt($i) }
+    $layerTimers = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer })
+    $previous = $layerTimers
+    $addHardHide = $false
+    if ($ExitScene) {
+        $hideTimers = @($layerTimers | Where-Object { -not (Get-JsonProp $_ 'ExitScene') })
+        if ($hideTimers.Count -gt 1 -or ($hideTimers.Count -eq 1 -and $Deadline -ge [datetimeoffset]$hideTimers[0].At)) { return $false }
+        $addHardHide = $maximumAt -and (-not $hideTimers.Count -or $maximumAt -lt [datetimeoffset]$hideTimers[0].At)
+        if (-not $addHardHide) { $previous = @($layerTimers | Where-Object { Get-JsonProp $_ 'ExitScene' }) }
     }
     $timer = @{
             Layer       = $Layer
@@ -304,9 +311,19 @@ function Set-AutoHideTimer {
             ExpectedLayerStartedAtTicks = $ExpectedLayerStartedAtTicks
             ExitScene = [bool]$ExitScene
         }
-    $script:AutoHideQueue.Add($timer)
+    $newTimers = @($timer)
+    if ($addHardHide) {
+        # A show with an engine-assigned ID may not have armed the cap. The
+        # reviewed status now identifies the scene for both commands.
+        $hardHide = $timer.Clone()
+        $hardHide.ExitScene = $false
+        $hardHide.At = $maximumAt
+        $newTimers += , $hardHide
+    }
+    foreach ($oldTimer in $previous) { $script:AutoHideQueue.Remove($oldTimer) | Out-Null }
+    foreach ($newTimer in $newTimers) { $script:AutoHideQueue.Add($newTimer) }
     if (Save-AutoHideQueue) { return $true }
-    $script:AutoHideQueue.Remove($timer) | Out-Null
+    foreach ($newTimer in $newTimers) { $script:AutoHideQueue.Remove($newTimer) | Out-Null }
     foreach ($oldTimer in $previous) { $script:AutoHideQueue.Add($oldTimer) }
     return $false
 }
@@ -335,7 +352,7 @@ function Get-AutoHideTargetDecision {
     }
     $timerId = [string](Get-JsonProp $Timer 'ActiveId')
     $currentId = [string](Get-JsonProp $current 'ActiveId')
-    if (-not (Get-JsonProp $Timer 'ExitScene') -and $timerId -and $currentId -and
+    if (-not (Get-JsonProp $Timer 'ExpectedDevicePath') -and $timerId -and $currentId -and
         -not $timerId.Trim().Trim('{', '}').Equals($currentId.Trim().Trim('{', '}'), [StringComparison]::OrdinalIgnoreCase)) {
         return [pscustomobject]@{ ShouldHide = $false; Reason = (T 'tick.layerChanged' $layer) }
     }
@@ -376,7 +393,9 @@ function Request-TemplateAirLimitNow {
         if ([string](Get-JsonProp $entry.Value 'Key') -ieq $Key) { $layer = [int]$entry.Key; $found = $true; break }
     }
     if (-not $found) { return $false }
-    $timer = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $layer }) | Select-Object -First 1
+    $timer = $script:AutoHideQueue | Where-Object {
+        [int](Get-JsonProp $_ 'Layer') -eq $layer -and -not (Get-JsonProp $_ 'ExitScene')
+    } | Select-Object -First 1
     if (-not $timer) { return $false }
     $cap = Get-EffectiveAutoHideSeconds -Key $Key
     $shownAt = [datetimeoffset]::MinValue
@@ -476,8 +495,9 @@ function Update-AutoHideQueue {
     $due = @($script:AutoHideQueue | Where-Object {
         [datetimeoffset]$_.At -le $Now -and
         (-not (Get-JsonProp $_ 'RetryAt') -or [datetimeoffset]$_.RetryAt -le $Now)
-    })
+    } | Sort-Object { [bool](Get-JsonProp $_ 'ExitScene') }, { [datetimeoffset]$_.At })
     foreach ($item in $due) {
+        if (-not $script:AutoHideQueue.Contains($item)) { continue }
         $exitScene = [bool](Get-JsonProp $item 'ExitScene')
         try {
             $decision = Get-AutoHideTargetDecision -Timer $item
@@ -538,9 +558,18 @@ function Update-AutoHideQueue {
                     if (-not (Invoke-HideLayer @reviewedTarget @timerActor)) { throw 'Hide not confirmed' }
                 }
             }
-            $script:AutoHideQueue.Remove($item) | Out-Null
+            $settledTimers = @($item)
+            if ($decision.ShouldHide) {
+                # A confirmed removal also retires the other timer for this layer.
+                $settledTimers += @($script:AutoHideQueue | Where-Object {
+                    [int](Get-JsonProp $_ 'Layer') -eq [int]$item.Layer -and -not [object]::ReferenceEquals($_, $item)
+                })
+            }
+            foreach ($settled in $settledTimers) { $script:AutoHideQueue.Remove($settled) | Out-Null }
             if (-not (Save-AutoHideQueue)) {
-                if (-not $script:AutoHideQueue.Contains($item)) { $script:AutoHideQueue.Add($item) }
+                foreach ($settled in $settledTimers) {
+                    if (-not $script:AutoHideQueue.Contains($settled)) { $script:AutoHideQueue.Add($settled) }
+                }
                 throw 'Could not persist timer settlement'
             }
             if ($decision.ShouldHide) {

@@ -211,7 +211,8 @@ function Get-WebStatusSnapshot {
     }
     $layers = foreach ($layer in ($script:OnAir.Keys | Sort-Object)) {
         $record = $script:OnAir[$layer]
-        $timer = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq [int]$layer }) | Select-Object -First 1
+        $timer = $script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq [int]$layer } |
+            Sort-Object { [datetimeoffset](Get-JsonProp $_ 'At') } | Select-Object -First 1
         $source = [string](Get-JsonProp $record 'Source')
         $actorId = [long](Get-JsonProp $record 'UserId')
         [ordered]@{

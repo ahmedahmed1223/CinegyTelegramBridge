@@ -564,6 +564,52 @@ Describe 'Persistent timed-show auto-hide timers' {
         $script:autoHideFile = $script:OriginalAutoHideFileForTest
     }
 
+    It 'arms an early urgent exit and keeps the configured hard hide pending if exit fails' {
+        $shown = [datetimeoffset]::FromUnixTimeSeconds(([datetimeoffset]::UtcNow).ToUnixTimeSeconds() - 10)
+        $script:OnAir[7] = @{ Key = 'Urgent'; ActiveId = 'show-command'; At = $shown; UserId = 2L }
+        $script:LastSuccessfulLayerShows[7] = @{
+            Key = 'Urgent'; ActiveId = 'show-command'; DevicePath = 'gfx_7'
+            WebTextIdentity = @{ ActiveId = 'engine-original'; StartedAtTicks = 777L }
+        }
+        Mock Test-Authorized { $true }
+        Mock Test-MaintenanceControl { $true }
+        Mock Test-TemplateAccess { @{ Allowed = $true } }
+        Mock Get-TemplateStore { @{ Map = @{ Urgent = @{ Layer = 7 } } } }
+        Mock Resolve-AirGfxDevice { @{ StatusPath = 'gfx_7' } }
+        Mock Test-PermanentGraphicAutoHideProtected { $false }
+        Mock Get-EffectiveAutoHideSeconds { 1800 }
+        Mock Get-WebLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = 'engine-original' } }
+        Mock Get-TitlerLayerStatus { [pscustomobject]@{ Success = $true; IsOnAir = $true; ActiveId = 'engine-original' } }
+        Mock Get-CinegyStatusStartTicks { 777L }
+        Mock Invoke-ExitLayer { $false }
+        Mock Add-AuditEntry {}
+        Mock Publish-WebChannelState {}
+
+        $inspect = Invoke-WebAirTimer -Arguments @{ actor = 2L; action = 'inspectExit'; layer = 7 }
+        $inspect.ok | Should -BeTrue -Because ([string](Get-JsonProp $inspect 'error'))
+        $tooLate = Invoke-WebAirTimer -Arguments @{ actor = 2L; action = 'previewExit'; layer = 7; seconds = 1800 }
+        $tooLate.error | Should -BeExactly 'live_timer_exit_capped'
+
+        $preview = Invoke-WebAirTimer -Arguments @{ actor = 2L; action = 'previewExit'; layer = 7; seconds = 15 }
+        $preview.ok | Should -BeTrue
+        $script:AutoHideQueue.Count | Should -Be 0
+        $apply = Invoke-WebAirTimer -Arguments @{
+            actor = 2L; action = 'applyExit'; layer = 7; seconds = 15; review = $preview.data.plan.review
+        }
+        $apply.ok | Should -BeTrue
+        $script:AutoHideQueue.Count | Should -Be 2
+        $hardHide = $script:AutoHideQueue | Where-Object { -not (Get-JsonProp $_ 'ExitScene') }
+        $hardHide.At | Should -Be $shown.AddSeconds(1800)
+        $exit = $script:AutoHideQueue | Where-Object { Get-JsonProp $_ 'ExitScene' }
+
+        Update-AutoHideQueue -Now $exit.At
+        Should -Invoke Invoke-ExitLayer -Times 1 -Exactly
+        Should -Invoke Invoke-HideLayer -Times 0 -Exactly
+        $script:AutoHideQueue.Contains($hardHide) | Should -BeTrue
+        Update-AutoHideQueue -Now $hardHide.At
+        Should -Invoke Invoke-HideLayer -Times 1 -Exactly
+    }
+
     It 'exits only the scheduled urgent scene after restart and skips its replacement' -TestCases @(
         @{ LiveId = 'engine-original'; ExpectedExit = 1 }
         @{ LiveId = 'engine-replacement'; ExpectedExit = 0 }

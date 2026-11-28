@@ -79,13 +79,13 @@ function Invoke-WebAirTimer {
     if ($Deadline -gt 0 -and [Diagnostics.Stopwatch]::GetTimestamp() -ge $Deadline) { return $busy }
 
     $timers = @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $layer })
-    if ($timers.Count -gt 1) { return @{ ok = $false; error = 'live_timer_unverified' } }
-    $timer = $timers | Select-Object -First 1
+    $sameAction = @($timers | Where-Object { [bool](Get-JsonProp $_ 'ExitScene') -eq $exitScene })
+    if ($sameAction.Count -gt 1) { return @{ ok = $false; error = 'live_timer_unverified' } }
+    $timer = $sameAction | Select-Object -First 1
     $timerDeadline = if ($timer) { [datetimeoffset](Get-JsonProp $timer 'At') }
     $timerId = if ($timer) { ([string]((Get-JsonProp $timer 'ActiveId') ?? '')).Trim().Trim('{', '}').ToLowerInvariant() } else { '' }
     $currentDeadline = if ($timerId -ceq $snapshotId) { $timerDeadline }
     $maxSeconds = Get-EffectiveAutoHideSeconds -Key $key
-    if ($exitScene -and $maxSeconds -gt 0) { return @{ ok = $false; error = 'live_timer_exit_capped' } }
     $capAt = $null
     if ($maxSeconds -gt 0) {
         $shownAt = [datetimeoffset]::MinValue
@@ -93,6 +93,13 @@ function Invoke-WebAirTimer {
             return @{ ok = $false; error = 'live_timer_unverified' }
         }
         $capAt = $shownAt.AddSeconds($maxSeconds)
+    }
+    if ($exitScene) {
+        foreach ($pendingHide in $timers) {
+            if (Get-JsonProp $pendingHide 'ExitScene') { continue }
+            $pendingAt = [datetimeoffset](Get-JsonProp $pendingHide 'At')
+            if (-not $capAt -or $pendingAt -lt $capAt) { $capAt = $pendingAt }
+        }
     }
     $plan = @{
         layer = $layer; templateKey = $key; choices = @(Get-AutoHideChoices | Where-Object { $_ -gt 0 -and $_ -le 86400 })
@@ -120,6 +127,7 @@ function Invoke-WebAirTimer {
         if ($proposed -gt $now.AddDays(1)) { return $invalid }
     }
     else { return $invalid }
+    if ($capAt -and $exitScene -and $proposed -ge $capAt) { return @{ ok = $false; error = 'live_timer_exit_capped' } }
     if ($capAt -and $proposed -gt $capAt) { $proposed = $capAt }
     if ($proposed -le $now) { return $stale }
     $timerSignature = if ($timer) {

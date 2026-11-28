@@ -110,7 +110,7 @@ function TimerEditor({ plan, exit, onClose, onReload }: { plan: Plan; exit: bool
         <Text size="sm">الطبقة {number.format(plan.layer)}</Text>
       </Group>
       {plan.currentHideAt && <Text size="sm">المؤقّت الحالي <bdi>{localTime.format(plan.currentHideAt)}</bdi></Text>}
-      {plan.maximumHideAt && <Text size="sm" c="dimmed">أقصى موعد حسب إعداد القالب <bdi>{localTime.format(plan.maximumHideAt)}</bdi></Text>}
+      {plan.maximumHideAt && <Text size="sm" c="dimmed">{exit ? 'موعد الإخفاء' : 'أقصى موعد حسب إعداد القالب'} <bdi>{localTime.format(plan.maximumHideAt)}</bdi></Text>}
       {error && <Alert role="alert" color="orange">
         <Stack gap="xs" align="flex-start">
           {timerError(error)}

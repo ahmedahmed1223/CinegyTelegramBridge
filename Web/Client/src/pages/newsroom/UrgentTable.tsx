@@ -1,5 +1,5 @@
 import { AdjustableRow, AdjustableTable } from '../../components/AdjustableTable'
-import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Paper, Stack, Table, Text, Textarea, Tooltip } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Checkbox, Group, Modal, Paper, Stack, Table, Text, Textarea, Tooltip } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { useQuery } from '@tanstack/react-query'
 import { getTemplates } from '../../api/air'
@@ -122,39 +122,10 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
     })
   }
 
-  function editorRow(row: Edit) {
-    return (
-      <AdjustableRow key={row.id ?? 'new'} className={classes.editRow}>
-        <Table.Td />
-        <Table.Td>{row.id ? '—' : 'جديد'}</Table.Td>
-        {fields.map((field, index) => (
-          <Table.Td key={field.name}>
-            <Textarea
-              aria-label={field.label}
-              dir="rtl"
-              autosize
-              minRows={2}
-              maxRows={5}
-              required={field.required}
-              maxLength={field.maxLength ?? undefined}
-              value={row.values[field.name] ?? ''}
-              onChange={(event) => setEdit({ ...row, values: { ...row.values, [field.name]: event.currentTarget.value } })}
-              autoFocus={index === 0}
-              disabled={busy}
-            />
-          </Table.Td>
-        ))}
-        <Table.Td>
-          <Checkbox label="مفعّل" checked={row.enabled} disabled={busy} onChange={(event) => setEdit({ ...row, enabled: event.currentTarget.checked })} />
-        </Table.Td>
-        <Table.Td>
-          <Group gap="xs" wrap="nowrap">
-            <Button type="submit" size="compact-sm" loading={busy}>حفظ</Button>
-            <Button variant="subtle" size="compact-sm" disabled={busy} onClick={() => { setEdit(null); setError('') }}>إلغاء</Button>
-          </Group>
-        </Table.Td>
-      </AdjustableRow>
-    )
+  function closeEditor() {
+    if (busy) return
+    setEdit(null)
+    setError('')
   }
 
   if (!fields.length) return <Alert>لم تُسجّل حقول إدخال لقالب العواجل في الجسر.</Alert>
@@ -169,17 +140,36 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
         </Group>
       </Group>
       <Text size="xs" c="dimmed" hiddenFrom="sm">مرّر الجدول أفقيًا لرؤية الحقول والإجراءات.</Text>
-      {!timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
-      <Paper radius="lg" className={classes.urgentGrid}>
+      {!edit && !timingEdit && error && <Alert color="red" role="alert">{error}</Alert>}
+      {edit && <Modal opened onClose={closeEditor} title={edit.id ? 'تعديل صف العاجل' : 'إضافة عاجل'} size="lg"
+        withCloseButton={!busy} closeOnClickOutside={!busy} closeOnEscape={!busy}>
         <form onSubmit={(event) => {
           event.preventDefault()
-          if (edit) void write({
+          void write({
             action: edit.id ? 'update' : 'add',
             revision: edit.revision,
             id: edit.id,
             row: { values: edit.values, enabled: edit.enabled },
           })
         }}>
+          <Stack gap="md" dir="rtl">
+            <Text size="sm" c="dimmed">يُحفظ النص في الجدول المشترك مع البوت.</Text>
+            {error && <Alert color="red" role="alert">{error}</Alert>}
+            {fields.map((field, index) => <Textarea key={field.name} label={field.label} dir="rtl"
+              minRows={3} autosize maxRows={8} data-autofocus={index === 0 || undefined}
+              required={field.required} maxLength={field.maxLength ?? undefined} disabled={busy}
+              value={edit.values[field.name] ?? ''}
+              onChange={(event) => setEdit({ ...edit, values: { ...edit.values, [field.name]: event.currentTarget.value } })} />)}
+            <Checkbox label="مفعّل" checked={edit.enabled} disabled={busy}
+              onChange={(event) => setEdit({ ...edit, enabled: event.currentTarget.checked })} />
+            <Group justify="flex-end">
+              <Button type="button" variant="default" disabled={busy} onClick={closeEditor}>إلغاء</Button>
+              <Button type="submit" loading={busy}>حفظ العاجل</Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>}
+      <Paper radius="lg" className={classes.urgentGrid}>
           <AdjustableTable layoutKey="urgent" label="جدول إدخال العواجل" verticalSpacing="sm" horizontalSpacing="sm" captionSide="top" columns={[
             { id: 'select', label: 'تحديد', width: 85, minWidth: 68 },
             { id: 'rank', label: 'الترتيب', width: 90, minWidth: 74 },
@@ -189,9 +179,7 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
             { id: 'actions', label: 'الإجراءات', width: 226, minWidth: 198 },
           ]}>
             <Table.Tbody>
-              {edit && !edit.id && editorRow(edit)}
               {board.items.map((item, index) => {
-                if (edit && edit.id === item.id) return editorRow(edit)
                 const rank = item.position ?? board.page * 20 + index + 1
                 const selectionState = item.id && selected.includes(item.id) ? 'selected' : 'ready'
                 const state = status[item.state === 'on_air' || item.state === 'disabled' ? item.state : selectionState]
@@ -262,7 +250,6 @@ export function UrgentTable({ board, filtered, searchPending, selected, onToggle
               )}
             </Table.Tbody>
           </AdjustableTable>
-        </form>
       </Paper>
       {timingEdit && <UrgentRowTiming title={timingEdit.item.title} timing={timingEdit.item.timing} busy={busy}
         stale={timingEdit.revision !== board.revision} error={error} onClose={() => { setTimingEdit(null); setError('') }}

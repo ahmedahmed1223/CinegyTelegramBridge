@@ -455,6 +455,32 @@ Describe 'A board as a table' {
 }
 
 Describe 'Web peer checks for channel-wide live text' {
+    It 'recognizes a retained bridge peer only while the live item and both files still match its show' {
+        $started = [datetime]::new(2026, 11, 28, 10, 45, 0, [DateTimeKind]::Utc)
+        $script:RetainedPeerWrite = $started.AddDays(-1)
+        Mock Get-TemplateRegistryFilePath { 'C:\fixture\templates.json' }
+        Mock Get-WebPlainLocalFile { @{ LastWriteTimeUtc = $script:RetainedPeerWrite } }
+        $savedRecords = $script:OnAir
+        $savedShows = $script:LastSuccessfulLayerShows
+        $id = '{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}'
+        $scene = @{ Key = 'Peer'; At = $started.AddMilliseconds(150); Source = 'bridge'; ActiveId = $id; ActiveIdConfirmed = $true }
+        $script:OnAir = @{ 9 = $scene }
+        $script:LastSuccessfulLayerShows = @{}
+        $store = @{ Map = @{ Peer = @{ Path = 'C:\fixture\peer.cintitle'; Layer = 9 } } }
+        $stamp = Get-MojazRunSceneStamp -Playback $scene
+        $reply = @{ Success = $true; ActiveXml = "<Item Id='$id' ScheduledAt=""$($started.ToString('o'))""/>" }
+        try {
+            Get-ProgrammeLoadedSceneKey -Layer 9 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $reply | Should -Be 'Peer'
+            Get-ProgrammeLoadedSceneKey -Layer 9 -Stamp 'active:replacement' -Store $store -LocalScenesOnly -VerifiedStatus $reply | Should -Be ''
+            $script:RetainedPeerWrite = $started.AddSeconds(1)
+            Get-ProgrammeLoadedSceneKey -Layer 9 -Stamp $stamp -Store $store -LocalScenesOnly -VerifiedStatus $reply | Should -Be ''
+        } finally {
+            $script:OnAir = $savedRecords
+            $script:LastSuccessfulLayerShows = $savedShows
+            Remove-Variable RetainedPeerWrite -Scope Script
+        }
+    }
+
     It 'requires the same exact engine event, start and device before trusting a loaded peer scene' {
         Mock Resolve-AirGfxDevice { @{ StatusPath = 'gfx_7' } }
         Mock Get-CinegyStatusStartTicks { [long](Get-JsonProp $Status 'FixtureTicks') }

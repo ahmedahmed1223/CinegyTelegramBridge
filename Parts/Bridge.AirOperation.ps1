@@ -590,11 +590,13 @@ function Get-VerifiedCinegyShowIdentity {
         [switch]$AllowAnonymousActiveId,
         [switch]$RequireEventIdentity,
         [switch]$CaptureUrgentEvent,
+        [datetime]$WebTextShowIssuedAt = [datetime]::MinValue,
         [string]$Device = ''
     )
     $deviceArguments = @{}
     if ($Device) { $deviceArguments.Device = $Device }
-    $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason } }
+    $webTextIdentity = $null
+    $failed = { param([string]$Reason) [pscustomobject]@{ Success=$false; ActiveId=''; Error=$Reason; WebTextIdentity=$webTextIdentity } }
     $status = Get-TitlerLayerStatus @deviceArguments -AirServerAddress $config.AirServerAddress `
         -AirChannelNumber $config.AirChannelNumber -Layer $Layer `
         -TimeoutSec (Get-SettingInt 'CinegyMonitorTimeoutSeconds' 1) -RequireConsistentIdentity:($CaptureUrgentEvent -and $RequireEventIdentity)
@@ -622,7 +624,7 @@ function Get-VerifiedCinegyShowIdentity {
     $expectedCurrentId = ([string]$ExpectedActiveId).Trim().Trim('{', '}')
     $startedAt = Get-CinegyStatusStartedAtUtc -Status $status
     $consistentItem = $false
-    if ($CaptureUrgentEvent) {
+    if ($CaptureUrgentEvent -or $WebTextShowIssuedAt -ne [datetime]::MinValue) {
         try {
             $item = ([xml][string](Get-JsonProp $status 'ActiveXml')).SelectSingleNode('/Item')
             $statusEvent = [guid]::Empty
@@ -633,10 +635,19 @@ function Get-VerifiedCinegyShowIdentity {
         }
         catch { $consistentItem = $false }
     }
+    # Some Cinegy versions assign an engine ID different from the submitted
+    # ID. Live text can follow that new item only when both reads agree and
+    # it started during the just-accepted SHOW, on the already checked device.
+    if ($WebTextShowIssuedAt -ne [datetime]::MinValue -and $consistentItem -and $startedAt -and
+        -not (Get-JsonProp $status 'ActiveTemplateName') -and -not (Get-JsonProp $status 'ActiveName') -and
+        $normalizedId -ne $expectedPreviousId -and $startedAt -ge $WebTextShowIssuedAt.AddMilliseconds(-100) -and
+        $startedAt -le [datetime]::UtcNow -and ($startedAt - $WebTextShowIssuedAt).TotalSeconds -le 5) {
+        $webTextIdentity = @{ ActiveId = $activeId; StartedAtTicks = $startedAt.Ticks }
+    }
     if ($RequireEventIdentity) {
         if ($expectedCurrentId -and $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase) -and
             (-not $CaptureUrgentEvent -or $consistentItem)) {
-            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id'; StartedAt=$startedAt; ConsistentItem=$consistentItem }
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='show-event-id'; StartedAt=$startedAt; ConsistentItem=$consistentItem; WebTextIdentity=$webTextIdentity }
         }
         return (& $failed (T 'air.noConfirmAfterShow'))
     }
@@ -655,7 +666,7 @@ function Get-VerifiedCinegyShowIdentity {
               $normalizedId.Equals($expectedCurrentId, [StringComparison]::OrdinalIgnoreCase)) -or
              (-not [string]::IsNullOrWhiteSpace($expectedPreviousId) -and
               -not $normalizedId.Equals($expectedPreviousId, [StringComparison]::OrdinalIgnoreCase)))) {
-            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation'; StartedAt=$startedAt; ConsistentItem=$consistentItem }
+            return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='active-id-correlation'; StartedAt=$startedAt; ConsistentItem=$consistentItem; WebTextIdentity=$webTextIdentity }
         }
         return (& $failed (T 'air.noMatchableName'))
     }
@@ -670,7 +681,7 @@ function Get-VerifiedCinegyShowIdentity {
     if (-not ($expected.Contains($reported) -or $expected.Contains($reportedWithoutExtension))) {
         return (& $failed (T 'air.sceneNameMismatch' $Key))
     }
-    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name'; StartedAt=$startedAt; ConsistentItem=$consistentItem }
+    return [pscustomobject]@{ Success=$true; ActiveId=$activeId; Error=''; IdentitySource='template-name'; StartedAt=$startedAt; ConsistentItem=$consistentItem; WebTextIdentity=$webTextIdentity }
 }
 
 function Get-TemplateFieldTypeOverrides {
@@ -948,6 +959,7 @@ function Invoke-ShowTemplateResult {
             return @{ Success = $false; Error = 'reviewed rollback target or deadline changed before show' }
         }
     }
+    $webTextShowIssuedAt = if ($captureWebProof) { [datetime]::UtcNow } else { [datetime]::MinValue }
     $result = Show-TitlerTemplate @rollbackDeviceArguments -AirServerAddress $config.AirServerAddress -AirChannelNumber $config.AirChannelNumber `
         -Layer $template.Layer -TemplatePath $template.Path -Variables $Variables `
         -Types $types -DefaultType $defaultType -TimeoutSec $airTimeout
@@ -999,7 +1011,7 @@ function Invoke-ShowTemplateResult {
         $identity = Get-VerifiedCinegyShowIdentity @rollbackDeviceArguments -Key $Key -TemplatePath ([string](Get-JsonProp $template 'Path')) `
             -Layer ([int]$template.Layer) -ExpectedPreviousActiveId ([string](Get-JsonProp $layerStatus 'ActiveId')) `
             -ExpectedActiveId $eventId -RequireEventIdentity:$RequireEventIdentity `
-            -CaptureUrgentEvent:($ManualUrgent -or $script:UrgentBoardStarting) -AllowAnonymousActiveId
+            -CaptureUrgentEvent:($ManualUrgent -or $script:UrgentBoardStarting) -AllowAnonymousActiveId -WebTextShowIssuedAt $webTextShowIssuedAt
         if ($identity.Success) { $activeId = [string]$identity.ActiveId; $activeIdConfirmed = $true }
         # Playback saves the engine identity from this result so it can prove
         # scene ownership even after the bridge process has restarted.
@@ -1060,6 +1072,7 @@ function Invoke-ShowTemplateResult {
             $snapshot.AutoHideSeconds = $AutoHideSeconds
             $snapshot.EventIdentityConfirmed = $eventIdentityConfirmed
             $snapshot.EngineStartedAtTicks = $engineStartTicks
+            $snapshot.WebTextIdentity = Get-JsonProp $identity 'WebTextIdentity'
             $snapshot.DevicePath = if ($ReviewedRollback) { $ExpectedDevicePath } else { (Resolve-AirGfxDevice -Layer ([int]$template.Layer)).StatusPath }
         }
         $script:LastShow[$ChatId] = @{ Key = $Key; Variables = $publicValues }

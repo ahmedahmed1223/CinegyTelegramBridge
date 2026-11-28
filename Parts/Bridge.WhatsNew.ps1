@@ -31,6 +31,7 @@ function Get-WhatsNewSectionsEn {
         in an English note.
     #>
     return @(
+                @{ Version = '9.1.22'; Items = @('Live text review also handles a different engine-assigned ID when Cinegy confirms the new scene in both reads. Edit and save an urgent row in a separate form with all its fields.') },
                 @{ Version = '9.1.21'; Items = @('Live text correction now recognizes a verified show even when Cinegy reports the matching event identifier without the template name.') },
                 @{ Version = '9.1.20'; Items = @('Review a live text correction from the web urgent desk or template cards. A confirmed urgent shown from the web template list is copied to the shared urgent board, and authorized Web alerts include the headline.') },
                 @{ Version = '9.1.19'; Items = @('Drag the edge of a column header to resize it or use the grip to move it in the web broadcast schedule and other main tables. Your browser saves the layout.') },
@@ -419,6 +420,7 @@ function Get-WhatsNewSections {
     #>
     if ((Get-BridgeLanguage) -eq 'en') { return @(Get-WhatsNewSectionsEn) }
     return @(
+                @{ Version = '9.1.22'; Items = @('يقبل محرّر النص اختلاف المعرّف الذي تعيّنه Cinegy إذا أكّدت القراءتان المشهد الجديد. يفتح زر تعديل صف العاجل نموذجًا بجميع الحقول وزر الحفظ.') },
                 @{ Version = '9.1.21'; Items = @('يتحقق محرّر النص على الهواء من العرض عندما يعيد Cinegy معرّف العرض المطابق من دون اسم القالب.') },
                 @{ Version = '9.1.20'; Items = @('راجع تصحيح النص على الهواء من قسم العواجل أو بطاقات القوالب في الويب. تُحفظ نسخة من العاجل المؤكّد من قائمة قوالب الويب في جدول العواجل، ويظهر العنوان في التنبيه للمستلمين المصرّح لهم.') },
                 @{ Version = '9.1.19'; Items = @('في جدول البث والجداول الرئيسية في الويب، اسحب حافة عنوان العمود لتغيير عرضه أو اسحب المقبض لنقله. يحفظ المتصفح التخطيط.') },

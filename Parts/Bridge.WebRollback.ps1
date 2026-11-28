@@ -26,27 +26,34 @@ function Test-WebRollbackUntimedSnapshot {
         -not @($script:AutoHideQueue | Where-Object { [int](Get-JsonProp $_ 'Layer') -eq $Layer }).Count)
 }
 
-function Test-WebRollbackLocalScene {
-    param($Template, $Restore)
-    $path = [string](Get-JsonProp $Template 'Path')
-    $ticks = [long](Get-JsonProp $Restore 'SceneWriteTicks')
-    if (-not $ticks -or -not [IO.Path]::IsPathFullyQualified($path) -or
-        $path -cne [string](Get-JsonProp $Restore 'TemplatePath')) { return $false }
+function Get-WebPlainLocalFile {
+    param([string]$Path)
+    if (-not $Path -or -not [IO.Path]::IsPathFullyQualified($Path)) { return }
     try {
         # The bridge thread cannot wait for an offline network share to prove
         # that a previous file still has the reviewed contents.
         $root = [IO.Path]::GetPathRoot($path)
-        if ($root -notmatch '^[A-Za-z]:[\\/]$' -or [IO.DriveInfo]::new($root).DriveType -ne [IO.DriveType]::Fixed) { return $false }
+        if ($root -notmatch '^[A-Za-z]:[\\/]$' -or [IO.DriveInfo]::new($root).DriveType -ne [IO.DriveType]::Fixed) { return }
         $cursor = $root
+        $file = $null
         foreach ($part in $path.Substring($root.Length).Split([char[]]@('\', '/'), [StringSplitOptions]::RemoveEmptyEntries)) {
-            if ($part -in '.', '..') { return $false }
+            if ($part -in '.', '..') { return }
             $file = Get-Item -LiteralPath (Join-Path $cursor $part) -ErrorAction Stop
-            if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+            if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
             $cursor = $file.FullName
         }
-        return (-not $file.PSIsContainer -and $file.LastWriteTimeUtc.Ticks -eq $ticks)
+        if ($file -is [IO.FileInfo]) { return $file }
     }
-    catch { return $false }
+    catch { return }
+}
+
+function Test-WebRollbackLocalScene {
+    param($Template, $Restore)
+    $path = [string](Get-JsonProp $Template 'Path')
+    $ticks = [long](Get-JsonProp $Restore 'SceneWriteTicks')
+    if (-not $ticks -or $path -cne [string](Get-JsonProp $Restore 'TemplatePath')) { return $false }
+    $file = Get-WebPlainLocalFile -Path $path
+    return ($null -ne $file -and $file.LastWriteTimeUtc.Ticks -eq $ticks)
 }
 
 function Get-WebRollbackDirectDevice {

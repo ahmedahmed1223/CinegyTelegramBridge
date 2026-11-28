@@ -71,8 +71,9 @@ Describe 'Full urgent reader and manual single story' {
         $script:LiveCorrectionFixture = @{ Key = $key; Layer = 7; Path = 'C:\test\urgent.cin'; PresetRevision = 'registry' }
         $script:OnAir[7] = @{ Key = $key; Source = 'bridge' }
         $script:LastSuccessfulLayerShows[7] = @{
-            Key = $key; ActiveId = 'fixture'; EngineStartedAtTicks = 777L; TemplateRevision = 'registry'
-            EventIdentityConfirmed = $true; DevicePath = 'gfx_7'; Variables = @{ Text = 'قبل' }
+            Key = $key; ActiveId = 'submitted-id'; EngineStartedAtTicks = 0L; TemplateRevision = 'registry'
+            EventIdentityConfirmed = $false; DevicePath = 'gfx_7'; Variables = @{ Text = 'قبل' }
+            WebTextIdentity = @{ ActiveId = 'fixture'; StartedAtTicks = 777L }
         }
         $script:LastWebTemplateText[$key] = @{ Values = @{ Text = 'قبل' }; Path = $script:LiveCorrectionFixture.Path; Layer = 7 }
         Mock Get-TemplateStore { @{ Map = @{ $script:MojazUrgentKey = $script:LiveCorrectionFixture } } }
@@ -100,6 +101,13 @@ Describe 'Full urgent reader and manual single story' {
             (Invoke-WebAirText -Arguments $update).ok | Should -BeTrue
             Should -Invoke Invoke-SetValues -Times 1 -Exactly -ParameterFilter { $Values.Text -eq 'بعد التصحيح' }
             $script:LastWebTemplateText[$key].Values.Text | Should -Be 'بعد التصحيح'
+            $update.action = 'preview'
+            $update.review = $null
+            $update.review = (Invoke-WebAirText -Arguments $update).data.plan.review
+            $update.action = 'apply'
+            Mock Get-CinegyLayerReviewStamp { 'active:replacement' }
+            (Invoke-WebAirText -Arguments $update).error | Should -Be 'live_text_stale'
+            Should -Invoke Invoke-SetValues -Times 1 -Exactly
             $script:UrgentBoardRun = @{ Layer = 7 }
             (Invoke-WebAirText -Arguments @{ actor = 101L; layer = 7; action = 'inspect' }).error | Should -Be 'live_text_managed'
         }

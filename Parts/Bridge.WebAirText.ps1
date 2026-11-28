@@ -66,10 +66,13 @@ function Invoke-WebAirText {
         (Test-PermanentGraphicAutoHideProtected -Layer $layer)) { return @{ ok = $false; error = 'live_text_managed' } }
     if ($script:LayerLocks.ContainsKey($layer)) { return @{ ok = $false; error = 'live_text_busy' } }
 
-    $eventId = ([string](Get-JsonProp $snapshot 'ActiveId')).Trim().Trim('{', '}').ToLowerInvariant()
-    $shownAt = [long](Get-JsonProp $snapshot 'EngineStartedAtTicks')
+    $textIdentity = Get-JsonProp $snapshot 'WebTextIdentity'
+    $exactEvent = (Get-JsonProp $snapshot 'EventIdentityConfirmed') -eq $true
+    $eventId = if ($exactEvent) { Get-JsonProp $snapshot 'ActiveId' } else { Get-JsonProp $textIdentity 'ActiveId' }
+    $eventId = ([string]$eventId).Trim().Trim('{', '}').ToLowerInvariant()
+    $shownAt = if ($exactEvent) { [long](Get-JsonProp $snapshot 'EngineStartedAtTicks') } else { [long](Get-JsonProp $textIdentity 'StartedAtTicks') }
     $revision = [string](Get-JsonProp $snapshot 'TemplateRevision')
-    $proofFailure = if (-not (Get-JsonProp $snapshot 'EventIdentityConfirmed') -or -not $eventId -or $shownAt -le 0) { 'show identity or start time' }
+    $proofFailure = if (-not $eventId -or $shownAt -le 0) { 'show identity or start time' }
     elseif ($device -cne [string](Get-JsonProp $snapshot 'DevicePath')) { 'device mapping' }
     elseif (-not $revision -or $revision -cne [string](Get-JsonProp $template 'PresetRevision') -or
         $revision -cne (Get-TemplatePresetRegistryRevision -TemplateKey $key)) { 'template registry revision' }

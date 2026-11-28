@@ -974,9 +974,44 @@ function Get-WebProgrammeBoardEditor {
     }
 }
 
+function Get-ProgrammeRetainedSceneKey {
+    # Only the persisted bridge-owned peer can stand in for a missing memory
+    # snapshot. The registry and scene must both predate its recorded SHOW.
+    param([int]$Layer, [string]$Stamp, $Store, $VerifiedStatus)
+    $record = $script:OnAir[$Layer]
+    $key = [string](Get-JsonProp $record 'Key')
+    $scheduledAt = Get-CinegyStatusStartedAtUtc -Status $VerifiedStatus
+    if (-not $key -or -not $scheduledAt -or (Get-JsonProp $record 'Source') -ne 'bridge' -or
+        (Get-JsonProp $record 'ActiveIdConfirmed') -ne $true -or
+        $Stamp -cne (Get-MojazRunSceneStamp -Playback $record)) { return '' }
+    $at = Get-JsonProp $record 'At'
+    if ($at -isnot [datetime] -or [math]::Abs(($at.ToUniversalTime() - $scheduledAt).TotalSeconds) -gt 2) { return '' }
+    try {
+        $detail = ([xml][string](Get-JsonProp $VerifiedStatus 'ActiveXml')).SelectSingleNode('/Item')
+        $detailId = [guid]::Empty
+        $recordId = [guid]::Empty
+        if (-not $detail -or -not [guid]::TryParse($detail.GetAttribute('Id'), [ref]$detailId) -or
+            -not [guid]::TryParse([string](Get-JsonProp $record 'ActiveId'), [ref]$recordId) -or
+            $detailId -eq [guid]::Empty -or $detailId -ne $recordId) { return '' }
+    }
+    catch { return '' }
+    $template = Get-JsonProp $Store.Map $key
+    if ([int](Get-JsonProp $template 'Layer') -ne $Layer) { return '' }
+    $recordedPath = [string](Get-JsonProp $record 'TemplatePath')
+    $templatePath = [string](Get-JsonProp $template 'Path')
+    if ($recordedPath -and $recordedPath -cne $templatePath) { return '' }
+    $registry = Get-WebPlainLocalFile -Path (Get-TemplateRegistryFilePath)
+    $scene = Get-WebPlainLocalFile -Path $templatePath
+    if (-not $registry -or -not $scene -or $registry.LastWriteTimeUtc -gt $scheduledAt -or $scene.LastWriteTimeUtc -gt $scheduledAt) { return '' }
+    return $key
+}
+
 function Get-ProgrammeLoadedSceneKey {
     param([int]$Layer, [string]$Stamp, $Store, [switch]$LocalScenesOnly, $VerifiedStatus)
     $shown = $script:LastSuccessfulLayerShows[$Layer]
+    if (-not $shown -and $LocalScenesOnly) {
+        return Get-ProgrammeRetainedSceneKey -Layer $Layer -Stamp $Stamp -Store $Store -VerifiedStatus $VerifiedStatus
+    }
     if (-not $Stamp -or $Stamp -cne (Get-MojazRunSceneStamp -Playback $shown)) { return '' }
     $key = [string](Get-JsonProp $shown 'Key')
     $template = Get-JsonProp $Store.Map $key
@@ -1029,9 +1064,24 @@ function Test-ProgrammeBoardPostboxScope {
         $otherStamp = Get-CinegyLayerReviewStamp -Status $otherStatus
         if ($otherStamp -eq 'empty') { continue }
         $otherKey = Get-ProgrammeLoadedSceneKey -Layer $probe.Layer -Stamp $otherStamp -Store $store -LocalScenesOnly:$LocalScenesOnly -VerifiedStatus $otherStatus
-        if (-not $otherKey) { return $false }
+        if (-not $otherKey) {
+            if ($LocalScenesOnly) { Write-BridgeLog "Live text isolation could not identify device $($entry.Key)." -Level WARN }
+            return $false
+        }
         $otherFields = @(Get-MojazDesignFields -TemplateKey $otherKey)
-        if (-not $otherFields.Count -or @($otherFields | Where-Object { [string]$_.Name -in $Names }).Count) { return $false }
+        if (@($otherFields | Where-Object { [string]$_.Name -in $Names }).Count) { return $false }
+        if (-not $otherFields.Count) {
+            if (-not $LocalScenesOnly) { return $false }
+            $peer = Get-JsonProp $store.Map $otherKey
+            try {
+                $file = Get-WebPlainLocalFile -Path ([string](Get-JsonProp $peer 'Path'))
+                if (-not $file) { return $false }
+                $peerXml = [xml](Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop)
+                if (-not $peerXml.DocumentElement -or $peerXml.SelectSingleNode('//*[local-name()="Var"]') -or
+                    $peerXml.OuterXml.Contains('${')) { return $false }
+            }
+            catch { return $false }
+        }
     }
     return $true
 }

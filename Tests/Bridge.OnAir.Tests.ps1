@@ -355,6 +355,35 @@ Describe 'SHOW identity tracking' {
         Get-JsonProp $OnAir[4] 'ActiveId' | Should -Be '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}'
     }
 
+    It 'records the fresh engine id for text review when Cinegy uses a different show id' {
+        $script:TextIdentityEngineAt = [datetime]::UtcNow.AddMilliseconds(-500)
+        $script:TextIdentityDetailId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        Mock Get-TitlerLayerStatus {
+            $at = $script:TextIdentityEngineAt.ToString('o')
+            @{
+                Success = $true; IsOnAir = $true; ActiveId = '{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}'
+                ActiveXml = "<Item Id='$($script:TextIdentityDetailId)' ScheduledAt=""$at""/>"
+            }
+        }
+        $argsForShow = @{
+            Key = 'Urgent'; Layer = 4; ExpectedActiveId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+            AllowAnonymousActiveId = $true; RequireEventIdentity = $true; CaptureUrgentEvent = $true
+            WebTextShowIssuedAt = $script:TextIdentityEngineAt.AddMilliseconds(-150)
+        }
+        try {
+            $result = Get-VerifiedCinegyShowIdentity @argsForShow
+            $result.Success | Should -BeFalse -Because 'the existing exact-ID policy still applies to manual removal and playback'
+            $result.WebTextIdentity.ActiveId | Should -Be '{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}'
+            $result.WebTextIdentity.StartedAtTicks | Should -Be $script:TextIdentityEngineAt.Ticks
+
+            (Get-VerifiedCinegyShowIdentity @argsForShow -ExpectedPreviousActiveId '{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}').WebTextIdentity | Should -BeNullOrEmpty
+            $script:TextIdentityDetailId = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+            (Get-VerifiedCinegyShowIdentity @argsForShow).WebTextIdentity | Should -BeNullOrEmpty
+        } finally {
+            Remove-Variable TextIdentityEngineAt, TextIdentityDetailId -Scope Script
+        }
+    }
+
     It 'verifies a show on an empty layer when Cinegy returns the matching id without a scene name' {
         $script:AnonymousShowFixture = $false
         Mock Get-Setting {

@@ -15,6 +15,10 @@ those scripts were refactored into reusable functions in
 `Modules/CinegyAirTitler.psm1`, and `TelegramBridge.ps1` wires them to a Telegram
 long-polling loop.
 
+## Version 9.1.22
+
+Live text review can follow a new engine-assigned ID when matching Cinegy responses confirm the scene started during the show. Urgent rows open in a separate editor with all template fields and the save action in view.
+
 ## Version 9.1.21
 
 Ordinary shows use the submitted event identifier to verify Cinegy responses that omit the template name, including on previously empty layers. The live text editor checks that both Cinegy status reads identify the same event before any correction.
